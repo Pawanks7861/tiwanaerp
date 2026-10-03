@@ -1,0 +1,62 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/forms';
+
+@source '../views';
+@source '../js';
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+
+/* BUILDIFY360 design tokens (architecture section O.1) */
+@theme {
+    --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+    --color-navy-50: #eef0f6;
+    --color-navy-100: #d9ddea;
+    --color-navy-200: #b3bbd5;
+    --color-navy-300: #8691b6;
+    --color-navy-400: #5b6893;
+    --color-navy-500: #3e4a74;
+    --color-navy-600: #2e3860;
+    --color-navy-700: #242c4f;
+    --color-navy-800: #1b2440;
+    --color-navy-900: #121a30;
+    --color-navy-950: #0b1020;
+
+    --color-brand-50: #eef0fb;
+    --color-brand-100: #dde1f6;
+    --color-brand-200: #bbc3ed;
+    --color-brand-300: #939fe0;
+    --color-brand-400: #6574c9;
+    --color-brand-500: #4b5bb8;
+    --color-brand-600: #3b4ba8;
+    --color-brand-700: #313e8c;
+    --color-brand-800: #283270;
+    --color-brand-900: #1f2757;
+
+    --color-accent-50: #fef3ec;
+    --color-accent-100: #fde3d2;
+    --color-accent-200: #fac4a2;
+    --color-accent-300: #f7a271;
+    --color-accent-400: #f4864a;
+    --color-accent-500: #f2762e;
+    --color-accent-600: #d95f1a;
+    --color-accent-700: #b44a14;
+    --color-accent-800: #8f3b13;
+    --color-accent-900: #743213;
+
+    --color-surface: #f5f6f8;
+    --color-line: #e4e7ec;
+}
+
+@layer base {
+    html {
+        font-feature-settings: 'cv11', 'ss01';
+    }
+
+    body {
+        @apply bg-surface text-slate-800;
+    }
+
+    .tabular {
+        font-variant-numeric: tabular-nums;
+    }
+}

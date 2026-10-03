@@ -1,0 +1,127 @@
+<?php
+
+namespace App\Http\Middleware;
+
+use App\Models\Projects\Project;
+use App\Models\User;
+use App\Support\Permissions\PermissionCatalog;
+use App\Support\Tenancy\CurrentCompany;
+use Illuminate\Http\Request;
+use Illuminate\Notifications\DatabaseNotification;
+use Inertia\Middleware;
+
+class HandleInertiaRequests extends Middleware
+{
+    /**
+     * The root template that is loaded on the first page visit.
+     *
+     * @var string
+     */
+    protected $rootView = 'app';
+
+    /**
+     * Determine the current asset version.
+     */
+    public function version(Request $request): ?string
+    {
+        return parent::version($request);
+    }
+
+    /**
+     * Shared props. Company-dependent values are closures: they resolve at render time, after
+     * SetCurrentCompany has run (this middleware runs earlier in the stack).
+     *
+     * @return array<string, mixed>
+     */
+    public function share(Request $request): array
+    {
+        return [
+            ...parent::share($request),
+            'app' => ['name' => config('app.name')],
+            'auth' => fn () => $this->auth($request->user()),
+            'company' => fn () => $this->company($request->user()),
+            'projectSwitcher' => fn () => $this->projects($request->user()),
+            'unreadNotifications' => fn () => $this->unreadCount($request->user()),
+            'flash' => fn () => [
+                'success' => $request->session()->get('success'),
+                'error' => $request->session()->get('error'),
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function auth(?User $user): ?array
+    {
+        if ($user === null) {
+            return ['user' => null, 'permissions' => []];
+        }
+
+        $hasCompany = app(CurrentCompany::class)->has();
+
+        return [
+            'user' => [
+                ...$user->only(['id', 'name', 'email', 'mobile']),
+                'is_super_admin' => $user->isSuperAdmin(),
+                'email_verified_at' => $user->email_verified_at,
+            ],
+            'permissions' => match (true) {
+                $user->isSuperAdmin() => PermissionCatalog::all(),
+                $hasCompany => $user->getAllPermissions()->pluck('name')->values()->all(),
+                default => [],
+            },
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function company(?User $user): ?array
+    {
+        $current = app(CurrentCompany::class)->get();
+        if ($user === null || $current === null) {
+            return null;
+        }
+
+        return [
+            'current' => $current->only(['id', 'name', 'code', 'state_code']),
+            'available' => $user->accessibleCompaniesQuery()->limit(50)->get(['id', 'name', 'code'])
+                ->map(fn ($c) => $c->only(['id', 'name', 'code']))->all(),
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function projects(?User $user): array
+    {
+        if ($user === null || ! app(CurrentCompany::class)->has() || ! $user->can('projects.view')) {
+            return [];
+        }
+
+        return Project::query()
+            ->visibleTo($user)
+            ->whereIn('status', ['planning', 'active', 'on_hold'])
+            ->orderBy('name')
+            ->limit(100)
+            ->get(['id', 'code', 'name', 'status'])
+            ->map(fn (Project $p) => ['id' => $p->id, 'code' => $p->code, 'name' => $p->name])
+            ->all();
+    }
+
+    private function unreadCount(?User $user): int
+    {
+        $companyId = app(CurrentCompany::class)->id();
+        if ($user === null || $companyId === null) {
+            return 0;
+        }
+
+        return DatabaseNotification::query()
+            ->where('notifiable_type', $user->getMorphClass())
+            ->where('notifiable_id', $user->id)
+            ->where('company_id', $companyId)
+            ->whereNull('read_at')
+            ->count();
+    }
+}
