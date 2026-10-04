@@ -53,6 +53,10 @@ class SetCurrentCompany
     {
         $isApi = $request->is('api/*');
 
+        if (! config('features.multi_company')) {
+            return $this->resolveActiveCompany($request, $user, $isApi);
+        }
+
         $requestedId = $isApi
             ? ($request->header('X-Company-Id') ?: $user->current_company_id)
             : ($request->session()->get(self::SESSION_KEY) ?: $user->current_company_id);
@@ -72,6 +76,27 @@ class SetCurrentCompany
         }
 
         $company = $user->accessibleCompaniesQuery()->first();
+        if ($company) {
+            $this->remember($request, $user, $company, $isApi);
+        }
+
+        return $company;
+    }
+
+    /**
+     * One company for this sign-in: the stored active company when it is still valid,
+     * otherwise the first active membership (companies are ordered by name).
+     */
+    private function resolveActiveCompany(Request $request, User $user, bool $isApi): ?Company
+    {
+        $company = null;
+
+        if ($user->current_company_id) {
+            $company = $user->accessibleCompaniesQuery()->whereKey($user->current_company_id)->first();
+        }
+
+        $company ??= $user->accessibleCompaniesQuery()->first();
+
         if ($company) {
             $this->remember($request, $user, $company, $isApi);
         }

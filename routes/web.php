@@ -97,7 +97,7 @@ Route::middleware(['auth', 'company'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
 
-    Route::post('/company/switch', CompanySwitchController::class)->name('company.switch');
+    Route::post('/company/switch', CompanySwitchController::class)->middleware('feature:multi_company')->name('company.switch');
 
     // Projects
     Route::get('/projects', [ProjectController::class, 'index'])->name('projects.index');
@@ -663,8 +663,8 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
     });
 
-    // Platform (super admin)
-    Route::prefix('/platform')->name('platform.')->group(function () {
+    // Platform (super admin). Hidden while features.multi_company is off; the controllers stay.
+    Route::prefix('/platform')->middleware('feature:multi_company')->name('platform.')->group(function () {
         Route::get('/companies', [CompanyController::class, 'index'])->name('companies.index');
         Route::get('/companies/create', [CompanyController::class, 'create'])->name('companies.create');
         Route::post('/companies', [CompanyController::class, 'store'])->name('companies.store');

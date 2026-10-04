@@ -5,6 +5,7 @@ import { router, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
 const page = usePage();
+const multiCompany = computed(() => page.props.features?.multi_company === true);
 const company = computed(() => page.props.company);
 const others = computed(() => (company.value?.available ?? []).filter((c) => c.id !== company.value?.current?.id));
 
@@ -14,7 +15,7 @@ function switchTo(id) {
 </script>
 
 <template>
-    <AppDropdown v-if="company?.current" align="left" width="w-64">
+    <AppDropdown v-if="multiCompany && company?.current" align="left" width="w-64">
         <template #trigger>
             <button
                 type="button"

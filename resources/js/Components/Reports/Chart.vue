@@ -11,16 +11,26 @@ const props = defineProps({
 });
 
 const donut = computed(() => props.type === 'donut' || props.type === 'pie');
-const numeric = (values) => (values ?? []).map((value) => Number(value) || 0);
+const categories = computed(() => (Array.isArray(props.categories) ? props.categories : []));
+const numeric = (values) => (Array.isArray(values) ? values : []).map((value) => Number(value) || 0);
 
 const chartSeries = computed(() => {
+    const series = Array.isArray(props.series) ? props.series : [];
+
     if (donut.value) {
-        return Array.isArray(props.series[0]) || typeof props.series[0] === 'object'
-            ? numeric(props.series[0]?.data ?? props.series)
-            : numeric(props.series);
+        const first = series[0];
+        const values = first && typeof first === 'object' && !Array.isArray(first) && Array.isArray(first.data)
+            ? first.data
+            : series;
+
+        return numeric(values);
     }
 
-    return props.series.map((entry) => ({ name: entry.name, data: numeric(entry.data) }));
+    return series.map((entry, index) => (
+        entry && typeof entry === 'object' && !Array.isArray(entry)
+            ? { name: entry.name || `Series ${index + 1}`, data: numeric(entry.data) }
+            : { name: `Series ${index + 1}`, data: numeric(Array.isArray(entry) ? entry : []) }
+    ));
 });
 
 const options = computed(() => ({
@@ -28,8 +38,9 @@ const options = computed(() => ({
     colors: ['#1e3a5f', '#f2762e', '#0f766e', '#b45309', '#64748b', '#7c3aed'],
     dataLabels: { enabled: donut.value },
     legend: { position: 'bottom', fontSize: '12px' },
-    labels: donut.value ? props.categories : undefined,
-    xaxis: donut.value ? undefined : { categories: props.categories, labels: { style: { fontSize: '11px' }, rotate: -35, trim: true } },
+    // ApexCharts reads labels.length during axis parsing. undefined crashes; [] falls through to xaxis.categories.
+    labels: donut.value ? categories.value : [],
+    ...(donut.value ? {} : { xaxis: { categories: categories.value, labels: { style: { fontSize: '11px' }, rotate: -35, trim: true } } }),
     yaxis: { labels: { formatter: (value) => (props.money ? compact(value) : String(Math.round(value))) } },
     tooltip: { y: { formatter: (value) => (props.money ? `₹ ${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : String(value)) } },
     plotOptions: { bar: { borderRadius: 3, columnWidth: '55%' } },

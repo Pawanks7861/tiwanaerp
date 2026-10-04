@@ -18,7 +18,7 @@ export const masters = [
     { slug: 'expense-categories', label: 'Expense Categories', icon: 'banknotes', permission: 'masters.expense_categories.view' },
 ];
 
-export function buildNavigation({ can, isSuperAdmin }) {
+export function buildNavigation({ can, isSuperAdmin, multiCompany = false }) {
     const sections = [
         {
             items: [
@@ -125,7 +125,7 @@ export function buildNavigation({ can, isSuperAdmin }) {
                 },
             ],
         },
-        isSuperAdmin && {
+        isSuperAdmin && multiCompany && {
             title: 'Platform',
             items: [
                 {

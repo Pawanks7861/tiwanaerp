@@ -22,6 +22,8 @@ const sidebarOpen = ref(false);
 const user = computed(() => page.props.auth.user);
 const unread = computed(() => page.props.unreadNotifications ?? 0);
 const branding = computed(() => page.props.branding ?? { logo_url: null, favicon_url: null });
+const companyName = computed(() => page.props.company?.current?.name ?? '');
+const multiCompany = computed(() => page.props.features?.multi_company === true);
 const chatUnread = ref(page.props.chatUnread ?? 0);
 const showProjectSwitcher = computed(() => can('projects.view'));
 
@@ -44,7 +46,11 @@ function refreshChat() {
 const navigation = computed(() => {
     void page.url;
 
-    return buildNavigation({ can, isSuperAdmin: !!user.value?.is_super_admin });
+    return buildNavigation({
+        can,
+        isSuperAdmin: !!user.value?.is_super_admin,
+        multiCompany: multiCompany.value,
+    });
 });
 
 const removeListener = router.on('navigate', () => (sidebarOpen.value = false));
@@ -78,21 +84,21 @@ onBeforeUnmount(() => {
             :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
         >
             <div class="flex h-14 shrink-0 items-center justify-between px-4">
-                <Link :href="route('dashboard')" class="flex min-w-0 items-center gap-2">
-                    <img v-if="branding.logo_url" :src="branding.logo_url" alt="" class="h-8 w-8 rounded-lg bg-white object-contain" />
-                    <span v-else class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-500 text-sm font-black text-white">B</span>
-                    <span class="truncate text-base font-bold tracking-tight text-white">BUILDIFY<span class="text-accent-400">360</span></span>
+                <Link :href="route('dashboard')" class="flex min-w-0 flex-1 items-center gap-2" :aria-label="companyName || 'Dashboard'">
+                    <img v-if="branding.logo_url" :src="branding.logo_url" alt="" class="h-8 w-8 shrink-0 rounded-lg bg-white object-contain" />
+                    <span v-else class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-500 text-sm font-black text-white" aria-hidden="true">B</span>
+                    <span class="min-w-0 truncate text-base font-bold tracking-tight text-white">{{ companyName }}</span>
                 </Link>
                 <button type="button" class="rounded-md p-1 text-white/70 hover:bg-white/10 lg:hidden" aria-label="Close menu" @click="sidebarOpen = false">
                     <Icon name="close" />
                 </button>
             </div>
 
-            <div class="border-y border-white/10 px-2 py-2">
+            <div v-if="multiCompany" class="border-y border-white/10 px-2 py-2">
                 <CompanySwitcher />
             </div>
 
-            <nav class="flex-1 space-y-5 overflow-y-auto px-2 py-4" aria-label="Main">
+            <nav class="sidebar-scroll flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-2 py-4" aria-label="Main">
                 <div v-for="(section, i) in navigation" :key="section.title ?? i">
                     <p v-if="section.title" class="mb-1 px-3 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
                         {{ section.title }}

@@ -40,6 +40,9 @@ class HandleInertiaRequests extends Middleware
         return [
             ...parent::share($request),
             'app' => ['name' => config('app.name')],
+            'features' => [
+                'multi_company' => (bool) config('features.multi_company'),
+            ],
             'auth' => fn () => $this->auth($request->user()),
             'company' => fn () => $this->company($request->user()),
             'projectSwitcher' => fn () => $this->projects($request->user()),
@@ -92,10 +95,14 @@ class HandleInertiaRequests extends Middleware
             return null;
         }
 
+        $available = config('features.multi_company')
+            ? $user->accessibleCompaniesQuery()->limit(50)->get(['id', 'name', 'code'])
+                ->map(fn ($c) => $c->only(['id', 'name', 'code']))->all()
+            : [];
+
         return [
             'current' => $current->only(['id', 'name', 'code', 'state_code']),
-            'available' => $user->accessibleCompaniesQuery()->limit(50)->get(['id', 'name', 'code'])
-                ->map(fn ($c) => $c->only(['id', 'name', 'code']))->all(),
+            'available' => $available,
         ];
     }
 

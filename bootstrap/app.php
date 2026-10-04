@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureFeatureEnabled;
 use App\Http\Middleware\EnsureProjectAccess;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SetCurrentCompany;
@@ -26,6 +27,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'company' => SetCurrentCompany::class,
+            'feature' => EnsureFeatureEnabled::class,
             'project.access' => EnsureProjectAccess::class,
         ]);
 

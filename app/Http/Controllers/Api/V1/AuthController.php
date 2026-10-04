@@ -30,11 +30,18 @@ class AuthController extends Controller
         $user->forceFill(['last_login_at' => now()])->saveQuietly();
         $token = $user->createToken($credentials['device_name'])->plainTextToken;
 
+        $companies = $user->accessibleCompaniesQuery()->get(['id', 'name', 'code'])
+            ->map(fn ($c) => $c->only(['id', 'name', 'code']));
+
+        if (! config('features.multi_company')) {
+            $active = $companies->firstWhere('id', $user->current_company_id) ?? $companies->first();
+            $companies = $active ? collect([$active]) : collect();
+        }
+
         return response()->json([
             'token' => $token,
             'user' => $user->only(['id', 'name', 'email', 'mobile']),
-            'companies' => $user->accessibleCompaniesQuery()->get(['id', 'name', 'code'])
-                ->map(fn ($c) => $c->only(['id', 'name', 'code'])),
+            'companies' => $companies->values(),
         ]);
     }
 
