@@ -1,5 +1,6 @@
 <script setup>
 import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
+import AuditTrail from '@/Components/Audit/AuditTrail.vue';
 import FinanceNav from '@/Components/Finance/FinanceNav.vue';
 import ReasonDialog from '@/Components/Inventory/ReasonDialog.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
@@ -18,6 +19,7 @@ const props = defineProps({
     payment: { type: Object, required: true },
     allocations: { type: Array, required: true },
     attachments: { type: Array, required: true },
+    audit: { type: Array, default: () => [] },
     can: { type: Object, required: true },
 });
 
@@ -121,6 +123,7 @@ const statusNote = computed(() => ({
             </AppCard>
 
             <AttachmentPanel :attachments="attachments" attachable-type="payment" :attachable-id="payment.id" :can-upload="can.attach" :can-delete="can.attach" placeholder="Bank advice, cheque copy…" />
+            <div class="mt-4"><AuditTrail :entries="audit" title="Audit trail" /></div>
         </div>
 
         <ConfirmDialog

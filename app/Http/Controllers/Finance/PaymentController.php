@@ -8,6 +8,7 @@ use App\Enums\Finance\PaymentPartyType;
 use App\Enums\Finance\PaymentStatus;
 use App\Enums\Labour\LabourPaymentStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Finance\Payment;
@@ -106,6 +107,7 @@ class PaymentController extends Controller
                 ];
             })->all(),
             'attachments' => ProcurementPresenter::attachments($payment),
+            'audit' => AuditPresenter::trail([$payment]),
             'can' => $this->abilities($user, $payment),
         ]);
     }

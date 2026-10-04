@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Procurement;
 
 use App\Enums\Procurement\GrnStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Masters\Warehouse;
 use App\Models\Procurement\Grn;
@@ -124,6 +125,7 @@ class GrnController extends Controller
             ])->all(),
             'approval' => ProcurementPresenter::approval($grn, $user),
             'attachments' => ProcurementPresenter::attachments($grn),
+            'audit' => AuditPresenter::trail([$grn]),
             'can' => [...$this->abilities($user, $grn), 'attach' => $user->can('update', $grn), 'view_rates' => $seeRates],
         ]);
     }

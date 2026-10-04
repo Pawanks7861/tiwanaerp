@@ -72,6 +72,7 @@ class LowStockScanner
                         sprintf('%s (%s) in %s is at %s, at or below its reorder level of %s.', $row->material, $row->code, $row->warehouse,
                             Decimal::of((string) $row->quantity)->toQuantity(), Decimal::of((string) $row->reorder_level)->toQuantity()),
                         $row->project_id ? route('projects.inventory.index', ['project' => $row->project_id, 'warehouse' => $row->warehouse_id, 'low' => 1]) : null,
+                        $row->project_id ? ['project_id' => (int) $row->project_id] : [],
                     ),
                 );
             }

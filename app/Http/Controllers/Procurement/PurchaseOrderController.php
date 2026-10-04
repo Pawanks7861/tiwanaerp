@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Procurement;
 use App\Enums\IndianState;
 use App\Enums\Procurement\PurchaseOrderStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Http\Requests\Procurement\PurchaseOrderRequest;
 use App\Models\Core\Company;
@@ -149,6 +150,7 @@ class PurchaseOrderController extends Controller
             ])->all() : [],
             'approval' => ProcurementPresenter::approval($po, $user),
             'attachments' => ProcurementPresenter::attachments($po),
+            'audit' => AuditPresenter::trail([$po]),
             'can' => [
                 ...$this->abilities($user, $po),
                 'receive' => $po->status->isReceivable() && $user->can('create', [Grn::class, $po]),

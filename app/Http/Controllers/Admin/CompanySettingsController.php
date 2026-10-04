@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Enums\IndianState;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\CompanyRequest;
+use App\Services\Branding\CompanyBranding;
 use App\Support\Math\Decimal;
 use App\Support\Procurement\ProcurementSettings;
 use App\Support\Tenancy\CurrentCompany;
@@ -36,6 +37,11 @@ class CompanySettingsController extends Controller
                 'grn_tolerance_percent' => (string) ($company->setting(ProcurementSettings::GRN_TOLERANCE_KEY) ?? config('procurement.grn_tolerance_percent', '0')),
             ],
             'can' => ['update' => $request->user()->can('manageSettings', $company)],
+            'branding' => [
+                'logo_url' => $company->logo_path ? route('company.branding.show', ['kind' => 'logo', 'v' => $company->updated_at?->getTimestamp()]) : null,
+                'favicon_url' => $company->favicon_path ? route('company.branding.show', ['kind' => 'favicon', 'v' => $company->updated_at?->getTimestamp()]) : null,
+                'max_kb' => CompanyBranding::MAX_KB,
+            ],
         ]);
     }
 

@@ -5,6 +5,7 @@ namespace App\Services\Planning;
 use App\Enums\Boq\BoqStatus;
 use App\Enums\Planning\MilestoneStatus;
 use App\Enums\Planning\TaskStatus;
+use App\Events\Planning\TaskAssigned;
 use App\Models\Boq\BoqItem;
 use App\Models\Planning\ProjectMilestone;
 use App\Models\Planning\ProjectTask;
@@ -82,6 +83,7 @@ class PlanningService
             }
 
             $task ??= new ProjectTask;
+            $previousAssignee = $task->exists ? $task->getOriginal('assigned_to') : null;
             $task->fill([
                 'parent_id' => $parent?->id,
                 'milestone_id' => $data['milestone_id'] ?? null,
@@ -105,6 +107,10 @@ class PlanningService
                 $task->forceFill(['project_id' => $project->id, 'status' => TaskStatus::NotStarted]);
             }
             $task->save();
+            if ($task->assigned_to && (int) $task->assigned_to !== (int) $previousAssignee) {
+                $taskId = $task->id;
+                DB::afterCommit(fn () => TaskAssigned::dispatch(ProjectTask::query()->findOrFail($taskId)));
+            }
 
             return $task;
         });

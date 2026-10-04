@@ -1,17 +1,19 @@
 <script setup>
 import StatCard from '@/Components/Data/StatCard.vue';
+import Chart from '@/Components/Reports/Chart.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import AppDropdown from '@/Components/UI/AppDropdown.vue';
 import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
-import { formatDate, formatMoney } from '@/lib/format';
+import { formatDate, formatMoney, formatPercent } from '@/lib/format';
 import { Link, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 const props = defineProps({
     project: { type: Object, required: true },
     transitions: { type: Array, required: true },
+    dashboard: { type: Object, default: null },
     can: { type: Object, required: true },
 });
 
@@ -33,6 +35,8 @@ function changeStatus() {
     );
 }
 
+const ops = computed(() => props.dashboard?.operational ?? null);
+const fin = computed(() => props.dashboard?.financial ?? null);
 const details = computed(() => {
     const p = props.project;
 
@@ -81,6 +85,30 @@ const details = computed(() => {
             />
         </div>
 
+        <div v-if="ops" class="mt-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+            <StatCard label="Progress" :value="formatPercent(ops.progress)" icon="check-circle" tone="brand" />
+            <StatCard label="Tasks" :value="ops.tasks" icon="clipboard" tone="slate" />
+            <StatCard label="Delayed" :value="ops.delayed_tasks" icon="warning" tone="orange" />
+            <StatCard label="Open NCRs" :value="ops.open_ncrs" icon="clipboard" tone="amber" />
+            <StatCard label="Inspections pending" :value="ops.pending_inspections" icon="check-circle" />
+            <StatCard label="Low stock items" :value="ops.low_stock" icon="archive" />
+        </div>
+
+        <div v-if="fin" class="mt-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+            <StatCard label="Budget" :value="formatMoney(fin.budget)" icon="banknotes" tone="brand" />
+            <StatCard label="Actual" :value="formatMoney(fin.actual)" icon="banknotes" tone="orange" />
+            <StatCard label="Committed" :value="formatMoney(fin.committed)" icon="truck" />
+            <StatCard label="Remaining" :value="formatMoney(fin.remaining)" icon="banknotes" tone="green" />
+            <StatCard label="Billed" :value="formatMoney(fin.billed)" icon="receipt" />
+            <StatCard label="Received" :value="formatMoney(fin.received)" icon="banknotes" tone="green" />
+            <StatCard label="Outstanding" :value="formatMoney(fin.outstanding)" icon="receipt" tone="amber" />
+            <StatCard v-if="fin.stock_value !== undefined" label="Stock value" :value="formatMoney(fin.stock_value)" icon="archive" />
+        </div>
+
+        <AppCard v-if="fin?.cost_by_head" title="Cost by head" class="mt-4">
+            <Chart type="bar" :categories="fin.cost_by_head.categories" :series="[{ name: 'Actual', data: fin.cost_by_head.series }]" money />
+        </AppCard>
+
         <div class="mt-4 grid gap-4 lg:grid-cols-3">
             <AppCard title="Project information" class="lg:col-span-2">
                 <dl class="grid gap-x-6 gap-y-4 sm:grid-cols-2">
@@ -100,12 +128,10 @@ const details = computed(() => {
                     <p class="text-xs text-slate-500 uppercase">Contract value</p>
                     <p class="mt-1 text-2xl font-semibold text-slate-900 tabular">{{ formatMoney(project.contract_value) }}</p>
                 </AppCard>
-                <AppCard title="Coming next">
-                    <p class="text-sm text-slate-600">
-                        BOQ, planning, daily progress, procurement and billing will appear in this project as each module is released.
-                    </p>
-                    <Link :href="route('projects.team.index', project.id)" class="mt-3 inline-block text-sm font-medium text-brand-600 hover:text-brand-700">
-                        Manage the project team →
+                <AppCard title="Reports">
+                    <p class="text-sm text-slate-600">Project cost, progress, stock and billing reports for this project.</p>
+                    <Link v-if="can.reports" :href="route('reports.project-index', project.id)" class="mt-3 inline-block text-sm font-medium text-brand-600 hover:text-brand-700">
+                        Open project reports →
                     </Link>
                 </AppCard>
             </div>

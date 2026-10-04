@@ -4,11 +4,12 @@ import ProjectSwitcher from '@/Components/Layout/ProjectSwitcher.vue';
 import AppDropdown from '@/Components/UI/AppDropdown.vue';
 import FlashMessages from '@/Components/UI/FlashMessages.vue';
 import Icon from '@/Components/UI/Icon.vue';
+import { registerStoredPush } from '@/lib/fcm';
 import { initials } from '@/lib/format';
 import { buildNavigation } from '@/lib/navigation';
 import { usePermissions } from '@/lib/permissions';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 defineProps({
     title: { type: String, default: null },
@@ -20,7 +21,24 @@ const sidebarOpen = ref(false);
 
 const user = computed(() => page.props.auth.user);
 const unread = computed(() => page.props.unreadNotifications ?? 0);
+const branding = computed(() => page.props.branding ?? { logo_url: null, favicon_url: null });
+const chatUnread = ref(page.props.chatUnread ?? 0);
 const showProjectSwitcher = computed(() => can('projects.view'));
+
+watch(() => page.props.chatUnread, (count) => {
+    chatUnread.value = count ?? 0;
+});
+
+let presenceTimer;
+function refreshChat() {
+    if (document.hidden) {
+        return;
+    }
+    window.axios.post(route('chat.heartbeat')).catch(() => {});
+    window.axios.get(route('chat.unread')).then((response) => {
+        chatUnread.value = response.data.count ?? 0;
+    }).catch(() => {});
+}
 
 // Recomputed on every visit so "active" follows the current URL.
 const navigation = computed(() => {
@@ -30,11 +48,22 @@ const navigation = computed(() => {
 });
 
 const removeListener = router.on('navigate', () => (sidebarOpen.value = false));
-onBeforeUnmount(removeListener);
+onMounted(() => {
+    refreshChat();
+    presenceTimer = setInterval(refreshChat, 15000);
+    registerStoredPush(page.props.fcm?.web).catch(() => {});
+});
+onBeforeUnmount(() => {
+    removeListener();
+    clearInterval(presenceTimer);
+});
 </script>
 
 <template>
     <Head v-if="title" :title="title" />
+    <Head>
+        <link head-key="favicon" rel="icon" :href="branding.favicon_url || '/favicon.svg'" />
+    </Head>
     <div class="min-h-screen bg-surface">
         <FlashMessages />
 
@@ -49,9 +78,10 @@ onBeforeUnmount(removeListener);
             :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
         >
             <div class="flex h-14 shrink-0 items-center justify-between px-4">
-                <Link :href="route('dashboard')" class="flex items-center gap-2">
-                    <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-500 text-sm font-black text-white">B</span>
-                    <span class="text-base font-bold tracking-tight text-white">BUILDIFY<span class="text-accent-400">360</span></span>
+                <Link :href="route('dashboard')" class="flex min-w-0 items-center gap-2">
+                    <img v-if="branding.logo_url" :src="branding.logo_url" alt="" class="h-8 w-8 rounded-lg bg-white object-contain" />
+                    <span v-else class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-500 text-sm font-black text-white">B</span>
+                    <span class="truncate text-base font-bold tracking-tight text-white">BUILDIFY<span class="text-accent-400">360</span></span>
                 </Link>
                 <button type="button" class="rounded-md p-1 text-white/70 hover:bg-white/10 lg:hidden" aria-label="Close menu" @click="sidebarOpen = false">
                     <Icon name="close" />
@@ -77,6 +107,12 @@ onBeforeUnmount(removeListener);
                             >
                                 <Icon :name="item.icon" :size="18" :class="item.active ? 'text-accent-400' : ''" />
                                 <span class="truncate">{{ item.label }}</span>
+                                <span
+                                    v-if="item.label === 'Chat' && chatUnread > 0"
+                                    class="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent-500 px-1 text-[10px] font-bold text-white tabular"
+                                >
+                                    {{ chatUnread > 99 ? '99+' : chatUnread }}
+                                </span>
                             </Link>
                         </li>
                     </ul>
@@ -94,6 +130,20 @@ onBeforeUnmount(removeListener);
                 <div class="min-w-0 flex-1">
                     <ProjectSwitcher v-if="showProjectSwitcher" />
                 </div>
+
+                <Link
+                    :href="route('chat.index')"
+                    class="relative rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                    :aria-label="`Chat (${chatUnread} unread)`"
+                >
+                    <Icon name="chat" />
+                    <span
+                        v-if="chatUnread > 0"
+                        class="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent-500 px-1 text-[10px] font-bold text-white tabular"
+                    >
+                        {{ chatUnread > 99 ? '99+' : chatUnread }}
+                    </span>
+                </Link>
 
                 <Link
                     :href="route('notifications.index')"
@@ -126,6 +176,9 @@ onBeforeUnmount(removeListener);
                     <div class="py-1">
                         <Link :href="route('profile.edit')" class="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
                             <Icon name="user" :size="16" /> My profile
+                        </Link>
+                        <Link :href="route('notifications.preferences')" class="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                            <Icon name="cog" :size="16" /> Notification preferences
                         </Link>
                         <Link
                             :href="route('logout')"

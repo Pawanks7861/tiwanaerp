@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Finance;
 use App\Enums\Finance\ClientInvoiceStatus;
 use App\Enums\IndianState;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Core\Company;
@@ -95,6 +96,7 @@ class ClientInvoiceController extends Controller
             ])->all(),
             'approval' => ProcurementPresenter::approval($invoice, $user),
             'attachments' => ProcurementPresenter::attachments($invoice),
+            'audit' => AuditPresenter::trail([$invoice]),
             'can' => $this->abilities($user, $invoice),
         ]);
     }

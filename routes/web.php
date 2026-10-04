@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\Admin\AuditLogController;
+use App\Http\Controllers\Admin\BrandingController;
 use App\Http\Controllers\Admin\CompanySettingsController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\UserController;
@@ -8,13 +10,20 @@ use App\Http\Controllers\Boq\BoqExcelController;
 use App\Http\Controllers\Boq\BoqSectionController;
 use App\Http\Controllers\Boq\ProjectBudgetController;
 use App\Http\Controllers\Boq\RateAnalysisController;
+use App\Http\Controllers\Chat\ChatController;
 use App\Http\Controllers\Core\ApprovalController;
 use App\Http\Controllers\Core\AttachmentController;
 use App\Http\Controllers\Core\CompanySwitchController;
+use App\Http\Controllers\Core\DeviceTokenController;
+use App\Http\Controllers\Core\FcmServiceWorkerController;
 use App\Http\Controllers\Core\NotificationController;
+use App\Http\Controllers\Core\NotificationPreferenceController;
 use App\Http\Controllers\Crm\LeadController;
 use App\Http\Controllers\Crm\QuotationController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\Documents\DocumentController;
+use App\Http\Controllers\Documents\DocumentFolderController;
+use App\Http\Controllers\Documents\DrawingController;
 use App\Http\Controllers\Equipment\EquipmentAssignmentController;
 use App\Http\Controllers\Equipment\EquipmentFuelController;
 use App\Http\Controllers\Equipment\EquipmentRepairController;
@@ -51,6 +60,11 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\Projects\ProjectController;
 use App\Http\Controllers\Projects\ProjectTeamController;
 use App\Http\Controllers\Projects\SiteController;
+use App\Http\Controllers\Quality\NcrController;
+use App\Http\Controllers\Quality\QualityChecklistController;
+use App\Http\Controllers\Quality\QualityInspectionController;
+use App\Http\Controllers\Reports\ReportController;
+use App\Http\Controllers\Reports\ReportExportController;
 use App\Http\Controllers\SiteExecution\DprController;
 use App\Http\Controllers\SiteExecution\SiteDiaryController;
 use App\Http\Controllers\SiteExecution\SiteDiaryPhotoController;
@@ -61,8 +75,24 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route(auth()->check() ? 'dashboard' : 'login'));
 
+Route::get('/firebase-messaging-sw.js', FcmServiceWorkerController::class)->name('fcm.worker');
+
 Route::middleware(['auth', 'company'])->group(function () {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+
+    Route::get('/branding/{kind}', [BrandingController::class, 'show'])->whereIn('kind', ['logo', 'favicon'])->name('company.branding.show');
+
+    Route::get('/chat/directory', [ChatController::class, 'directory'])->name('chat.directory');
+    Route::get('/chat/unread', [ChatController::class, 'unread'])->name('chat.unread');
+    Route::post('/chat/heartbeat', [ChatController::class, 'heartbeat'])->name('chat.heartbeat');
+    Route::post('/chat/direct', [ChatController::class, 'open'])->name('chat.direct');
+    Route::get('/chat/attachments/{attachment}', [ChatController::class, 'attachment'])->whereNumber('attachment')->name('chat.attachments.show');
+    Route::patch('/chat/messages/{message}', [ChatController::class, 'update'])->whereNumber('message')->name('chat.messages.update');
+    Route::delete('/chat/messages/{message}', [ChatController::class, 'destroy'])->whereNumber('message')->name('chat.messages.destroy');
+    Route::get('/chat/{conversation}/messages', [ChatController::class, 'messages'])->whereNumber('conversation')->name('chat.messages.index');
+    Route::post('/chat/{conversation}/messages', [ChatController::class, 'store'])->whereNumber('conversation')->middleware('throttle:60,1')->name('chat.messages.store');
+    Route::get('/chat', [ChatController::class, 'index'])->name('chat.index');
+    Route::get('/chat/{conversation}', [ChatController::class, 'index'])->whereNumber('conversation')->name('chat.show');
 
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
@@ -450,6 +480,93 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::post('/submit', [RetentionController::class, 'submit'])->name('submit');
         });
         Route::get('/cash-flow', [CashFlowController::class, 'project'])->name('projects.cash-flow');
+
+        // Quality: inspections and NCRs
+        Route::get('/quality/inspections', [QualityInspectionController::class, 'index'])->name('projects.inspections.index');
+        Route::get('/quality/inspections/create', [QualityInspectionController::class, 'create'])->name('projects.inspections.create');
+        Route::post('/quality/inspections', [QualityInspectionController::class, 'store'])->name('projects.inspections.store');
+        Route::prefix('/quality/inspections/{qualityInspection}')->whereNumber('qualityInspection')->name('projects.inspections.')->group(function () {
+            Route::get('/', [QualityInspectionController::class, 'show'])->name('show');
+            Route::get('/edit', [QualityInspectionController::class, 'edit'])->name('edit');
+            Route::put('/', [QualityInspectionController::class, 'update'])->name('update');
+            Route::delete('/', [QualityInspectionController::class, 'destroy'])->name('destroy');
+            Route::post('/schedule', [QualityInspectionController::class, 'schedule'])->name('schedule');
+            Route::post('/record', [QualityInspectionController::class, 'record'])->name('record');
+            Route::post('/complete', [QualityInspectionController::class, 'complete'])->name('complete');
+        });
+        Route::get('/quality/ncrs', [NcrController::class, 'index'])->name('projects.ncrs.index');
+        Route::get('/quality/ncrs/create', [NcrController::class, 'create'])->name('projects.ncrs.create');
+        Route::post('/quality/ncrs', [NcrController::class, 'store'])->name('projects.ncrs.store');
+        Route::prefix('/quality/ncrs/{ncr}')->whereNumber('ncr')->name('projects.ncrs.')->group(function () {
+            Route::get('/', [NcrController::class, 'show'])->name('show');
+            Route::get('/edit', [NcrController::class, 'edit'])->name('edit');
+            Route::put('/', [NcrController::class, 'update'])->name('update');
+            Route::delete('/', [NcrController::class, 'destroy'])->name('destroy');
+            Route::post('/start', [NcrController::class, 'start'])->name('start');
+            Route::post('/resolve', [NcrController::class, 'resolve'])->name('resolve');
+            Route::post('/verify', [NcrController::class, 'verify'])->name('verify');
+            Route::post('/reopen', [NcrController::class, 'reopen'])->name('reopen');
+            Route::post('/close', [NcrController::class, 'close'])->name('close');
+        });
+
+        // Drawings: register, immutable revisions, review / approval, secure preview / download
+        Route::get('/drawings', [DrawingController::class, 'index'])->name('projects.drawings.index');
+        Route::get('/drawings/create', [DrawingController::class, 'create'])->name('projects.drawings.create');
+        Route::post('/drawings', [DrawingController::class, 'store'])->middleware('throttle:30,1')->name('projects.drawings.store');
+        Route::prefix('/drawings/{drawing}')->whereNumber('drawing')->name('projects.drawings.')->group(function () {
+            Route::get('/', [DrawingController::class, 'show'])->name('show');
+            Route::put('/', [DrawingController::class, 'update'])->name('update');
+            Route::post('/revisions', [DrawingController::class, 'storeRevision'])->middleware('throttle:30,1')->name('revisions.store');
+            Route::prefix('/revisions/{revision}')->whereNumber('revision')->name('revisions.')->group(function () {
+                Route::post('/submit', [DrawingController::class, 'submit'])->name('submit');
+                Route::post('/review', [DrawingController::class, 'review'])->name('review');
+                Route::post('/approve', [DrawingController::class, 'approve'])->name('approve');
+                Route::post('/reject', [DrawingController::class, 'reject'])->name('reject');
+                Route::delete('/', [DrawingController::class, 'withdraw'])->name('withdraw');
+                Route::get('/download', [DrawingController::class, 'download'])->name('download');
+                Route::get('/preview', [DrawingController::class, 'preview'])->name('preview');
+            });
+        });
+
+        // Documents: folders, controlled documents, immutable versions
+        Route::get('/documents', [DocumentController::class, 'index'])->name('projects.documents.index');
+        Route::get('/documents/create', [DocumentController::class, 'create'])->name('projects.documents.create');
+        Route::post('/documents', [DocumentController::class, 'store'])->middleware('throttle:30,1')->name('projects.documents.store');
+        Route::post('/documents/folders', [DocumentFolderController::class, 'store'])->name('projects.documents.folders.store');
+        Route::put('/documents/folders/{documentFolder}', [DocumentFolderController::class, 'update'])->whereNumber('documentFolder')->name('projects.documents.folders.update');
+        Route::delete('/documents/folders/{documentFolder}', [DocumentFolderController::class, 'destroy'])->whereNumber('documentFolder')->name('projects.documents.folders.destroy');
+        Route::prefix('/documents/{document}')->whereNumber('document')->name('projects.documents.')->group(function () {
+            Route::get('/', [DocumentController::class, 'show'])->name('show');
+            Route::put('/', [DocumentController::class, 'update'])->name('update');
+            Route::delete('/', [DocumentController::class, 'destroy'])->name('destroy');
+            Route::post('/publish', [DocumentController::class, 'publish'])->name('publish');
+            Route::post('/archive', [DocumentController::class, 'archive'])->name('archive');
+            Route::post('/restore', [DocumentController::class, 'restore'])->name('restore');
+            Route::post('/versions', [DocumentController::class, 'storeVersion'])->middleware('throttle:30,1')->name('versions.store');
+            Route::get('/versions/{version}/download', [DocumentController::class, 'download'])->whereNumber('version')->name('versions.download');
+            Route::get('/versions/{version}/preview', [DocumentController::class, 'preview'])->whereNumber('version')->name('versions.preview');
+        });
+
+        // Project reports (same definitions, scoped to this project)
+        Route::get('/reports', [ReportController::class, 'projectIndex'])->name('reports.project-index');
+        Route::get('/reports/{report}', [ReportController::class, 'project'])->where('report', '[a-z0-9-]+')->name('reports.project');
+        Route::get('/reports/{report}/export', [ReportController::class, 'projectExport'])->where('report', '[a-z0-9-]+')->middleware('throttle:20,1')->name('reports.project-export');
+    });
+
+    // Reports (company scope = projects the user can see)
+    Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+    Route::get('/reports/{report}', [ReportController::class, 'show'])->where('report', '[a-z0-9-]+')->name('reports.show');
+    Route::get('/reports/{report}/export', [ReportController::class, 'export'])->where('report', '[a-z0-9-]+')->middleware('throttle:20,1')->name('reports.export');
+    Route::get('/report-exports/{reportExport}/download', [ReportExportController::class, 'download'])->whereNumber('reportExport')->name('reports.exports.download');
+
+    // Quality checklist templates (company masters)
+    Route::prefix('/quality/checklists')->name('quality.checklists.')->group(function () {
+        Route::get('/', [QualityChecklistController::class, 'index'])->name('index');
+        Route::get('/create', [QualityChecklistController::class, 'create'])->name('create');
+        Route::post('/', [QualityChecklistController::class, 'store'])->name('store');
+        Route::get('/{checklist}', [QualityChecklistController::class, 'show'])->whereNumber('checklist')->name('show');
+        Route::put('/{checklist}', [QualityChecklistController::class, 'update'])->whereNumber('checklist')->name('update');
+        Route::delete('/{checklist}', [QualityChecklistController::class, 'destroy'])->whereNumber('checklist')->name('destroy');
     });
 
     // Finance: company-wide cash flow and outstanding (projects the user can see)
@@ -514,6 +631,10 @@ Route::middleware(['auth', 'company'])->group(function () {
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead'])->name('notifications.read-all');
     Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead'])->whereUuid('notification')->name('notifications.read');
+    Route::get('/notifications/preferences', [NotificationPreferenceController::class, 'edit'])->name('notifications.preferences');
+    Route::put('/notifications/preferences', [NotificationPreferenceController::class, 'update'])->name('notifications.preferences.update');
+    Route::post('/devices', [DeviceTokenController::class, 'store'])->middleware('throttle:30,1')->name('devices.store');
+    Route::delete('/devices', [DeviceTokenController::class, 'destroy'])->name('devices.destroy');
 
     // Company administration
     Route::prefix('/admin')->name('admin.')->group(function () {
@@ -534,6 +655,12 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/company', [CompanySettingsController::class, 'edit'])->name('company.edit');
         Route::put('/company', [CompanySettingsController::class, 'update'])->name('company.update');
         Route::put('/company/procurement', [CompanySettingsController::class, 'updateProcurement'])->name('company.procurement');
+        Route::post('/company/logo', [BrandingController::class, 'storeLogo'])->name('company.logo.store');
+        Route::delete('/company/logo', [BrandingController::class, 'destroyLogo'])->name('company.logo.destroy');
+        Route::post('/company/favicon', [BrandingController::class, 'storeFavicon'])->name('company.favicon.store');
+        Route::delete('/company/favicon', [BrandingController::class, 'destroyFavicon'])->name('company.favicon.destroy');
+
+        Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
     });
 
     // Platform (super admin)

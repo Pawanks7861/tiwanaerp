@@ -4,13 +4,14 @@ namespace App\Notifications;
 
 use App\Models\Core\NotificationPreference;
 use App\Notifications\Channels\CompanyDatabaseChannel;
+use App\Notifications\Channels\FcmChannel;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Notification;
 
 /**
- * Base for all BUILDIFY360 notifications. Delivery channels come from the user's preferences
- * (database by default); mail / WhatsApp / push channels plug in here later.
+ * Base for all BUILDIFY360 notifications. Delivery channels come from the user's preferences.
+ * In-app is the default. Push is included only when the user has turned it on.
  */
 abstract class BaseNotification extends Notification implements ShouldQueue
 {
@@ -37,10 +38,14 @@ abstract class BaseNotification extends Notification implements ShouldQueue
             ->value('channels');
 
         $channels = is_array($configured) ? $configured : ['database'];
+        $allowed = [
+            'database' => CompanyDatabaseChannel::class,
+            'push' => FcmChannel::class,
+        ];
 
         return array_values(array_map(
-            fn (string $channel) => $channel === 'database' ? CompanyDatabaseChannel::class : $channel,
-            array_intersect($channels, ['database']),
+            fn (string $channel) => $allowed[$channel],
+            array_values(array_intersect($channels, array_keys($allowed))),
         ));
     }
 

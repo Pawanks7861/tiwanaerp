@@ -60,6 +60,10 @@ const tabs = computed(() =>
         can('subcontract.view') && { key: 'subcontract', label: 'Subcontract', icon: 'briefcase', href: route('projects.work-orders.index', props.project.id) },
         can('equipment.view') && { key: 'equipment', label: 'Equipment', icon: 'wrench', href: route('projects.equipment-assignments.index', props.project.id) },
         financeHome.value && { key: 'finance', label: 'Finance', icon: 'banknotes', href: financeHome.value },
+        can('quality.view') && { key: 'quality', label: 'Quality', icon: 'check-circle', href: route('projects.inspections.index', props.project.id) },
+        can('drawings.view') && { key: 'drawings', label: 'Drawings', icon: 'grid', href: route('projects.drawings.index', props.project.id) },
+        can('documents.view') && { key: 'documents', label: 'Documents', icon: 'folder', href: route('projects.documents.index', props.project.id) },
+        can('reports.view') && { key: 'reports', label: 'Reports', icon: 'document', href: route('reports.project-index', props.project.id) },
     ].filter(Boolean),
 );
 </script>

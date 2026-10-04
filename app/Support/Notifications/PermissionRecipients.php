@@ -40,4 +40,24 @@ class PermissionRecipients
                 ->where('pu.is_active', true)))
             ->get();
     }
+
+    /**
+     * Active members of the company among the given user ids (assignees, project managers).
+     *
+     * @param  list<int|string|null>  $userIds
+     * @return Collection<int, User>
+     */
+    public function users(int $companyId, array $userIds): Collection
+    {
+        $ids = array_values(array_unique(array_filter(array_map(fn ($id) => $id ? (int) $id : null, $userIds))));
+        if ($ids === []) {
+            return collect();
+        }
+
+        return User::query()
+            ->where('is_active', true)
+            ->whereIn('id', $ids)
+            ->whereHas('memberships', fn (Builder $m) => $m->where('company_id', $companyId)->where('is_active', true))
+            ->get();
+    }
 }

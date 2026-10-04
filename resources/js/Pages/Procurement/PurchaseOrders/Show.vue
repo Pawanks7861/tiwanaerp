@@ -1,5 +1,6 @@
 <script setup>
 import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
+import AuditTrail from '@/Components/Audit/AuditTrail.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import ApprovalActions from '@/Components/Procurement/ApprovalActions.vue';
 import ProcurementNav from '@/Components/Procurement/ProcurementNav.vue';
@@ -22,6 +23,7 @@ const props = defineProps({
     grns: { type: Array, required: true },
     approval: { type: Object, default: null },
     attachments: { type: Array, required: true },
+    audit: { type: Array, default: () => [] },
     can: { type: Object, required: true },
 });
 
@@ -251,6 +253,9 @@ const statusNote = computed(() => {
                 :can-delete="can.attach"
                 placeholder="Signed PO, vendor acceptance…"
             />
+            <div class="mt-4">
+                <AuditTrail :entries="audit" title="Audit trail" />
+            </div>
         </div>
 
         <ConfirmDialog

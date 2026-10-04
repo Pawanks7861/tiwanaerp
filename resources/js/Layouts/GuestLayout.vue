@@ -1,8 +1,11 @@
 <script setup>
-import { Link } from '@inertiajs/vue3';
+import { Head, Link } from '@inertiajs/vue3';
 </script>
 
 <template>
+    <Head>
+        <link head-key="favicon" rel="icon" href="/favicon.svg" />
+    </Head>
     <div class="flex min-h-screen">
         <aside class="relative hidden w-[42%] flex-col justify-between overflow-hidden bg-navy-900 p-10 text-white lg:flex">
             <div class="flex items-center gap-3">

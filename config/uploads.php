@@ -30,4 +30,10 @@ return [
 
     'image_extensions' => ['jpg', 'jpeg', 'png', 'webp'],
 
+    // Drawing revisions (subset of "allowed"). DWG/DXF are stored as is and only downloaded.
+    'drawing_extensions' => ['pdf', 'dwg', 'dxf', 'jpg', 'jpeg', 'png', 'webp'],
+
+    // Served inline by the secure preview routes; everything else is download only.
+    'preview_extensions' => ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+
 ];

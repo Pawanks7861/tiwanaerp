@@ -10,6 +10,9 @@ use App\Models\Crm\Client;
 use App\Models\Projects\Project;
 use App\Services\Core\CompanyDirectory;
 use App\Services\Projects\ProjectService;
+use App\Services\Reports\DashboardService;
+use App\Support\Reports\ReportPeriod;
+use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -22,6 +25,7 @@ class ProjectController extends Controller
     public function __construct(
         private readonly ProjectService $projects,
         private readonly CompanyDirectory $directory,
+        private readonly DashboardService $dashboards,
     ) {}
 
     public function index(Request $request): Response
@@ -76,17 +80,26 @@ class ProjectController extends Controller
             ->loadCount(['sites', 'members' => fn ($q) => $q->where('is_active', true)]);
 
         $user = $request->user();
+        $financials = $user->can('dashboard.view_financials');
+        $detail = $this->detail($project);
+        if (! $financials) {
+            $detail['contract_value'] = null;
+        }
 
         return Inertia::render('Projects/Show', [
-            'project' => $this->detail($project),
+            'project' => $detail,
             'transitions' => array_map(
                 fn (ProjectStatus $s) => ['value' => $s->value, 'label' => $s->label()],
                 $project->status->allowedTransitions(),
             ),
+            'dashboard' => $user->can('dashboard.view')
+                ? $this->dashboards->project($project, $user, ReportPeriod::today(app(CurrentCompany::class)->require()))
+                : null,
             'can' => [
                 'update' => $user->can('update', $project),
                 'changeStatus' => $user->can('changeStatus', $project),
-                'viewFinancials' => $user->can('dashboard.view_financials'),
+                'viewFinancials' => $financials,
+                'reports' => $user->can('reports.view'),
             ],
         ]);
     }

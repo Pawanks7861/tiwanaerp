@@ -6,6 +6,7 @@ use App\Models\Concerns\Auditable;
 use App\Models\Concerns\Blameable;
 use App\Models\Core\Company;
 use App\Models\Core\CompanyUser;
+use App\Models\Core\DeviceToken;
 use App\Models\Projects\Project;
 use App\Models\Projects\ProjectUser;
 use Database\Factories\UserFactory;
@@ -29,13 +30,14 @@ class User extends Authenticatable
     use Auditable, Blameable, HasApiTokens, HasFactory, HasRoles, Notifiable;
 
     /** @var list<string> */
-    protected array $auditExclude = ['last_login_at', 'current_company_id'];
+    protected array $auditExclude = ['last_login_at', 'last_seen_at', 'current_company_id'];
 
     protected function casts(): array
     {
         return [
             'email_verified_at' => 'datetime',
             'last_login_at' => 'datetime',
+            'last_seen_at' => 'datetime',
             'password' => 'hashed',
             'is_super_admin' => 'boolean',
             'is_active' => 'boolean',
@@ -59,6 +61,14 @@ class User extends Authenticatable
     public function memberships(): HasMany
     {
         return $this->hasMany(CompanyUser::class);
+    }
+
+    /**
+     * @return HasMany<DeviceToken, $this>
+     */
+    public function deviceTokens(): HasMany
+    {
+        return $this->hasMany(DeviceToken::class);
     }
 
     /**

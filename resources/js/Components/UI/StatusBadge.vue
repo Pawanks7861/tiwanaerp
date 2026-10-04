@@ -53,6 +53,19 @@ const colors = {
     returned: 'slate',
     open: 'amber',
     posted: 'green',
+    requested: 'amber',
+    scheduled: 'blue',
+    under_review: 'blue',
+    resolved: 'brand',
+    verified: 'green',
+    archived: 'slate',
+    withdrawn: 'slate',
+    passed: 'green',
+    failed: 'red',
+    conditional: 'orange',
+    minor: 'slate',
+    major: 'orange',
+    critical: 'red',
 };
 
 const key = computed(() => (props.status === true ? 'active' : props.status === false ? 'inactive' : props.status));

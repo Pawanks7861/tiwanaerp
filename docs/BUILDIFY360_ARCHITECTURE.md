@@ -1583,4 +1583,188 @@ The approval engine is verified by automated tests using a test document type. N
 7. CHECK constraints are added on MySQL only; tests run on SQLite, where the services enforce the rules.
 8. Verification data (projects P7VERIFY and P7VCRM, client P7V-CLI and "P7V Sandhu Estates LLP", vendors, subcontractor, labourers, the P7V roles and `p7v.*` users) was left in the local database for review.
 
-**Next:** Phase 8 starts only on explicit instruction.
+### Phase 8: complete (2026-10-03)
+
+**Implemented scope**
+
+- **Quality checklists.** Company templates (`quality_checklists`, name unique per company, discipline, activity, active flag) with ordered checkpoints (`quality_checklist_items`, synced by id, `sort_order` = position). A checklist that has been used can only be deactivated, not deleted; inactive checklists can't start new inspections. Editing a template never changes existing inspections.
+- **Inspections.** `INS-{PROJECT_CODE}-NNNN`: requested → scheduled → completed. Checkpoints are copied from the checklist on request. Site, task, BOQ item (current approved BOQ, `boq_line_uid` kept) and inspector (active project team member) are validated against the project. Each checkpoint is pass, fail or N/A, with a remark required on a fail. Completion rule: every checkpoint assessed and not all N/A; any fail makes the result failed and the server refuses passed or conditional; with no fail the inspector chooses passed (default) or conditional, and conditional needs remarks. Completed inspections are locked (model guard on the header and on checkpoints). Evidence uses the private attachment store until completion.
+- **NCRs.** `NCR-{PROJECT_CODE}-NNNN`: open → in progress → resolved → verified → closed, with resolved → in progress when the resolution is not accepted (reason kept). Raised from a completed failed or conditional inspection of the same project (location inherited), or manually. Severity minor / major / critical, responsible project member and / or active subcontractor, target date. Start needs an assignee; resolve records root cause and corrective action with `resolved_by` / `resolved_at`; verification is by someone other than the resolver (enforced in the service, also for platform super admins) with `verified_by` / `verified_at`; close stamps `closed_by` / `closed_at`. A closed NCR is immutable (model guard).
+- **Drawings.** Drawing number is user-supplied and unique per project, fixed once a revision is approved. Revisions are new rows with a code unique per drawing (uppercased, letters / digits / `. _ -`, up to 10), never reused even after rejection or withdrawal. Draft → submitted (`drawings.upload`) → under review (`drawings.review`) → approved (`drawings.approve`) / rejected (comments required); one revision in the workflow at a time; an unsubmitted draft can be withdrawn. Approval marks the previous approved revision superseded, sets `supersedes_revision_id`, moves `current_revision_id` and the drawing status in one transaction. The full history, including superseded, rejected and withdrawn revisions, stays visible and downloadable.
+- **Documents.** Logical folders per project (unique per project + parent + name, no slashes, moves can't create cycles or cross projects, only empty folders are deleted). Documents `DOC-{PROJECT_CODE}-NNNN` with a separate external reference: draft → active ⇄ archived; only a draft can be deleted (soft delete, versions and files kept). Versions are numbered 1, 2, 3 … by the server under a row lock on the document and `current_version_id` moves in the same transaction; archived documents take no new versions until restored.
+- **File handling.** `PrivateFileStore` writes drawing revisions and document versions to the private disk under `company/{id}/project/{id}/drawings|documents/Y/m/{uuid}.{ext}`, after the extension allow-list, server-side MIME detection and the DWG / DXF signature check (`FileTypeGuard`). Size, MIME and SHA-256 are stored. Revision and version files are immutable: model guards plus MySQL triggers (`drawing_revisions_immutable`, `drawing_revisions_no_delete`, `document_versions_immutable`, `document_versions_no_delete`). Every download and preview re-checks the checksum (mismatch → 409 and a log warning) and sends `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`. PDF and images preview inline; DWG / DXF are download only. A re-upload with the same checksum is accepted and flagged ("identical to revision R0" / "version 1").
+- **Screens.** Masters › Quality Checklists; project tabs Quality (Inspections, NCRs), Drawings and Documents. The inspection page has pass / fail / N/A buttons per checkpoint (cards at 390 px) and a completion dialog; detail pages show an audit history.
+- **Security.** Policies for every action follow the M.2 permissions plus project access (`projects.view_all` or team membership). Routes sit under `/projects/{project}` with `project.access` and scoped bindings, so a revision, version, folder, inspection or NCR id from another drawing, document or project is 404. `company_id`, `project_id` and uploaders always come from the server. UI `can` flags combine permission and record state (platform super admins pass every policy), and services re-check state under row locks. Phase 8 changes no stock, cost, progress, billing or procurement data.
+
+**Verification results (2026-10-03)**
+
+| Gate | Result |
+|---|---|
+| `php artisan test` | Pass: 481 tests, 5432 assertions, 0 failed, 0 skipped, 81 s (parallel, 4 processes). Phase 8 adds 59 tests / 825 assertions: `QualityChecklistTest` 7, `QualityInspectionTest` 11, `NcrTest` 13, `DrawingTest` 12, `DocumentTest` 12, `Phase8IsolationTest` 4 (tenant isolation of every record type under the owner's and the intruder's project URLs, attachment protection, view-only access, no side effects). Pint clean. |
+| `npm run build` | Pass: exit 0, 948 modules, built in 4.7–6 s; only rolldown's informational `PLUGIN_TIMINGS` note. |
+| Migrations | 2 migrations: `2026_10_08_100000` quality (5 tables), `100100` drawings and documents (5 tables). 10 InnoDB tables, 61 foreign keys, 8 CHECK constraints, 8 unique keys, 4 triggers; all 132 tables are InnoDB. Gate: APP_ENV=local and DB `tiwanaerp` on 127.0.0.1 confirmed, backup `storage/app/backups/tiwanaerp_pre_phase8_20261003.sql` (122 tables, 3,888 rows), then `migrate`, rollback of the 2 migrations (all row counts identical to the pre-migration census), then `migrate` again (identical to the first run). Phase 0–7 migrations were not edited. |
+| Live run (HTTP as real users) | Project P8VERIFY (`storage/app/verification/p8-setup.php`, `p8-e2e.php`, result `p8-e2e-result.json`): 97 of 97 checks passed. QE created a 10-checkpoint checklist; engineer requested INS-P8VERIFY-0001 linked to task 1.1, BOQ A.1 and the site; QE scheduled, saved partial results and completed it; evidence attached before completion and refused after. NCR-P8VERIFY-0001 raised from it (engineer + subcontractor, target date), started, resolved with root cause and corrective action, refused for the engineer's verification, verified and closed by the QE; edits after closing refused. Manual NCR-P8VERIFY-0002: the QE who resolved it was refused verification, the PM verified it. INS-P8VERIFY-0002 completed as passed. |
+| Inspection hand check | 10 checkpoints: 8 pass, 1 fail (cover blocks), 1 N/A. A request for "passed" was refused ("A failed checkpoint makes the inspection failed."); the server result is exactly `failed`. |
+| Revision history | P8V-ARC-101: R0 submitted / reviewed / approved, then R1. Second open revision and reused code `r0` refused. After R1 approval: 2 rows, `current_revision_id` = R1, R1 supersedes R0, R0 superseded with `superseded_at`; R0's path, name, MIME, size and checksum identical before and after; R0 still downloads with the original SHA-256. R1 previews inline as `application/pdf`. Outsider (not on the team) 403, guest redirected to login, R0 requested under another drawing 404. DWG drawing P8V-STR-201: preview 404, download as attachment. |
+| Document history | DOC-P8VERIFY-0001 (reference TIWANA/SC/2026/014) in `P8V Contracts / Subcontracts`: v1, v2, v3 numbered 1, 2, 3 (a client-sent `version_no` was ignored), current = v3, v1 row byte-identical after v2 and v3, all three files present with matching checksums. Published, archived, new version refused (403), all three versions still downloadable. Duplicate sibling folder refused; DOC-P8VERIFY-0002 shows the duplicate-upload flag. |
+| File integrity | SHA-256 of the local file = stored checksum = hash of the stored file = hash of the downloaded body for R0, R1, the DWG and v1–v3. A raw SQL update of R0's `file_path` and a raw delete of a document version were both blocked by the triggers. Tampered files return 409 (tests). |
+| No side effects | `stock_transactions`, `project_cost_ledger`, `progress_entries`, `client_invoices`, `vendor_bills`, `subcontractor_bills`, `purchase_orders`, `material_requests`, `approval_requests` row counts and the P8VERIFY task / BOQ rows unchanged by the whole live run (also covered by a test). |
+| Browser | 20 Phase 8 pages at 1366 px and 390 px (checklist list / create / edit; inspection list / request / two details; NCR list / raise / two details; drawing list / register / R0–R1 detail / DWG detail; document library / folder filter / create / two details): 0 px page-level overflow, and no console errors, warnings, uncaught errors or rejected promises (console hooked before the app scripts ran). Revision upload dialog checked at 390 px. Results in `storage/app/verification/p8-browser.md`. |
+| `laravel.log` | New entries are only the expected `testing.WARNING` integrity-check lines from the tamper tests and one error from the verification script's own summary step (since fixed). No application errors during the live run or the browser checks. |
+| Roles | `storage/app/verification/p8-role-gap.php`: all 13 Phase 8 permissions exist; Company Admin, Director, Project Manager, Site Engineer and Quality Engineer in TIWANA and NORTHBLD already hold every Phase 8 permission their default definition grants. No role was changed; the live run used P8V copies of the default roles. |
+| Queue and scheduler | Not blockers: Phase 8 adds no jobs or schedules; no background services were started. |
+| Phase 0–7 regression | Full test suite passes. NORTHBLD Demo and the P3–P7 verification projects were not modified. |
+
+**Issues found by the checks and fixed**
+
+1. The checklist service created new checkpoints through mass assignment on a guarded model, so every checklist save failed (found by the first test run).
+2. The drawing upload forms showed the generic "PDF, images, Excel, Word or drawings" hint; `FileUpload` now takes an optional `hint` and the drawing forms say "PDF, DWG, DXF or images".
+3. During the build: the checklist delete action authorised `update` instead of `delete`; the library's unfiled count read a null key; the completion dialog rendered empty error lines.
+
+**Deviations from this document**
+
+1. Checklist maintenance uses `quality.perform_inspection` (no extra permission); reading needs `quality.view`.
+2. A checksum mismatch on download returns 409 and logs a warning instead of serving the file.
+3. A withdrawn draft revision is soft deleted (row and file kept, code stays taken). Revisions and versions are never hard deleted.
+4. Only a draft document can be deleted (soft delete); an active document is archived instead.
+5. The drawing header has two statuses (no approved revision / approved); the workflow lives on revisions, and only one revision can be in the workflow at a time.
+6. An inspection can raise more than one NCR, and a conditional result can raise one too.
+7. CHECK constraints and the immutability triggers exist on MySQL only; tests run on SQLite, where the model guards and services enforce the rules.
+8. The pre-gate backup was taken with a project-local logical dump (`storage/app/verification/p8-backup.php`: schema, data and triggers through the app's own connection) instead of `mysqldump`.
+9. Global PHP limits (`upload_max_filesize` 2M, `post_max_size` 8M in the WAMP php.ini) are below the app's 25 MB limit. They were not changed; live test files were kept under 2 MB. Raising them is a global WAMP change for the owner.
+10. Verification data (project P8VERIFY with its site, BOQ, task and Phase 8 records, subcontractor P8V-SUB, the P8V roles and `p8v.*` users, files under `storage/app/private/company/1/project/11/`) was left in the local database for review.
+
+### Phase 9: complete (2026-10-04)
+
+**Implemented scope**
+
+- **Reports.** Eighteen project and company reports (cost, budget vs actual, BOQ progress, cash flow, receivables, payables, stock, consumption, procurement, labour, equipment, subcontract, quality, CRM, delayed tasks, progress, cost by head, project cost summary) with financial-year periods (April–March), exact paisa totals, tenant and project isolation, and financial / inventory-valuation stripping.
+- **Exports.** PDF and XLSX through the same authorization as the screen; large exports queue a `report_exports` row and a private download.
+- **Dashboards.** Executive and project overview, cached per company, kind, permission version and filter hash. Cache bumps when invoices, payments, vendor bills, purchase orders, GRNs, progress and cost ledger rows are saved or deleted.
+- **Notifications.** In-app only. Catalogue covers task assignment, certified client invoices, approved client receipts, NCRs and report exports, plus the existing approval, procurement and inventory notices. Preferences can turn the database channel off; email, WhatsApp and push stay listed and disabled. Delayed-task notices (`planning:flag-delays`, 06:30) and low-stock scans (`inventory:scan-low-stock`, 07:00) are scheduled.
+- **Audit.** Immutable log, human-readable values on the way out (names for foreign keys, masked secrets). The viewer is `admin.audit_logs.view`.
+
+**Verification results (2026-10-04)**
+
+| Gate | Result |
+|---|---|
+| `php artisan test --parallel --processes=4` | Pass: 510 tests, 6,402 assertions, 0 failed, 0 skipped. Phase 8 baseline was 481 / 5,432. |
+| `npm run build` | Pass: exit 0, Vite 8.3.2, 957 modules, 8.81 s. Warnings only: chunks over 500 kB (ApexCharts) and `PLUGIN_TIMINGS`. No frontend file changed in the closing money checks, so this build stays authoritative. |
+| Migrations | `2026_10_09_100000_create_reporting_tables` (`report_exports`, `task_overdue_alerts`), both InnoDB. Gate already passed: backup `storage/app/backups/tiwanaerp_pre_phase9_20261004_080404.sql`, migrate, rollback of that step, migrate again. Not repeated for the live money checks. |
+| Live reports / dashboards / audit / notifications | P9VERIFY (project 12, `PRJ-2026-0011`) before the money checks: budget material 1,00,000 + labour 40,000 = 1,40,000; actual cost ledger material 20,000 + labour 8,000 = 28,000; petty cash funding 5,000 outflow and return 1,500 inflow, net −3,500. Those gates passed earlier in this phase. |
+
+**Live client RA bill and partial receipt (P9VERIFY, 2026-10-04)**
+
+Normal services and the approval engine, not inserted certified rows. Project state set to 03 (same as the company) and client Greenfield Developers LLP. Approved BOQ line A.1, client rate 1,000.0000, quantity 10. Approved site diary and DPR posted executed quantity 4 on task 1.1. RA bill current quantity 2 (previous 0, cumulative 2), within executed quantity, `boq_line_uid` kept, rate from the BOQ.
+
+Hand calculation before certification: gross 2 × 1,000 = 2,000.00; intra-state GST 18% → CGST 180.00 + SGST 180.00; retention 5% of gross = 100.00; advance recovery 0; TDS 0; other deductions 0; net payable 2,260.00.
+
+| Field | Expected | Application |
+|---|---:|---:|
+| Net payable | 2,260.00 | 2,260.00 |
+| Receipt approved | 900.00 | 900.00 |
+| Received | 900.00 | 900.00 |
+| Outstanding | 1,360.00 | 1,360.00 |
+
+`INV-P9VERIFY-0001` certified by the Project Manager then the Director, then locked. Before the receipt the receivables report outstanding was 2,260.00 and received was 0. `RCPT-P9VERIFY-0001` for 900.00 was recorded by the accountant and approved by the Director (not the recorder). The draft did not change the receivable. After approval the invoice is `partially_paid`, `received_amount` 900.00 equals the approved allocation, and outstanding is 1,360.00. Certification and the receipt posted ₹0 to the project cost ledger.
+
+**Live vendor bill and partial payment (P9VERIFY, 2026-10-04)**
+
+Material request 10 of Cement OPC 53, approved; direct PO `PO-P9VERIFY-0001` quantity 10 at 400.00, GST 18%, vendor P3V Ludhiana Cement Traders (state 03); GRN `GRN-P9VERIFY-0001` accepted 10 into warehouse P9-WH. Vendor bill quantity 4 of the accepted 10.
+
+Three-way match before the bill: ordered 10.0000, accepted 10.0000, previously billed 0.0000, remaining 10.0000. Current bill quantity 4 does not exceed accepted quantity.
+
+Hand calculation before approval: taxable 4 × 400 = 1,600.00; CGST 144.00; SGST 144.00; IGST 0; TDS 0; net payable 1,888.00.
+
+| Field | Expected | Application |
+|---|---:|---:|
+| Vendor bill net | 1,888.00 | 1,888.00 |
+| Payment approved | 700.00 | 700.00 |
+| Paid | 700.00 | 700.00 |
+| Outstanding | 1,188.00 | 1,188.00 |
+
+`VB-P9VERIFY-0001` (vendor invoice P9-VI-1001) approved by the Project Manager then the Director and locked. A second bill with the same vendor invoice number was refused ("already entered as VB-P9VERIFY-0001") and left the bill count at 1. Before the payment, payables outstanding was 1,888.00 and paid was 0. `PAY-P9VERIFY-0001` for 700.00 was recorded by the accountant and approved by the Director. The draft did not reduce the payable. After approval the bill is `partially_paid` and outstanding is 1,188.00. The GRN posted stock, not project cost. The PO-backed bill and the payment posted ₹0 project cost. The PO is fully received, so committed cost stays 0.00.
+
+**Cost and cash after both flows**
+
+Project cost ledger total stayed 28,000.00 before the RA bill, after certification, after the GRN, after vendor-bill approval and after the vendor payment. Client billing, the receipt, the inventory-backed vendor bill and the vendor payment each added ₹0.
+
+Cash flow, FY 2026-27: previous inflow 1,500.00 and outflow 5,000.00. New inflow 1,500.00 + 900.00 = 2,400.00. New outflow 5,000.00 + 700.00 = 5,700.00. Net −3,300.00. The cash-flow report matches all three.
+
+**Dashboards and reports**
+
+Executive dashboard filtered to P9VERIFY: actual cost 28,000.00, budget 1,40,000.00, outstanding receivables 1,360.00, vendor payables 1,188.00. Project overview: billed (gross) 2,000.00, received 900.00, outstanding 1,360.00, budget 1,40,000.00, actual 28,000.00, committed 0.00. Stock value on the overview is 4,000.00 (10 accepted × 400), which is inventory, not a second project cost. Client receivables, vendor payables, cash flow, project cost summary (actual 28,000.00, billed gross 2,000.00, client outstanding 1,360.00) and budget vs actual (1,40,000.00 / 28,000.00 / committed 0.00) reconcile to the same documents.
+
+**Notifications, audit, permissions, log**
+
+Approved client receipt `finance.payment_received` once each to the five users who hold `payments.view` (company admin, director, and the three accountant / cashier accounts). Body names `RCPT-P9VERIFY-0001` and 900.00; the link is `/projects/12/payments/13`. No preference row turns that type off, so the default database channel applied, and nobody received it twice. Invoice certification also notified `payments.view` plus the project manager. Vendor payment has no Phase 9 notification; none was created.
+
+Audit rows exist for the invoice (created, submitted, certified, then partially paid with received amount 0.00 → 900.00), the receipt (draft → approved, approver Verification Director), the vendor bill (approved → partially paid, paid amount 0.00 → 700.00) and the vendor payment. The invoice and payment screens show those labels. Formatted values contain no PAN-shaped text. Bank references used for the live payments are `P9-RCPT-1` and `P9-PAY-1`, not account numbers.
+
+The site engineer still receives a project overview without the financial block, an executive dashboard without receivables, payables and actual cost, and HTTP 403 on the cash-flow report.
+
+`laravel.log` has no exception from certification, the receipt, the vendor bill or the payment. The only new line after the historical queue errors is the closing script calling `AuditValueFormatter::format()`, a method the formatter does not have; the screens use `changes()`. The 48 historical procurement jobs in `failed_jobs` were not retried, deleted or resent. The 41 new notification jobs from this run were processed with `queue:work --stop-when-empty --max-jobs=41`; `jobs` is 0 and `failed_jobs` is still 48.
+
+**Browser (focused recheck, no frontend change)**
+
+1366 px: invoice `INV-P9VERIFY-0001`, client receivables (outstanding 1,360.00), receipt `RCPT-P9VERIFY-0001`, vendor bill `VB-P9VERIFY-0001`, payables (outstanding 1,188.00), cash flow (2,400.00 / 5,700.00 / −3,300.00) and the P9VERIFY overview. 390 px: receivables, payables, `PAY-P9VERIFY-0001` and the project overview. Page-level overflow 0, no `NaN`, no hooked console errors.
+
+**Queue and scheduler (production)**
+
+Notifications implement `ShouldQueue`. Production needs `php artisan queue:work`. No permanent worker was started on this machine. Production also needs the Laravel scheduler (`php artisan schedule:run` from cron, or a managed `php artisan schedule:work`) for `planning:flag-delays` at 06:30 and `inventory:scan-low-stock` at 07:00. Windows Task Scheduler was not changed.
+
+**Deviations from this document**
+
+1. Committed cost is open approved PO taxable value, (ordered − accepted on approved GRNs) × rate, plus work-order subtotal minus posted subcontract cost, floored at 0. GST and freight are excluded. A fully received PO has committed 0 even when it is not fully billed.
+2. Dashboard "billed" is the gross amount (2,000.00 here), not the net payable (2,260.00). Outstanding uses net payable less approved receipts.
+3. The vendor-payables KPI is the vendor kind only. Subcontract and labour payables stay on the payables report.
+4. Email, WhatsApp and push stay shown in preferences and are not delivered.
+5. WAMP `upload_max_filesize` is 2M and `post_max_size` is 8M. Global `php.ini` was not changed.
+6. Forty-eight old procurement notification jobs remain in `failed_jobs` from before the `isset($this->context)` payload guard. They were left as they are.
+7. Verification data for P9VERIFY (BOQ, progress, RA bill, receipt, material request, PO, GRN, warehouse P9-WH, vendor bill and payment) was left in the local database. NORTHBLD Demo and the P3–P8 verification projects were not modified; the vendor and client masters already on the company were used.
+
+**Next:** Phase 9 is complete. No later phase starts without an explicit instruction.
+
+### Post-Phase-9 enhancement: company branding and direct chat (2026-10-04)
+
+This is not a new phase. Sections A–R are unchanged. Phase 0–9 behaviour is unchanged except where the shell, company settings, PDF headers and the notification catalogue now carry this enhancement.
+
+**Company branding**
+
+- Logo and favicon live on `companies.logo_path` (already present) and `companies.favicon_path` (new). There is no branding table.
+- Files are stored on the private uploads disk at `company/{id}/branding/{uuid}.{ext}` with a generated name. SVG is refused. Logo accepts PNG, JPG, JPEG and WEBP. Favicon also accepts ICO when the file starts with the ICO signature. The cap is 2 MB, matching the current WAMP `upload_max_filesize`. The settings screen says so.
+- Only `admin.settings.manage` can upload or remove them (`CompanyPolicy::manageSettings`). A signed-in user in the active company can load the image at `GET /branding/{logo|favicon}`. The response is `Cache-Control: private, no-store` and the URL carries `v={company updated_at}` so a company switch cannot show another company's file from cache. Other private files are not served by this route.
+- The sidebar mark uses the active company's logo and falls back to the orange "B". The BUILDIFY360 wordmark stays. Login has no company context, so it keeps the product mark and `public/favicon.svg`. Inside the app the favicon link follows the active company, or `/favicon.svg` when none is set. Report, invoice, purchase-order and DPR PDFs include the logo when it is a PNG or JPEG (WebP is converted to PNG when GD can). A missing or broken file is omitted rather than shown broken.
+- Changing the logo or favicon is an audited company update. Chat heartbeats are not: `users.last_seen_at` is excluded from the user audit.
+
+**Internal chat**
+
+- Direct messages only, between active members of the same company. One conversation per pair (`conversations.pair_key`). Inactive users cannot be started with and cannot send; existing history stays. A platform super admin is not added to every company's threads. Participation is checked in `ChatService` with HTTP 404, not a policy, because `Gate::before` would otherwise open every thread to a super admin.
+- No `chat.use` permission. Every active member of the current company can chat. That is the smallest design that matches the permission catalogue: chat is not an extra capability beyond membership.
+- Tables: `conversations`, `conversation_participants` (`last_read_message_id`, `viewing_at`), `messages` (soft-deleted with `deleted_at`, still returned as "Message deleted"), `message_attachments`. All InnoDB with foreign keys. Messages are ordered by id. The screen loads the latest 40 and can request older rows.
+- A message needs text (trimmed, tags stripped, at most 8,000 characters) or at least one attachment, and at most 5 files totalling 6 MB so a post stays under the 8 MB `post_max_size`. Allowed types: jpg, jpeg, png, webp, pdf, doc, docx, xls, xlsx, csv, txt, dwg, dxf. Extension, detected MIME and, for images, file signature are checked. Executables and scripts are rejected. Downloads go through `GET /chat/attachments/{id}` and require the user to be a participant. Images and PDF may be shown inline; other types download as an attachment. The checksum is checked before the file is sent.
+- Unread is messages from the other person after `last_read_message_id`. Opening the conversation marks it read. Seeing it in the list does not. Badges sit on the Chat nav item and the top-bar icon.
+- `MessageSent` is a normal Laravel event so a broadcaster can be added later without changing how messages are stored. There is no WebSocket server. The open thread polls every 4 seconds (the request is skipped while the tab is hidden) and the conversation list reloads every 12 seconds. Presence is `POST /chat/heartbeat` every 15 seconds, which sets `last_seen_at`. Online means seen within 60 seconds. A recipient whose `viewing_at` is within the last 20 seconds does not get a notification.
+- `chat.message_received` is one database notification per message id, via the existing queued `GeneralNotification` and the preference catalogue. Turning the database channel off skips the in-app notice and leaves the message. Email and WhatsApp are not sent. Chat rows are not written to the audit log.
+- Reply is on the screen. Edit and delete exist on `ChatService` and the HTTP routes (the sender only; delete sets `deleted_at` and hides text and attachments, and the file stays on disk). The screen does not yet show edit or delete buttons.
+
+**Verification (2026-10-04)**
+
+| Gate | Result |
+|---|---|
+| `php artisan test --parallel --processes=4` | Pass: 522 tests, 6,522 assertions, 0 failed. Phase 9 baseline was 510 / 6,402. |
+| `npm run build` | Pass: exit 0, Vite 8.3.2, 958 modules, 26.26 s. Same chunk-size and `PLUGIN_TIMINGS` warnings as Phase 9. |
+| Migrations | `2026_10_10_100000_add_company_favicon_and_presence`, `2026_10_10_100100_create_chat_tables`. Backup `storage/app/backups/tiwanaerp_pre_branding_chat_20261004_094051.sql`. Rollback of those two steps restored 134 tables and 4,487 rows with no diff, then they were migrated again. The four chat tables are InnoDB. `failed_jobs` stayed 48. |
+
+Live company BRANDCHAT (id 3): Brand Admin, Brand B and Brand C (`brand.admin@`, `brand.b@`, `brand.c@buildify360.test`, password `password`). Tiwana Constructions logo and favicon were unchanged. Replacing the logo and favicon deleted the previous private files. Conversation 1 is the only direct thread. Brand C receives 404 for that conversation and for its attachments. Notifications for the new messages were drained with `queue:work --stop-when-empty --max-jobs` limited to those jobs. No permanent worker was started. Production still needs `php artisan queue:work`. No new scheduler entry.
+
+Browser at 1366 px: branding previews, sidebar logo, Chat badge, conversation, attachment card, role search, and the in-app "New message" notice. At 390 px: conversation list, thread with back button and composer, branding images, page overflow 0. Login keeps the product mark and `/favicon.svg`.
+
+### Push notifications (FCM)
+
+Push uses the existing notification classes. `BaseNotification::via()` adds the FCM channel only when that user's preference for the notification type includes `push`. In-app stays the default. Email and WhatsApp are still not delivered.
+
+- `device_tokens` stores one FCM token per device (`web`, `android`, or `ios`), unique on the token. Registering a token that belonged to someone else moves it to the current user. `POST /devices` and `DELETE /devices` are for the signed-in web session. The same actions are `POST /api/v1/devices` and `DELETE /api/v1/devices` for a Sanctum token.
+- Delivery is Firebase Cloud Messaging HTTP v1. `FCM_PROJECT_ID` and `FCM_CREDENTIALS` (path to the service-account JSON, never committed) are required before anything is sent. Without them the channel does nothing and the queued job does not fail. An `UNREGISTERED` or `NOT_FOUND` response deletes that token.
+- The browser registers from Notification preferences after the user allows notifications, and again on later visits when permission is already granted. The public web keys are `FCM_WEB_API_KEY`, `FCM_WEB_AUTH_DOMAIN`, `FCM_MESSAGING_SENDER_ID`, `FCM_WEB_APP_ID` and `FCM_WEB_VAPID_KEY`. The service worker is `GET /firebase-messaging-sw.js`. The service-account private key is not sent to the browser.
+- Production still needs `php artisan queue:work`, because the notification is queued before FCM is called.

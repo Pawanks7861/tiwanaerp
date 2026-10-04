@@ -20,8 +20,15 @@ class FileTypeGuard
 
     public function isAllowed(UploadedFile $file): bool
     {
+        return $this->accepts($file, config('uploads.allowed'));
+    }
+
+    /**
+     * @param  array<string, list<string>>  $allowed  extension => detected MIME types
+     */
+    public function accepts(UploadedFile $file, array $allowed): bool
+    {
         $extension = strtolower($file->getClientOriginalExtension());
-        $allowed = config('uploads.allowed');
 
         if (! isset($allowed[$extension])) {
             return false;
@@ -33,6 +40,9 @@ class FileTypeGuard
         }
 
         return match ($extension) {
+            'png' => str_starts_with($this->head($file, 8), "\x89PNG\r\n\x1a\n"),
+            'jpg', 'jpeg' => str_starts_with($this->head($file, 3), "\xFF\xD8\xFF"),
+            'webp' => str_starts_with($this->head($file, 4), 'RIFF') && substr($this->head($file, 12), 8, 4) === 'WEBP',
             'dwg' => $this->hasDwgSignature($file),
             'dxf' => $this->looksLikeDxf($file),
             default => true,

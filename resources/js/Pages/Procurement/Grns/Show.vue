@@ -1,5 +1,6 @@
 <script setup>
 import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
+import AuditTrail from '@/Components/Audit/AuditTrail.vue';
 import ApprovalActions from '@/Components/Procurement/ApprovalActions.vue';
 import ProcurementNav from '@/Components/Procurement/ProcurementNav.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
@@ -18,6 +19,7 @@ const props = defineProps({
     items: { type: Array, required: true },
     approval: { type: Object, default: null },
     attachments: { type: Array, required: true },
+    audit: { type: Array, default: () => [] },
     can: { type: Object, required: true },
 });
 
@@ -146,6 +148,9 @@ const statusNote = computed(() => {
                 :can-delete="can.attach"
                 placeholder="Vendor invoice, delivery challan, photos…"
             />
+            <div class="mt-4">
+                <AuditTrail :entries="audit" title="Audit trail" />
+            </div>
         </div>
 
         <ConfirmDialog

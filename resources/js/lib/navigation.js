@@ -35,6 +35,18 @@ export function buildNavigation({ can, isSuperAdmin }) {
                     href: route('approvals.index'),
                     active: route().current('approvals.*'),
                 },
+                can('reports.view') && {
+                    label: 'Reports',
+                    icon: 'document',
+                    href: route('reports.index'),
+                    active: route().current('reports.*'),
+                },
+                {
+                    label: 'Chat',
+                    icon: 'chat',
+                    href: route('chat.index'),
+                    active: route().current('chat.*'),
+                },
             ],
         },
         {
@@ -67,14 +79,22 @@ export function buildNavigation({ can, isSuperAdmin }) {
         },
         {
             title: 'Masters',
-            items: masters
-                .filter((m) => can(m.permission))
-                .map((m) => ({
-                    label: m.label,
-                    icon: m.icon,
-                    href: route('masters.index', m.slug),
-                    active: route().current('masters.*', { master: m.slug }),
-                })),
+            items: [
+                ...masters
+                    .filter((m) => can(m.permission))
+                    .map((m) => ({
+                        label: m.label,
+                        icon: m.icon,
+                        href: route('masters.index', m.slug),
+                        active: route().current('masters.*', { master: m.slug }),
+                    })),
+                can('quality.view') && {
+                    label: 'Quality Checklists',
+                    icon: 'check-circle',
+                    href: route('quality.checklists.index'),
+                    active: route().current('quality.checklists.*'),
+                },
+            ],
         },
         {
             title: 'Administration',
@@ -96,6 +116,12 @@ export function buildNavigation({ can, isSuperAdmin }) {
                     icon: 'cog',
                     href: route('admin.company.edit'),
                     active: route().current('admin.company.*'),
+                },
+                can('admin.audit_logs.view') && {
+                    label: 'Audit Logs',
+                    icon: 'clipboard',
+                    href: route('admin.audit-logs.index'),
+                    active: route().current('admin.audit-logs.*'),
                 },
             ],
         },

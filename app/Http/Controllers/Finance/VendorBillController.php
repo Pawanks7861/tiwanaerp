@@ -7,6 +7,7 @@ use App\Enums\Finance\VendorBillStatus;
 use App\Enums\Finance\VendorBillType;
 use App\Enums\Procurement\PurchaseOrderStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Finance\VendorBill;
@@ -106,6 +107,7 @@ class VendorBillController extends Controller
             ])->all(),
             'approval' => ProcurementPresenter::approval($bill, $user),
             'attachments' => ProcurementPresenter::attachments($bill),
+            'audit' => AuditPresenter::trail([$bill]),
             'can' => $this->abilities($user, $bill),
         ]);
     }

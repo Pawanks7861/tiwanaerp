@@ -43,6 +43,10 @@ return [
         'retention_release' => ['pattern' => 'RTR-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
         'lead' => ['pattern' => 'LEAD-{YYYY}-{SEQ:4}', 'reset' => 'yearly', 'assign_on' => 'create'],
         'quotation' => ['pattern' => 'QTN-{YYYY}-{SEQ:4}', 'reset' => 'yearly', 'assign_on' => 'create'],
+
+        'quality_inspection' => ['pattern' => 'INS-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
+        'ncr' => ['pattern' => 'NCR-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
+        'document' => ['pattern' => 'DOC-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
     ],
 
 ];

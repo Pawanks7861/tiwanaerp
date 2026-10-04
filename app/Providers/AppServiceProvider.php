@@ -5,11 +5,18 @@ namespace App\Providers;
 use App\Events\Approval\ApprovalCompleted;
 use App\Events\Approval\ApprovalRejected;
 use App\Events\Approval\ApprovalRequested;
+use App\Events\Chat\MessageSent;
+use App\Events\Finance\ClientInvoiceCertified;
+use App\Events\Finance\PaymentReceived;
+use App\Events\Planning\TaskAssigned;
 use App\Events\Procurement\GrnApproved;
 use App\Events\Procurement\MaterialRequestSubmitted;
 use App\Events\Procurement\PurchaseOrderApproved;
+use App\Events\Quality\NcrRaised;
 use App\Listeners\PostGrnStock;
 use App\Listeners\SendApprovalNotifications;
+use App\Listeners\SendChatNotification;
+use App\Listeners\SendOperationalNotifications;
 use App\Listeners\SendProcurementNotifications;
 use App\Models\Approval\ApprovalRequest;
 use App\Models\Approval\ApprovalWorkflow;
@@ -32,6 +39,11 @@ use App\Models\Crm\Lead;
 use App\Models\Crm\LeadActivity;
 use App\Models\Crm\Quotation;
 use App\Models\Crm\QuotationItem;
+use App\Models\Documents\Document;
+use App\Models\Documents\DocumentFolder;
+use App\Models\Documents\DocumentVersion;
+use App\Models\Documents\Drawing;
+use App\Models\Documents\DrawingRevision;
 use App\Models\Equipment\Equipment;
 use App\Models\Equipment\EquipmentAssignment;
 use App\Models\Equipment\EquipmentFuelLog;
@@ -48,6 +60,7 @@ use App\Models\Finance\ProjectCostEntry;
 use App\Models\Finance\RetentionRelease;
 use App\Models\Finance\VendorBill;
 use App\Models\Finance\VendorBillItem;
+use App\Models\Inventory\LowStockAlert;
 use App\Models\Inventory\MaterialIssue;
 use App\Models\Inventory\MaterialIssueItem;
 use App\Models\Inventory\MaterialReturn;
@@ -78,6 +91,7 @@ use App\Models\Planning\ProgressEntry;
 use App\Models\Planning\ProjectMilestone;
 use App\Models\Planning\ProjectTask;
 use App\Models\Planning\TaskDependency;
+use App\Models\Planning\TaskOverdueAlert;
 use App\Models\Procurement\BidComparison;
 use App\Models\Procurement\Grn;
 use App\Models\Procurement\GrnItem;
@@ -94,6 +108,12 @@ use App\Models\Procurement\VendorQuotationItem;
 use App\Models\Projects\Project;
 use App\Models\Projects\ProjectUser;
 use App\Models\Projects\Site;
+use App\Models\Quality\Ncr;
+use App\Models\Quality\QualityChecklist;
+use App\Models\Quality\QualityChecklistItem;
+use App\Models\Quality\QualityInspection;
+use App\Models\Quality\QualityInspectionItem;
+use App\Models\Reports\ReportExport;
 use App\Models\SiteExecution\Dpr;
 use App\Models\SiteExecution\DprEquipment;
 use App\Models\SiteExecution\DprItem;
@@ -116,6 +136,8 @@ use App\Policies\BoqPolicy;
 use App\Policies\CompanyPolicy;
 use App\Policies\Crm\LeadPolicy;
 use App\Policies\Crm\QuotationPolicy;
+use App\Policies\Documents\DocumentPolicy;
+use App\Policies\Documents\DrawingPolicy;
 use App\Policies\Equipment\EquipmentAssignmentPolicy;
 use App\Policies\Equipment\EquipmentFuelLogPolicy;
 use App\Policies\Equipment\EquipmentRepairPolicy;
@@ -144,6 +166,9 @@ use App\Policies\ProjectBudgetPolicy;
 use App\Policies\ProjectMilestonePolicy;
 use App\Policies\ProjectPolicy;
 use App\Policies\ProjectTaskPolicy;
+use App\Policies\Quality\NcrPolicy;
+use App\Policies\Quality\QualityChecklistPolicy;
+use App\Policies\Quality\QualityInspectionPolicy;
 use App\Policies\RateAnalysisPolicy;
 use App\Policies\RolePolicy;
 use App\Policies\SiteExecution\DprPolicy;
@@ -152,10 +177,12 @@ use App\Policies\SitePolicy;
 use App\Policies\Subcontract\SubcontractorBillPolicy;
 use App\Policies\Subcontract\WorkOrderPolicy;
 use App\Policies\UserPolicy;
+use App\Support\Reports\DashboardCache;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -169,6 +196,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(CurrentCompany::class);
+        $this->app->scoped(DashboardCache::class);
 
         foreach (MasterPolicy::PERMISSIONS as $prefix) {
             $this->app->singleton(MasterPolicy::containerKey($prefix), fn () => new MasterPolicy($prefix));
@@ -284,6 +312,18 @@ class AppServiceProvider extends ServiceProvider
             'lead_activity' => LeadActivity::class,
             'quotation' => Quotation::class,
             'quotation_item' => QuotationItem::class,
+            'quality_checklist' => QualityChecklist::class,
+            'quality_checklist_item' => QualityChecklistItem::class,
+            'quality_inspection' => QualityInspection::class,
+            'quality_inspection_item' => QualityInspectionItem::class,
+            'ncr' => Ncr::class,
+            'drawing' => Drawing::class,
+            'drawing_revision' => DrawingRevision::class,
+            'document_folder' => DocumentFolder::class,
+            'document' => Document::class,
+            'document_version' => DocumentVersion::class,
+            'task_overdue_alert' => TaskOverdueAlert::class,
+            'report_export' => ReportExport::class,
         ]);
 
         // Platform super admin bypasses permission checks (never tenant isolation).
@@ -329,6 +369,11 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(RetentionRelease::class, RetentionReleasePolicy::class);
         Gate::policy(Lead::class, LeadPolicy::class);
         Gate::policy(Quotation::class, QuotationPolicy::class);
+        Gate::policy(QualityChecklist::class, QualityChecklistPolicy::class);
+        Gate::policy(QualityInspection::class, QualityInspectionPolicy::class);
+        Gate::policy(Ncr::class, NcrPolicy::class);
+        Gate::policy(Drawing::class, DrawingPolicy::class);
+        Gate::policy(Document::class, DocumentPolicy::class);
         foreach (MasterPolicy::PERMISSIONS as $model => $prefix) {
             Gate::policy($model, MasterPolicy::containerKey($prefix));
         }
@@ -340,6 +385,28 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(PurchaseOrderApproved::class, [SendProcurementNotifications::class, 'handlePurchaseOrderApproved']);
         Event::listen(GrnApproved::class, [SendProcurementNotifications::class, 'handleGrnApproved']);
         Event::listen(GrnApproved::class, [PostGrnStock::class, 'handle']);
+        Event::listen(TaskAssigned::class, [SendOperationalNotifications::class, 'handleTaskAssigned']);
+        Event::listen(ClientInvoiceCertified::class, [SendOperationalNotifications::class, 'handleClientInvoiceCertified']);
+        Event::listen(PaymentReceived::class, [SendOperationalNotifications::class, 'handlePaymentReceived']);
+        Event::listen(NcrRaised::class, [SendOperationalNotifications::class, 'handleNcrRaised']);
+        Event::listen(MessageSent::class, [SendChatNotification::class, 'handle']);
+
+        // Dashboard KPIs are cached per filter set; any write to their sources invalidates the company's entries.
+        $bump = fn (Model $model) => app(DashboardCache::class)->bump((int) ($model->getAttributes()['company_id'] ?? 0));
+        foreach ([
+            Project::class, ProjectBudget::class, ProjectCostEntry::class, StockTransaction::class, LowStockAlert::class,
+            ProgressEntry::class, ProjectTask::class, ClientInvoice::class, Payment::class, RetentionRelease::class,
+            VendorBill::class, SubcontractorBill::class, LabourPayment::class, PurchaseOrder::class, WorkOrder::class,
+            Grn::class, Expense::class, PettyCashTransaction::class, Ncr::class, QualityInspection::class,
+        ] as $model) {
+            $model::saved($bump);
+            $model::deleted($bump);
+        }
+        Event::listen(TransactionRolledBack::class, function (TransactionRolledBack $event) {
+            if ($event->connection->transactionLevel() === 0) {
+                app(DashboardCache::class)->forgetPending();
+            }
+        });
 
         RateLimiter::for('api-login', fn (Request $request) => Limit::perMinute(5)->by(
             strtolower((string) $request->input('email')).'|'.$request->ip()

@@ -7,6 +7,7 @@ use App\Enums\Finance\ClientInvoiceStatus;
 use App\Enums\Finance\PaymentPartyType;
 use App\Enums\Finance\PaymentStatus;
 use App\Enums\Procurement\TaxType;
+use App\Events\Finance\ClientInvoiceCertified;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
 use App\Models\Core\Company;
@@ -200,6 +201,8 @@ class ClientInvoiceService
                 'certified_at' => now(),
             ])->save();
             $invoice->setRawAttributes($locked->getAttributes(), true);
+            $invoiceId = $locked->id;
+            DB::afterCommit(fn () => ClientInvoiceCertified::dispatch(ClientInvoice::query()->findOrFail($invoiceId)));
         });
     }
 

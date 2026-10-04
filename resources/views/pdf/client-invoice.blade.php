@@ -33,6 +33,7 @@
     <table>
         <tr>
             <td style="width: 60%; vertical-align: top;">
+                @include('pdf.partials.logo')
                 <h1>{{ $company->legal_name ?: $company->name }}</h1>
                 <div class="muted" style="margin-top: 3px; line-height: 1.4;">
                     {!! nl2br(e($company->address)) !!}@if ($company->city)<br>{{ $company->city }}@if ($company->pincode) - {{ $company->pincode }}@endif @endif

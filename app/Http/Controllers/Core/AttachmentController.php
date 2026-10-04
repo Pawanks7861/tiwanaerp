@@ -23,6 +23,7 @@ class AttachmentController extends Controller
         'dpr',
         'labour', 'equipment', 'work_order', 'subcontractor_bill', 'equipment_repair',
         'expense', 'client_invoice', 'vendor_bill', 'payment', 'retention_release', 'quotation',
+        'quality_inspection', 'ncr',
     ];
 
     public function __construct(private readonly AttachmentService $attachments) {}

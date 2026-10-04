@@ -2,9 +2,11 @@
 
 namespace App\Services\Finance;
 
+use App\Enums\Finance\PaymentDirection;
 use App\Enums\Finance\PaymentMode;
 use App\Enums\Finance\PaymentPartyType;
 use App\Enums\Finance\PaymentStatus;
+use App\Events\Finance\PaymentReceived;
 use App\Models\Crm\Client;
 use App\Models\Finance\Payment;
 use App\Models\Finance\PaymentAllocation;
@@ -124,6 +126,10 @@ class PaymentService
                 $this->payables->refresh($payable);
             }
             $payment->setRawAttributes($locked->getAttributes(), true);
+            if ($locked->direction === PaymentDirection::Receipt) {
+                $paymentId = $locked->id;
+                DB::afterCommit(fn () => PaymentReceived::dispatch(Payment::query()->findOrFail($paymentId)));
+            }
         });
     }
 

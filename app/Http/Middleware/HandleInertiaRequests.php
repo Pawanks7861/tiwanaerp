@@ -4,6 +4,8 @@ namespace App\Http\Middleware;
 
 use App\Models\Projects\Project;
 use App\Models\User;
+use App\Services\Chat\ChatPresenter;
+use App\Services\Notifications\FcmClient;
 use App\Support\Permissions\PermissionCatalog;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\Request;
@@ -42,6 +44,12 @@ class HandleInertiaRequests extends Middleware
             'company' => fn () => $this->company($request->user()),
             'projectSwitcher' => fn () => $this->projects($request->user()),
             'unreadNotifications' => fn () => $this->unreadCount($request->user()),
+            'chatUnread' => fn () => $this->chatUnread($request->user()),
+            'branding' => fn () => $this->branding(),
+            'fcm' => fn () => [
+                'configured' => app(FcmClient::class)->configured(),
+                'web' => app(FcmClient::class)->webConfig(),
+            ],
             'flash' => fn () => [
                 'success' => $request->session()->get('success'),
                 'error' => $request->session()->get('error'),
@@ -117,6 +125,42 @@ class HandleInertiaRequests extends Middleware
             return 0;
         }
 
+        return $this->scopedUnread($user, $companyId);
+    }
+
+    private function chatUnread(?User $user): int
+    {
+        if ($user === null || ! app(CurrentCompany::class)->has()) {
+            return 0;
+        }
+
+        return app(ChatPresenter::class)->unreadTotal($user);
+    }
+
+    /**
+     * @return array{logo_url: ?string, favicon_url: ?string}
+     */
+    private function branding(): array
+    {
+        $company = app(CurrentCompany::class)->get();
+        if ($company === null) {
+            return ['logo_url' => null, 'favicon_url' => null];
+        }
+
+        $version = $company->updated_at?->getTimestamp();
+
+        return [
+            'logo_url' => $company->logo_path
+                ? route('company.branding.show', ['kind' => 'logo', 'v' => $version])
+                : null,
+            'favicon_url' => $company->favicon_path
+                ? route('company.branding.show', ['kind' => 'favicon', 'v' => $version])
+                : null,
+        ];
+    }
+
+    private function scopedUnread(User $user, int $companyId): int
+    {
         return DatabaseNotification::query()
             ->where('notifiable_type', $user->getMorphClass())
             ->where('notifiable_id', $user->id)

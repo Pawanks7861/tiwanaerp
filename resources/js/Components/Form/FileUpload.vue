@@ -9,6 +9,7 @@ import { ref } from 'vue';
 const props = defineProps({
     accept: { type: String, default: '.pdf,.jpg,.jpeg,.png,.webp,.xls,.xlsx,.csv,.doc,.docx,.dwg,.dxf' },
     maxMb: { type: Number, default: 25 },
+    hint: { type: String, default: 'PDF, images, Excel, Word or drawings' },
     error: { type: String, default: null },
     disabled: { type: Boolean, default: false },
 });
@@ -56,7 +57,7 @@ function onDrop(event) {
         >
             <Icon name="paperclip" class="text-slate-400" />
             <span class="text-sm font-medium text-slate-700">Choose a file or drop it here</span>
-            <span class="text-xs text-slate-500">PDF, images, Excel, Word or drawings · up to {{ maxMb }} MB</span>
+            <span class="text-xs text-slate-500">{{ hint }} · up to {{ maxMb }} MB</span>
         </button>
         <input ref="input" type="file" class="hidden" :accept="accept" @change="pick($event.target.files)" />
         <p v-if="localError || error" class="mt-1 text-xs text-red-600">{{ localError || error }}</p>

@@ -11,6 +11,9 @@ use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
 use App\Models\Crm\Client;
+use App\Models\Documents\Document;
+use App\Models\Documents\DocumentFolder;
+use App\Models\Documents\Drawing;
 use App\Models\Equipment\EquipmentAssignment;
 use App\Models\Equipment\EquipmentFuelLog;
 use App\Models\Equipment\EquipmentRepair;
@@ -35,6 +38,8 @@ use App\Models\Procurement\Grn;
 use App\Models\Procurement\MaterialRequest;
 use App\Models\Procurement\PurchaseOrder;
 use App\Models\Procurement\Rfq;
+use App\Models\Quality\Ncr;
+use App\Models\Quality\QualityInspection;
 use App\Models\SiteExecution\Dpr;
 use App\Models\SiteExecution\SiteDiary;
 use App\Models\Subcontract\SubcontractorBill;
@@ -397,5 +402,45 @@ class Project extends Model
     public function retentionReleases(): HasMany
     {
         return $this->hasMany(RetentionRelease::class);
+    }
+
+    /**
+     * @return HasMany<QualityInspection, $this>
+     */
+    public function qualityInspections(): HasMany
+    {
+        return $this->hasMany(QualityInspection::class);
+    }
+
+    /**
+     * @return HasMany<Ncr, $this>
+     */
+    public function ncrs(): HasMany
+    {
+        return $this->hasMany(Ncr::class);
+    }
+
+    /**
+     * @return HasMany<Drawing, $this>
+     */
+    public function drawings(): HasMany
+    {
+        return $this->hasMany(Drawing::class);
+    }
+
+    /**
+     * @return HasMany<DocumentFolder, $this>
+     */
+    public function documentFolders(): HasMany
+    {
+        return $this->hasMany(DocumentFolder::class);
+    }
+
+    /**
+     * @return HasMany<Document, $this>
+     */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(Document::class);
     }
 }
