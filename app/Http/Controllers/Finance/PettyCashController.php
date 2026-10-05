@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Finance;
 
+use App\Enums\Finance\PettyCashTxnType;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Projects\ProjectHeader;
+use App\Integrations\Tally\TallyStatusPresenter;
 use App\Models\Finance\PettyCashAccount;
 use App\Models\Finance\PettyCashTransaction;
 use App\Models\Projects\Project;
@@ -77,6 +79,7 @@ class PettyCashController extends Controller
                 'expense' => $t->expense ? ['id' => $t->expense->id, 'number' => $t->expense->expense_number] : null,
                 'remarks' => $t->remarks,
                 'by' => $t->creator?->name,
+                'tally' => $t->type === PettyCashTxnType::ExpenseOut ? null : app(TallyStatusPresenter::class)->for($t),
             ];
         })->reverse()->values();
 

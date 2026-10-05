@@ -1778,3 +1778,41 @@ Push uses the existing notification classes. `BaseNotification::via()` adds the 
 - `POST /company/switch` and `/platform/companies` return 404 while the flag is off, including for a platform super admin. The super-admin flag on the user is not removed. Company admins still manage users, roles and project access inside the active company. Creating a user still attaches that person to the current company and does not ask which company. There is no company field on the user form.
 - Chat, reports and the dashboard keep filtering by the active company. Audit rows are unchanged, and the audit screen has no company selector. Login stays email and password, with no company step.
 - The test suite sets `FEATURE_MULTI_COMPANY=true` so the existing switch, API header and platform checks still run. Tests that cover the hidden UI set the flag to false.
+
+### TallyPrime Integration
+
+TallyPrime is an external copy of finalized accounting events. The ERP stays the operational source of truth. Sync does not create project cost, stock, invoices, bills, or payments.
+
+| Domain | Source of truth |
+|---|---|
+| BOQ | ERP |
+| Procurement | ERP |
+| GRN | ERP |
+| Inventory | ERP |
+| Project cost | ERP |
+| Progress | ERP |
+| Client invoice | ERP |
+| Vendor bill | ERP |
+| Payment approval | ERP |
+| Tally voucher | Tally copy of a finalized ERP accounting event |
+| Financial statements in Tally | Tally |
+
+**Transport.** `TallyXmlClient` posts XML over HTTP to the company's configured endpoint (`protocol`, host, port). Nothing is hard-coded to `127.0.0.1:9000`. Local development may suggest those values on an unsaved form; production leaves the host empty until it is saved. `TallyJsonClient` is reserved for TallyPrime 7.0+ and refuses to send. Direct mode is the ERP calling a Tally HTTP port on localhost, a LAN, or a VPN. Connector mode uses the same XML client pointed at a private connector host, so a desktop connector can replace the host later. This version does not ship that desktop app. Do not publish port 9000 on the internet. The settings screen rejects a public IP.
+
+**Settings.** One `tally_connections` row per company. Fields cover enabled, transport, host, port, protocol, Tally company name, timeout, auto sync, sync of approved transactions, dry run, and optional project cost centres. Test Connection checks reachability, a parseable Tally body, and that the named company is loaded. Messages are Connected, Tally not reachable, Wrong port, Company not loaded, Company name mismatch, Invalid response, and Timeout. HTTP 200 with an import error is a failure. Connection checks are not audited. Settings changes are.
+
+**Supported documents (version 1).** Certified client RA invoices (Sales), approved client receipts (Receipt), approved vendor bills (Purchase), approved vendor payments (Payment), approved expenses, certified subcontractor bills (Journal), approved subcontract payments, approved labour payment batches (one Journal, not attendance rows), and petty-cash funding or return. Drafts and rejected documents are not eligible. An approved GRN is not a voucher; the vendor bill is the accounting event. `project_cost_ledger` is not exported. Stock quantities, issues, transfers, and site returns are not exported.
+
+**Mapping.** System ledgers (sales, expense by cost head, GST output and input, retention receivable and payable, TDS receivable and payable, advances, petty cash, cash, bank, labour, subcontract, equipment) and party ledgers (client under Sundry Debtors, vendor and subcontractor under Sundry Creditors) are stored in `tally_ledger_mappings`. A missing mapping sets Needs Mapping and does not post a voucher. Master sync creates a ledger only when the mapping allows it and the name is not already in use. A similar name without a mapping is a conflict. The integration does not create `ABC Ltd 1`. Optional `tally_cost_centre_mappings` link a project to a Tally cost centre when that setting is on.
+
+**Amounts.** Vouchers use the stored certified or approved figures. GST is not recalculated. TDS, retention, and advance recovery use their own ledgers. Narration is `Imported from Tiwana ERP | Project: {code} | ERP Ref: ERP:{type}:{id}`.
+
+**Idempotency and changes.** One sync row per company, source, and action. A second sync of an unchanged document does not post again. If a previously synced document's accounting payload changes, the status becomes Conflict with "Previously synced document has changed" and Tally is not overwritten. Cancellation of a synced payment or reversal of a synced expense queues a separate cancel action.
+
+**Retry and queue.** Approval and certification commit even when Tally is closed. The listener queues `SyncTallyTransaction` after commit, and only when the company has enabled auto sync of approved transactions. The job tries up to 3 times. On the sync queue driver used by tests it records Pending or Failed and does not throw, so the HTTP request still succeeds. A real deployment needs `php artisan queue:work`. Manual retry is available to `tally.retry`. Bulk sync queues at most 50 documents. Dry run stores the payload and does not call Tally.
+
+**History and reconciliation.** Sync history lists date, ERP reference, project, type, voucher type, amount, status, Tally reference, and error. The detail page shows ledgers and amounts. The raw response is visible only with `tally.manage`. Reconciliation compares local sync acknowledgements (Matched, ERP only, Tally conflict, Failed, Needs review). It does not pull a general ledger.
+
+**Permissions.** `tally.view`, `tally.manage`, `tally.sync`, `tally.retry`, `tally.mapping`. Company Admin has all of them through `*`. Accountant has view, sync, retry, and mapping. Project roles do not. Settings, mapping, manual sync, retry, and reversal requests are audited.
+
+**Production.** Tally must be running, the company loaded, and the endpoint reachable only on a private network. The queue worker must be running or vouchers stay pending. Inventory sync is a later design, not part of this version.

@@ -117,6 +117,12 @@ export function buildNavigation({ can, isSuperAdmin, multiCompany = false }) {
                     href: route('admin.company.edit'),
                     active: route().current('admin.company.*'),
                 },
+                can('tally.view') && {
+                    label: 'TallyPrime',
+                    icon: 'banknotes',
+                    href: route('integrations.tally.edit'),
+                    active: route().current('integrations.tally.*'),
+                },
                 can('admin.audit_logs.view') && {
                     label: 'Audit Logs',
                     icon: 'clipboard',

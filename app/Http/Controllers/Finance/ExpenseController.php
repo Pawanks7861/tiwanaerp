@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Finance;
 use App\Enums\Finance\ExpenseStatus;
 use App\Enums\Finance\PaymentMode;
 use App\Http\Controllers\Controller;
+use App\Integrations\Tally\TallyStatusPresenter;
 use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
@@ -95,6 +96,7 @@ class ExpenseController extends Controller
             'attachments' => ProcurementPresenter::attachments($expense),
             'audit' => AuditPresenter::trail([$expense]),
             'can' => $this->abilities($user, $expense),
+            'tally' => app(TallyStatusPresenter::class)->for($expense),
             'today' => now()->toDateString(),
         ]);
     }

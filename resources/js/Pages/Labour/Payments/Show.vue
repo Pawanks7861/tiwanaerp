@@ -2,6 +2,7 @@
 import DecimalInput from '@/Components/Form/DecimalInput.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import ReasonDialog from '@/Components/Inventory/ReasonDialog.vue';
+import TallyStatus from '@/Components/Integrations/TallyStatus.vue';
 import LabourNav from '@/Components/Labour/LabourNav.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
@@ -23,6 +24,7 @@ const props = defineProps({
     overlaps: { type: Array, required: true },
     today: { type: String, required: true },
     can: { type: Object, required: true },
+    tally: { type: Object, default: null },
 });
 
 const page = usePage();
@@ -85,6 +87,7 @@ const showDays = ref(false);
 <template>
     <ProjectLayout :project="project" active="labour" :title="payment.payment_number">
         <LabourNav :project-id="project.id" active="payments" />
+        <TallyStatus :tally="tally" class="mb-4" />
         <div class="space-y-4">
             <AppCard :padded="false">
                 <div class="flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-start lg:justify-between">

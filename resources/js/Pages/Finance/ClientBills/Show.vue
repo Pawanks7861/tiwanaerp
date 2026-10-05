@@ -1,5 +1,6 @@
 <script setup>
 import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
+import TallyStatus from '@/Components/Integrations/TallyStatus.vue';
 import AuditTrail from '@/Components/Audit/AuditTrail.vue';
 import FinanceNav from '@/Components/Finance/FinanceNav.vue';
 import ApprovalActions from '@/Components/Procurement/ApprovalActions.vue';
@@ -22,6 +23,7 @@ const props = defineProps({
     attachments: { type: Array, required: true },
     audit: { type: Array, default: () => [] },
     can: { type: Object, required: true },
+    tally: { type: Object, default: null },
 });
 
 const { can: canDo } = usePermissions();
@@ -60,6 +62,7 @@ const statusNote = computed(() => {
 <template>
     <ProjectLayout :project="project" active="finance" :title="bill.display_number">
         <FinanceNav :project-id="project.id" active="ra-bills" />
+        <TallyStatus :tally="tally" class="mb-4" />
         <div class="space-y-4">
             <AppCard :padded="false">
                 <div class="flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-start lg:justify-between">

@@ -99,6 +99,7 @@ final class DefaultRoles
                     'expenses.*', 'petty_cash.*', 'billing.view', 'vendor_bills.*', 'payments.view', 'payments.record',
                     'subcontract.view', 'labour.view', 'labour.manage_payments', 'equipment.view', 'purchase.view', 'grn.view',
                     'reports.*', 'inventory.view', 'inventory.view_valuation',
+                    'tally.view', 'tally.sync', 'tally.retry', 'tally.mapping',
                     'masters.vendors.view', 'masters.subcontractors.view', 'masters.expense_categories.*',
                     'masters.tax_rates.*', 'crm.clients.*',
                 ],

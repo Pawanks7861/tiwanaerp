@@ -84,6 +84,10 @@ function saveAccount() {
                         <div class="text-sm">{{ row.type_label }}</div>
                         <Link v-if="row.expense" :href="route('projects.expenses.show', [project.id, row.expense.id])" class="font-mono text-xs text-brand-700 hover:underline">{{ row.expense.number }}</Link>
                         <div v-if="row.remarks" class="text-xs text-slate-500">{{ row.remarks }}</div>
+                        <div v-if="row.tally" class="mt-1 flex flex-wrap items-center gap-2">
+                            <StatusBadge :status="row.tally.status" :label="`Tally: ${row.tally.status_label}`" />
+                            <Link v-if="row.tally.can_preview" :href="row.tally.preview_url" class="text-xs text-brand-700">Preview</Link>
+                        </div>
                     </template>
                     <template #cell-in="{ value }"><span class="text-emerald-700 tabular">{{ value ? formatMoney(value) : '' }}</span></template>
                     <template #cell-out="{ value }"><span class="text-red-700 tabular">{{ value ? formatMoney(value) : '' }}</span></template>

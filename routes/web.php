@@ -35,6 +35,10 @@ use App\Http\Controllers\Finance\PaymentController;
 use App\Http\Controllers\Finance\PettyCashController;
 use App\Http\Controllers\Finance\RetentionController;
 use App\Http\Controllers\Finance\VendorBillController;
+use App\Http\Controllers\Integrations\TallyDocumentController;
+use App\Http\Controllers\Integrations\TallyHistoryController;
+use App\Http\Controllers\Integrations\TallyMappingController;
+use App\Http\Controllers\Integrations\TallySettingsController;
 use App\Http\Controllers\Inventory\InventoryController;
 use App\Http\Controllers\Inventory\MaterialIssueController;
 use App\Http\Controllers\Inventory\MaterialReturnController;
@@ -635,6 +639,24 @@ Route::middleware(['auth', 'company'])->group(function () {
     Route::put('/notifications/preferences', [NotificationPreferenceController::class, 'update'])->name('notifications.preferences.update');
     Route::post('/devices', [DeviceTokenController::class, 'store'])->middleware('throttle:30,1')->name('devices.store');
     Route::delete('/devices', [DeviceTokenController::class, 'destroy'])->name('devices.destroy');
+
+    Route::prefix('/integrations/tally')->name('integrations.tally.')->group(function () {
+        Route::get('/', [TallySettingsController::class, 'edit'])->name('edit');
+        Route::put('/', [TallySettingsController::class, 'update'])->name('update');
+        Route::post('/test', [TallySettingsController::class, 'test'])->name('test');
+        Route::post('/masters', [TallySettingsController::class, 'syncMasters'])->name('masters');
+        Route::post('/pending', [TallySettingsController::class, 'syncPending'])->name('pending');
+        Route::get('/mappings', [TallyMappingController::class, 'edit'])->name('mappings');
+        Route::put('/mappings', [TallyMappingController::class, 'updateSystems'])->name('mappings.update');
+        Route::post('/mappings/parties', [TallyMappingController::class, 'storeParty'])->name('mappings.parties');
+        Route::post('/mappings/cost-centres', [TallyMappingController::class, 'storeCostCentre'])->name('mappings.cost-centres');
+        Route::get('/history', [TallyHistoryController::class, 'index'])->name('history');
+        Route::get('/history/{record}', [TallyHistoryController::class, 'show'])->name('history.show');
+        Route::post('/history/{record}/retry', [TallyHistoryController::class, 'retry'])->name('history.retry');
+        Route::get('/reconciliation', [TallyHistoryController::class, 'reconciliation'])->name('reconciliation');
+        Route::get('/documents/{type}/{id}/preview', [TallyDocumentController::class, 'preview'])->where('type', '[a-z_]+')->name('documents.preview');
+        Route::post('/documents/{type}/{id}/sync', [TallyDocumentController::class, 'sync'])->where('type', '[a-z_]+')->name('documents.sync');
+    });
 
     // Company administration
     Route::prefix('/admin')->name('admin.')->group(function () {

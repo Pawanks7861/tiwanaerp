@@ -3,6 +3,7 @@ import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
 import DecimalInput from '@/Components/Form/DecimalInput.vue';
 import ReasonDialog from '@/Components/Inventory/ReasonDialog.vue';
 import ApprovalActions from '@/Components/Procurement/ApprovalActions.vue';
+import TallyStatus from '@/Components/Integrations/TallyStatus.vue';
 import SubcontractNav from '@/Components/Subcontract/SubcontractNav.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
@@ -21,6 +22,7 @@ const props = defineProps({
     approval: { type: Object, default: null },
     attachments: { type: Array, required: true },
     can: { type: Object, required: true },
+    tally: { type: Object, default: null },
 });
 
 const page = usePage();
@@ -74,6 +76,7 @@ const statusNote = computed(() => {
 <template>
     <ProjectLayout :project="project" active="subcontract" :title="bill.bill_number">
         <SubcontractNav :project-id="project.id" active="bills" />
+        <TallyStatus :tally="tally" class="mb-4" />
         <div class="space-y-4">
             <AppCard :padded="false">
                 <div class="flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-start lg:justify-between">

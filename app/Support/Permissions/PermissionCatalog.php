@@ -75,6 +75,7 @@ final class PermissionCatalog
             'admin.workflows' => ['label' => 'Approval Workflows', 'group' => 'Administration', 'actions' => ['view', 'manage']],
             'admin.settings' => ['label' => 'Company Settings', 'group' => 'Administration', 'actions' => ['view', 'manage']],
             'admin.audit_logs' => ['label' => 'Audit Logs', 'group' => 'Administration', 'actions' => ['view']],
+            'tally' => ['label' => 'TallyPrime', 'group' => 'Administration', 'actions' => ['view', 'manage', 'sync', 'retry', 'mapping']],
         ];
     }
 

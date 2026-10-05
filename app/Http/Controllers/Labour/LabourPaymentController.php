@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Labour;
 
 use App\Enums\Labour\LabourPaymentStatus;
 use App\Http\Controllers\Controller;
+use App\Integrations\Tally\TallyStatusPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Labour\LabourAttendance;
 use App\Models\Labour\LabourPayment;
@@ -126,6 +127,7 @@ class LabourPaymentController extends Controller
             ])->all(),
             'today' => now()->toDateString(),
             'can' => $this->abilities($user, $payment),
+            'tally' => app(TallyStatusPresenter::class)->for($payment),
         ]);
     }
 

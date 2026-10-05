@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Finance;
 use App\Enums\Finance\ClientInvoiceStatus;
 use App\Enums\IndianState;
 use App\Http\Controllers\Controller;
+use App\Integrations\Tally\TallyStatusPresenter;
 use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
@@ -98,6 +99,7 @@ class ClientInvoiceController extends Controller
             'attachments' => ProcurementPresenter::attachments($invoice),
             'audit' => AuditPresenter::trail([$invoice]),
             'can' => $this->abilities($user, $invoice),
+            'tally' => app(TallyStatusPresenter::class)->for($invoice),
         ]);
     }
 

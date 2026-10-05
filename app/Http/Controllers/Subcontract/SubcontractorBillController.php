@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Subcontract;
 use App\Enums\Subcontract\SubcontractorBillStatus;
 use App\Enums\Subcontract\WorkOrderStatus;
 use App\Http\Controllers\Controller;
+use App\Integrations\Tally\TallyStatusPresenter;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Projects\Project;
@@ -101,6 +102,7 @@ class SubcontractorBillController extends Controller
             'approval' => ProcurementPresenter::approval($bill, $user),
             'attachments' => ProcurementPresenter::attachments($bill),
             'can' => $this->abilities($user, $bill),
+            'tally' => app(TallyStatusPresenter::class)->for($bill),
         ]);
     }
 
