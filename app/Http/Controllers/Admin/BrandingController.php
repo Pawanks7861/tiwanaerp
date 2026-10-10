@@ -61,11 +61,13 @@ class BrandingController extends Controller
         $company = $this->tenancy->require();
         Gate::authorize('manageSettings', $company);
 
+        $maxKb = $kind === 'logo' ? (int) config('uploads.logo_max_kb') : (int) config('uploads.favicon_max_kb');
+        $label = max(1, (int) round($maxKb / 1024));
         $request->validate([
-            'file' => ['required', 'file', 'max:'.CompanyBranding::MAX_KB],
+            'file' => ['required', 'file', 'max:'.$maxKb],
         ], [
-            'file.max' => 'The file must be 2 MB or smaller.',
-            'file.uploaded' => 'The file is larger than the server limit of 2 MB.',
+            'file.max' => "The file must be {$label} MB or smaller.",
+            'file.uploaded' => "The file is larger than the server limit of {$label} MB.",
         ]);
 
         if ($kind === 'logo') {

@@ -1,4 +1,5 @@
 <script setup>
+import UniversalFileViewer from '@/Components/Files/UniversalFileViewer.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import Icon from '@/Components/UI/Icon.vue';
 import { formatDateTime } from '@/lib/format';
@@ -20,6 +21,7 @@ const props = defineProps({
 
 const MAX_EDGE = 1920;
 const caption = ref('');
+const viewing = ref(null);
 const queue = reactive([]);
 const busy = ref(false);
 const camera = ref(null);
@@ -187,9 +189,9 @@ function remove(photo) {
 
         <ul v-if="photos.length" class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             <li v-for="photo in photos" :key="photo.id" class="overflow-hidden rounded-lg border border-line bg-white">
-                <a :href="photo.url" target="_blank" rel="noopener" class="block aspect-[4/3] bg-slate-100">
+                <button type="button" class="block aspect-[4/3] w-full bg-slate-100" @click="viewing = photo">
                     <img :src="photo.thumb_url" :alt="photo.caption || 'Site photo'" loading="lazy" class="h-full w-full object-cover" />
-                </a>
+                </button>
                 <div class="flex items-start justify-between gap-1 p-2">
                     <div class="min-w-0 text-xs">
                         <p class="truncate font-medium text-slate-800">{{ photo.caption || 'No caption' }}</p>
@@ -203,5 +205,12 @@ function remove(photo) {
             </li>
         </ul>
         <p v-else-if="!canEdit" class="text-sm text-slate-500">No photos.</p>
+        <UniversalFileViewer
+            :show="!!viewing"
+            source="site_photo"
+            :file-id="viewing?.id ?? null"
+            :gallery="photos.map((photo) => ({ source: 'site_photo', id: photo.id }))"
+            @close="viewing = null"
+        />
     </div>
 </template>

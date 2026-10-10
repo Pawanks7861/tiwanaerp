@@ -1,6 +1,8 @@
 <script setup>
+import UniversalFileViewer from '@/Components/Files/UniversalFileViewer.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import Icon from '@/Components/UI/Icon.vue';
+import LargeFileUploader from '@/Components/Uploads/LargeFileUploader.vue';
 import { initials } from '@/lib/format';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
@@ -19,11 +21,13 @@ const hasMore = ref(props.active?.page?.has_more ?? false);
 const query = ref('');
 const people = ref([]);
 const body = ref('');
-const files = ref([]);
+const uploadIds = ref([]);
+const uploaderKey = ref(0);
 const replyTo = ref(null);
 const error = ref('');
 const sending = ref(false);
-const fileInput = ref(null);
+const viewing = ref(null);
+const attachmentGallery = computed(() => messages.value.flatMap((message) => (message.attachments ?? []).map((file) => ({ source: 'chat', id: file.id }))));
 const scroller = ref(null);
 
 watch(() => props.conversations, (rows) => {
@@ -65,18 +69,14 @@ async function openWith(userId) {
     router.visit(response.data.url);
 }
 
-function onFiles(listIn) {
-    error.value = '';
-    const next = [...files.value, ...Array.from(listIn ?? [])].slice(0, 5);
-    const tooBig = next.find((file) => file.size > 2 * 1024 * 1024);
-    if (tooBig) {
-        error.value = 'Each file must be 2 MB or smaller.';
-        return;
+function onUploaded(file) {
+    if (!uploadIds.value.includes(file.id) && uploadIds.value.length < 5) {
+        uploadIds.value = [...uploadIds.value, file.id];
     }
-    files.value = next;
-    if (fileInput.value) {
-        fileInput.value.value = '';
-    }
+}
+
+function onRemoved(file) {
+    uploadIds.value = uploadIds.value.filter((id) => id !== file.id);
 }
 
 async function send() {
@@ -90,12 +90,13 @@ async function send() {
     if (replyTo.value) {
         data.append('reply_to_message_id', replyTo.value.id);
     }
-    files.value.forEach((file) => data.append('files[]', file));
+    uploadIds.value.forEach((id) => data.append('upload_ids[]', id));
     try {
         const response = await window.axios.post(route('chat.messages.store', props.active.id), data);
         messages.value = [...messages.value, response.data.message];
         body.value = '';
-        files.value = [];
+        uploadIds.value = [];
+        uploaderKey.value += 1;
         replyTo.value = null;
         router.reload({ only: ['conversations'], preserveState: true, preserveScroll: true });
     } catch (e) {
@@ -211,10 +212,10 @@ onBeforeUnmount(() => {
                                 <p v-if="message.deleted" class="italic opacity-80">Message deleted</p>
                                 <p v-else-if="message.body" class="whitespace-pre-wrap break-words">{{ message.body }}</p>
                                 <div v-if="message.attachments?.length" class="mt-1 space-y-1">
-                                    <a v-for="file in message.attachments" :key="file.id" :href="file.url" class="block rounded-lg bg-black/10 p-1" target="_blank" rel="noopener">
+                                    <button v-for="file in message.attachments" :key="file.id" type="button" class="block w-full rounded-lg bg-black/10 p-1 text-left" @click="viewing = file">
                                         <img v-if="file.image" :src="`${file.url}?inline=1`" :alt="file.name" class="max-h-40 rounded object-contain" />
                                         <span v-else class="block px-1 text-xs">{{ file.name }} · {{ size(file.size) }}</span>
-                                    </a>
+                                    </button>
                                 </div>
                                 <p class="mt-1 text-[10px] opacity-70">
                                     {{ new Date(message.created_at).toLocaleString() }}
@@ -229,15 +230,9 @@ onBeforeUnmount(() => {
                             <span>Replying to {{ replyTo.body || 'attachment' }}</span>
                             <button type="button" class="ml-2" @click="replyTo = null">Cancel</button>
                         </p>
-                        <div v-if="files.length" class="mb-1 flex flex-wrap gap-1 px-1">
-                            <span v-for="(file, index) in files" :key="file.name + index" class="rounded bg-slate-100 px-2 py-0.5 text-xs">{{ file.name }}</span>
-                        </div>
+                        <LargeFileUploader :key="uploaderKey" class="mb-2" module="chat" source-type="conversation" :source-id="active.id" :max-files="5" persist @completed="onUploaded" @removed="onRemoved" />
                         <p v-if="error" class="mb-1 px-1 text-xs text-red-600">{{ error }}</p>
                         <div class="flex items-end gap-2">
-                            <button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="Attach files" @click="fileInput?.click()">
-                                <Icon name="paperclip" :size="18" />
-                            </button>
-                            <input ref="fileInput" type="file" multiple class="hidden" accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.dwg,.dxf" @change="onFiles($event.target.files)" />
                             <textarea v-model="body" rows="1" maxlength="8000" placeholder="Write a message" class="max-h-28 min-h-10 flex-1 resize-none rounded-lg border-slate-300 text-sm" @keydown.enter.exact.prevent="send" />
                             <AppButton type="submit" size="sm" :loading="sending" :disabled="sending">Send</AppButton>
                         </div>
@@ -245,5 +240,12 @@ onBeforeUnmount(() => {
                 </template>
             </section>
         </div>
+        <UniversalFileViewer
+            :show="!!viewing"
+            source="chat"
+            :file-id="viewing?.id ?? null"
+            :gallery="attachmentGallery"
+            @close="viewing = null"
+        />
     </AppLayout>
 </template>

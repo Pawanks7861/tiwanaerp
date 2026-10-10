@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\Attachments\FileTypeGuard;
 use App\Services\Attachments\PrivateFileStore;
 use App\Services\Documents\DocumentService;
+use App\Services\Uploads\LargeFileUploadService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -28,6 +29,7 @@ class DocumentController extends Controller
     public function __construct(
         private readonly DocumentService $documents,
         private readonly PrivateFileStore $files,
+        private readonly LargeFileUploadService $uploads,
     ) {}
 
     public function index(Request $request, Project $project): Response
@@ -103,7 +105,9 @@ class DocumentController extends Controller
         Gate::authorize('create', [Document::class, $project]);
 
         $data = $request->validate([...$this->detailRules(), ...$this->versionRules()]);
-        [$document] = $this->documents->create($project, $data, $request->file('file'), $request->user());
+        $file = $this->uploads->fileFromRequest($request);
+        [$document] = $this->documents->create($project, $data, $file, $request->user());
+        $this->uploads->release($request->user(), $request->input('upload_id'));
 
         return redirect()->route('projects.documents.show', [$project, $document])
             ->with('success', "Document {$document->document_number} created as draft (version 1). Publish it when ready.");
@@ -167,7 +171,10 @@ class DocumentController extends Controller
     {
         Gate::authorize('addVersion', $document);
 
-        $version = $this->documents->addVersion($document, $request->validate($this->versionRules()), $request->file('file'), $request->user());
+        $data = $request->validate($this->versionRules());
+        $file = $this->uploads->fileFromRequest($request);
+        $version = $this->documents->addVersion($document, $data, $file, $request->user());
+        $this->uploads->release($request->user(), $request->input('upload_id'));
         $duplicate = $this->documents->duplicateOf($version);
 
         return back()->with('success', "Version {$version->version_no} uploaded and is now current."
@@ -244,10 +251,8 @@ class DocumentController extends Controller
      */
     private function versionRules(): array
     {
-        $maxKb = (int) config('uploads.max_kb');
-
         return [
-            'file' => ['required', 'file', "max:{$maxKb}", 'extensions:'.implode(',', FileTypeGuard::extensions())],
+            ...FileTypeGuard::fileRules(),
             'revision_label' => ['nullable', 'string', 'max:30'],
             'notes' => ['nullable', 'string', 'max:1000'],
         ];

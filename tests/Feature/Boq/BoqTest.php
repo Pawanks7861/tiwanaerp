@@ -408,6 +408,20 @@ test('BOQs are isolated by project and company', function () {
         ->assertForbidden();
 });
 
+test('a spreadsheet import above the safe cap is rejected before it is parsed', function () {
+    expect((int) config('uploads.import_max_kb'))->toBe(10240)
+        ->and((int) config('uploads.import_max_kb') * 1024)->toBeLessThan((int) config('uploads.max_file_size_bytes'));
+
+    config(['uploads.import_max_kb' => 1]);
+    $boq = $this->makeBoq();
+
+    $this->actingInCompany($this->billing, $this->company)
+        ->post(route('projects.boqs.import', [$this->project, $boq]), [
+            'file' => UploadedFile::fake()->create('huge.xlsx', 2, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+        ])
+        ->assertSessionHasErrors('file');
+});
+
 test('site engineers can view but not create, edit or submit BOQs', function () {
     $boq = $this->makeBoq();
     $as = $this->actingInCompany($this->engineer, $this->company);

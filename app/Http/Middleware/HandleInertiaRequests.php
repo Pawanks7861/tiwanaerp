@@ -44,6 +44,11 @@ class HandleInertiaRequests extends Middleware
             'features' => [
                 'multi_company' => (bool) config('features.multi_company'),
             ],
+            'uploads' => [
+                'max_bytes' => (int) config('uploads.max_file_size_bytes'),
+                'chunk_bytes' => (int) config('uploads.chunk_bytes'),
+                'max_label' => '1 GB',
+            ],
             'auth' => fn () => $this->auth($request->user()),
             'company' => fn () => $this->company($request->user()),
             'projectSwitcher' => fn () => $this->projects($request->user()),

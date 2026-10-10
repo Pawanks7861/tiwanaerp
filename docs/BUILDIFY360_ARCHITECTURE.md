@@ -1816,3 +1816,55 @@ TallyPrime is an external copy of finalized accounting events. The ERP stays the
 **Permissions.** `tally.view`, `tally.manage`, `tally.sync`, `tally.retry`, `tally.mapping`. Company Admin has all of them through `*`. Accountant has view, sync, retry, and mapping. Project roles do not. Settings, mapping, manual sync, retry, and reversal requests are audited.
 
 **Production.** Tally must be running, the company loaded, and the endpoint reachable only on a private network. The queue worker must be running or vouchers stay pending. Inventory sync is a later design, not part of this version.
+
+### Large File Upload Enhancement
+
+Generic attachments use one chunked, resumable pipeline. A 1 GB file is never posted as a single request.
+
+**Limit.** `config/uploads.php` sets `max_file_size_bytes` to 1,073,741,824 (1 GiB). Modules read that value. Logo, favicon, camera photos, and spreadsheet imports keep smaller caps.
+
+**Service.** `LargeFileUploadService` initializes a session, checks the destination, stores each chunk, and finalizes only when every chunk is present. Finalization verifies the byte count and a streamed SHA-256. The same request cannot be assembled twice: the session moves to `processing` with a conditional update, and a second complete of an already finished session returns the existing result. Chunks are not audited. Creating, replacing, or deleting the finished file is.
+
+**Sessions.** `upload_sessions` holds the owner, company, module, optional source record, original filename, size, chunk size, checksums, and status (`initialized`, `uploading`, `processing`, `completed`, `failed`, `cancelled`, `expired`). Chunk bytes are files on the private disk at `uploads/tmp/{uuid}/{n}`, with size and SHA-256 in `chunk_checksums`. There is no `upload_chunks` table. A 1 GiB file would be about a thousand rows that only repeat the filesystem, so one file per chunk number is the uniqueness rule.
+
+**Chunk size.** The default is 1 MiB so a chunk fits the current local PHP `upload_max_filesize` of 2M. Production should set `UPLOAD_CHUNK_BYTES=10485760` (10 MiB) and raise only the single-request limit (see deployment below). The browser splits the file, retries one failed part, and can pause. An upload id in `localStorage` lets a refresh resume; the server still checks the user and company.
+
+**Storage.** The physical name is a UUID. The original filename is metadata. Finished attachment bytes live under `company/{company_id}/{module}/...` on the `private` disk, which is `storage/app/private` and is not the web root. Laravel's disk is the storage boundary, so a later S3 or MinIO disk can replace the local driver without a Windows path in application code. The assembler currently uses the local disk's path to stream chunks together; an object-storage driver needs a stream-only assembler before it is selected.
+
+**Types.** Known office, PDF, image, and CAD types keep MIME and signature checks. Any other extension that is not on the executable block-list is stored as a private binary. `.php`, `.phtml`, `.phar`, `.exe`, `.bat`, `.sh`, `.py`, `.jar`, and the rest of `blocked_extensions` are refused, including a dangerous segment such as `invoice.pdf.php`. A file whose first bytes look like PHP, a Windows executable, or an ELF binary is refused even when the extension is harmless. Unknown files download with `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, and `Cache-Control: private, no-store`. Opening a file inside the ERP is described under Universal File Viewer.
+
+**Authorization.** The session belongs to the current company and the user who started it. Another user gets 403. Another company gets 404. Attachment uploads require permission to update the target record. Document and drawing uploads require create or version permission on that project record. Chat uploads require conversation participation, which is checked in the chat service so a platform super admin is not exempt. Downloads stay on the existing authorized controllers.
+
+**Checksum and scan.** SHA-256 is computed while the chunks are copied, in 1 MB reads, not by loading the file into a string. `FileSecurityScannerInterface` is bound to `NullFileSecurityScanner`. Its status is `not_configured`. The application does not call a file safe merely because the extension was allowed. Install a scanner such as ClamAV in production and return `pending`, `safe`, `blocked`, or `scan_failed` from a real implementation.
+
+**Cleanup.** `uploads:cleanup` runs hourly from the Laravel scheduler. It deletes abandoned chunk directories and ready files for sessions that are expired, cancelled, or failed. Completed files are left in place. The default lifetime is 36 hours (`UPLOAD_EXPIRE_HOURS`).
+
+**Where the uploader is used.** `LargeFileUploader.vue` is the control behind generic record attachments (vendors, subcontractors, clients, material requests, RFQs, quotations, purchase orders, GRNs, stock documents, DPR, labour, equipment, work orders, subcontract bills, equipment repairs, expenses, client invoices, vendor bills, payments, retention releases, quality inspections, and NCRs), document create and new versions, drawing create and new revisions, chat (up to five files at a time), and large site-diary photos. Camera capture on a diary still posts a small image because the thumbnail is decoded in memory; photos larger than 12 MB skip that thumbnail.
+
+**Exceptions.** Logo and favicon use `logo_max_kb` and `favicon_max_kb` (2 MB by default, inside the 5–10 MB and 2–5 MB bands). They stay a single small request. BOQ and other spreadsheet imports use `import_max_kb` (10 MB). The workbook library reads the file into memory, so those endpoints do not accept 1 GB. Raise that cap only if the importer is rewritten to stream.
+
+**Deployment.** The web server must accept one chunk, not 1 GB. For the default 1 MiB chunk, `upload_max_filesize=2M` and `post_max_size=8M` are enough. For a 10 MiB production chunk, set `upload_max_filesize=16M`, `post_max_size=20M`, and Apache `LimitRequestBody` or Nginx `client_max_body_size` to at least that post size. Do not set `upload_max_filesize=1G`. Keep the upload directory out of the document root and do not enable PHP execution there. This application does not change `php.ini`, Apache, or Nginx.
+
+### Universal File Viewer
+
+Clicking a file opens `UniversalFileViewer.vue`. The same component is used for generic attachments (procurement, finance, quality, NCR, labour, subcontract, equipment, DPR), document versions, drawing revisions, chat attachments, and site-diary photos. `FilePreviewService` chooses the preview. `GET /files/{source}/{id}`, `/preview`, `/stream`, and `/download` re-check the parent record on every request. Another company receives 404. A user who cannot view the parent receives 403, or 404 where the module already hides the record (chat non-participants).
+
+| Kind | Preview | Download |
+| --- | --- | --- |
+| JPG, JPEG, PNG, WEBP, GIF, BMP | Authorized image stream, with zoom, rotate, and fit | Original |
+| SVG | Served only after scripts, event handlers, and external URLs are removed | Original |
+| PDF | Browser PDF viewer inside the ERP, from the authorized stream | Original |
+| TXT, LOG, JSON, XML, MD | First 1 MB as text in the page, HTML is not rendered | Original |
+| CSV | First 500 rows as a table, or the same text cap as raw text | Original |
+| XLS, XLSX | First 500 rows and 50 columns, formulas as text. Files over 8 MB are not opened | Original |
+| DOC, DOCX, PPT, PPTX | Local LibreOffice to a private PDF, queued | Original when LibreOffice is not installed |
+| DWG | Local `dwg2SVG` to a sanitized private SVG, queued. Raw DWG is not sent to the browser | Original when no converter is installed |
+| DXF | Built-in text parser to a private SVG of lines and circles. Binary DXF uses `dwg2SVG` when it is installed | Original otherwise |
+| MP4, WebM, OGV | HTML5 video with HTTP range requests | Original |
+| MP3, WAV, OGG, M4A | HTML5 audio | Original |
+| ZIP | Entry names only, never extracted | Original |
+| RAR, 7Z, and anything else | File card | Original |
+
+Generated previews live on the private disk and in `file_previews`, keyed by the source checksum. A changed checksum drops the old preview. `GenerateFilePreview` runs on the queue for DWG, DXF that the text parser cannot read, and Office files. The upload itself does not wait. Statuses are pending, processing, ready, failed, and unsupported. The viewer says "Generating drawing preview…" while a CAD job runs, and "DWG preview unavailable on this server" or "Preview not available" when the converter is missing. Failure text never includes a path or shell output.
+
+Conversion uses `Process` with a fixed binary and a staged name `input.{ext}`. The original filename is not an argument. Nothing is uploaded to Google Docs, Autodesk, or another public viewer. Preview is not a malware scan. The scanner status remains `not_configured` until a scanner is installed. Deleting a site photo also deletes its generated preview. Soft-deleted attachments keep their files, so their previews stay too.

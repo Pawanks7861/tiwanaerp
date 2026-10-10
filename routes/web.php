@@ -28,6 +28,7 @@ use App\Http\Controllers\Equipment\EquipmentAssignmentController;
 use App\Http\Controllers\Equipment\EquipmentFuelController;
 use App\Http\Controllers\Equipment\EquipmentRepairController;
 use App\Http\Controllers\Equipment\EquipmentUsageController;
+use App\Http\Controllers\Files\FileViewerController;
 use App\Http\Controllers\Finance\CashFlowController;
 use App\Http\Controllers\Finance\ClientInvoiceController;
 use App\Http\Controllers\Finance\ExpenseController;
@@ -74,6 +75,7 @@ use App\Http\Controllers\SiteExecution\SiteDiaryController;
 use App\Http\Controllers\SiteExecution\SiteDiaryPhotoController;
 use App\Http\Controllers\Subcontract\SubcontractorBillController;
 use App\Http\Controllers\Subcontract\WorkOrderController;
+use App\Http\Controllers\Uploads\UploadController;
 use App\Support\Masters\MasterRegistry;
 use Illuminate\Support\Facades\Route;
 
@@ -616,6 +618,19 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::put('/{record}', [MasterController::class, 'update'])->whereNumber('record')->name('update');
             Route::delete('/{record}', [MasterController::class, 'destroy'])->whereNumber('record')->name('destroy');
         });
+
+    // Chunked uploads. Each request carries one chunk, never the whole file.
+    Route::post('/uploads', [UploadController::class, 'store'])->middleware('throttle:uploads')->name('uploads.store');
+    Route::get('/uploads/{upload}', [UploadController::class, 'show'])->middleware('throttle:uploads')->name('uploads.show');
+    Route::post('/uploads/{upload}/chunks/{number}', [UploadController::class, 'chunk'])->whereNumber('number')->middleware('throttle:uploads')->name('uploads.chunks.store');
+    Route::post('/uploads/{upload}/complete', [UploadController::class, 'complete'])->middleware('throttle:uploads')->name('uploads.complete');
+    Route::delete('/uploads/{upload}', [UploadController::class, 'destroy'])->middleware('throttle:uploads')->name('uploads.cancel');
+
+    // Universal private file viewer. Every request re-checks the parent record.
+    Route::get('/files/{source}/{id}', [FileViewerController::class, 'show'])->whereIn('source', ['attachment', 'document_version', 'drawing_revision', 'chat', 'site_photo'])->whereNumber('id')->name('files.show');
+    Route::get('/files/{source}/{id}/preview', [FileViewerController::class, 'preview'])->whereIn('source', ['attachment', 'document_version', 'drawing_revision', 'chat', 'site_photo'])->whereNumber('id')->name('files.preview');
+    Route::get('/files/{source}/{id}/stream', [FileViewerController::class, 'stream'])->whereIn('source', ['attachment', 'document_version', 'drawing_revision', 'chat', 'site_photo'])->whereNumber('id')->name('files.stream');
+    Route::get('/files/{source}/{id}/download', [FileViewerController::class, 'download'])->whereIn('source', ['attachment', 'document_version', 'drawing_revision', 'chat', 'site_photo'])->whereNumber('id')->name('files.download');
 
     // Attachments
     Route::post('/attachments', [AttachmentController::class, 'store'])->middleware('throttle:30,1')->name('attachments.store');

@@ -165,12 +165,26 @@ Recorded before the hardening changes. Secret values are not shown.
 - Models are guarded. User creation uses validated fields, so forged `is_super_admin` and `company_id` are ignored.
 - Company and project middleware remain. Super-admin `Gate::before` does not replace document state checks inside services.
 - Chat messages render as text (`{{ message.body }}`), not `v-html`.
-- Uploads go through `FileTypeGuard` (extension plus detected MIME, and signatures for images and CAD). Stored names are generated.
+- Uploads go through `FileTypeGuard`. Known types are checked by detected MIME and signature. Other non-executable types are allowed. Executable and double extensions are blocked. Stored names are generated. See Large file uploads below.
 - Private files are served by authorized controllers.
 - API routes require Sanctum except `POST /api/v1/auth/login`, which is throttled. Tokens are revoked on logout, password change, and when a user has no remaining active company membership.
 - Financial report exports keep the existing permission checks; this pass did not widen them.
 - `composer audit`: no advisories.
 - `composer.lock` and `package-lock.json` remain.
+
+## Large file uploads
+
+Generic attachments accept up to 1 GiB (1,073,741,824 bytes) through chunked, resumable uploads. One HTTP request carries one chunk. The default chunk is 1 MiB so it fits a PHP `upload_max_filesize` of 2M. Production can use a 10 MiB chunk after `upload_max_filesize` is 16M and `post_max_size` is 20M (Apache `LimitRequestBody` or Nginx `client_max_body_size` must match the chunk, not the whole file). Do not set the server limit to 1G. This repository does not edit `php.ini` or the web server.
+
+Sessions live in `upload_sessions` and are limited to the current company and the user who started them. Chunks sit on the private disk under `uploads/tmp/{uuid}/`. The finished file uses a UUID name. The original filename is metadata only. Downloads send `Content-Disposition`, `X-Content-Type-Options: nosniff`, and `Cache-Control: private, no-store`. SHA-256 is streamed. Executable extensions, double extensions such as `invoice.pdf.php`, and content that starts like PHP, ELF, or a Windows executable are refused. An unknown business extension is stored as a private binary. That is not a malware verdict.
+
+`FileSecurityScannerInterface` currently reports `not_configured`. Install ClamAV or an equivalent scanner before treating arbitrary uploads as inspected. `uploads:cleanup` runs hourly and removes abandoned chunks. It does not delete completed files.
+
+Logo and favicon stay at 2 MB. Spreadsheet imports stay at 10 MB because they are not streamed. Camera diary photos stay at the smaller capture cap; a large diary photo uses the chunked uploader and skips the in-memory thumbnail above 12 MB.
+
+The upload directory must stay outside the document root, and PHP must not be allowed to execute files there.
+
+Preview uses the same private disk and the same parent-record check. Images, PDF, text, CSV, capped spreadsheets, video, and audio stream from `/files/{source}/{id}/stream`. Office files become a private PDF only when LibreOffice is installed locally. DWG becomes a sanitized SVG only when `dwg2SVG` is installed locally. Text DXF is converted in-process to an SVG of lines and circles. SVG scripts and external URLs are removed before storage. ZIP listings do not extract the archive. No file is sent to a public viewer. A missing converter leaves the original downloadable and does not mark the file safe.
 
 ## Production checklist
 
@@ -193,6 +207,7 @@ Recorded before the hardening changes. Secret values are not shown.
 ## Verification
 
 - Security tests: 14 in `tests/Feature/Security/SecurityHardeningTest.php`
-- Full suite: 566 passed, 6835 assertions, 0 failed
-- `npm run build`: exit 0, Vite 8.3.2, 969 modules, about 13.8s. Warnings: Node engine, chunk size, plugin timings. No build error.
+- Large-file tests: 11 in `tests/Feature/Uploads/LargeFileUploadTest.php`, plus the BOQ import cap test
+- Full suite: 589 passed, 7066 assertions, 0 failed
+- `npm run build`: exit 0, Vite 8.3.2, 971 modules, built in 7.36s. Warnings: Node engine, chunk size, plugin timings. No build error.
 - Browser at 1366 and 390: login, dashboard charts, profile two-factor setup, company settings, chat, and Tally settings loaded. Horizontal overflow at 390px was 0. HSTS was absent on local HTTP, as intended.

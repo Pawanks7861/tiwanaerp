@@ -55,10 +55,14 @@ class AttachmentService
 
     public function download(Attachment $attachment): StreamedResponse
     {
-        return Storage::disk($attachment->disk)->download($attachment->path, $attachment->original_name, [
-            'Content-Type' => $attachment->mime,
+        $preview = in_array(strtolower((string) $attachment->extension), config('uploads.preview_extensions'), true);
+        $name = str_replace(['"', "\r", "\n"], '', (string) $attachment->original_name);
+
+        return Storage::disk($attachment->disk)->response($attachment->path, $name !== '' ? $name : 'download', [
+            'Content-Type' => $preview ? ($attachment->mime ?: 'application/octet-stream') : 'application/octet-stream',
             'X-Content-Type-Options' => 'nosniff',
-        ]);
+            'Cache-Control' => 'private, no-store',
+        ], $preview ? 'inline' : 'attachment');
     }
 
     /**

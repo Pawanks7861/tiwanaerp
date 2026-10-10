@@ -1,11 +1,10 @@
 <script setup>
-import FileUpload from '@/Components/Form/FileUpload.vue';
+import LargeFileUploader from '@/Components/Uploads/LargeFileUploader.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import FormSelect from '@/Components/Form/FormSelect.vue';
 import SearchSelect from '@/Components/Form/SearchSelect.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
-import Icon from '@/Components/UI/Icon.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { Link, useForm } from '@inertiajs/vue3';
 
@@ -26,7 +25,7 @@ const form = useForm({
     description: '',
     revision_label: '',
     notes: '',
-    file: null,
+    upload_id: null,
 });
 
 function submit() {
@@ -57,8 +56,8 @@ function submit() {
                     <FormInput v-model="form.revision_label" label="Revision label" maxlength="30" placeholder="Optional, e.g. Rev A" :error="form.errors.revision_label" />
                     <FormInput v-model="form.description" label="Description" multiline :rows="2" maxlength="1000" class="sm:col-span-2" :error="form.errors.description" />
                     <div class="sm:col-span-2">
-                        <FileUpload :accept="extensions.map((e) => `.${e}`).join(',')" :max-mb="maxMb" :error="form.errors.file" @select="form.file = $event" />
-                        <p v-if="form.file" class="mt-1 flex items-center gap-1 text-xs break-all text-slate-600"><Icon name="paperclip" :size="12" />{{ form.file.name }}</p>
+                        <LargeFileUploader persist module="document" source-type="project" :source-id="project.id" @completed="(file) => (form.upload_id = file.id)" />
+                        <p v-if="form.errors.file || form.errors.upload_id" class="mt-1 text-xs text-red-700">{{ form.errors.file || form.errors.upload_id }}</p>
                     </div>
                     <FormInput v-model="form.notes" label="Version notes" maxlength="1000" class="sm:col-span-2" :error="form.errors.notes" />
                 </div>
@@ -68,7 +67,7 @@ function submit() {
                     :href="route('projects.documents.index', project.id)"
                     class="inline-flex h-10 flex-1 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 md:flex-none"
                 >Cancel</Link>
-                <AppButton type="submit" :loading="form.processing" :disabled="!form.file" class="flex-1 md:flex-none">Save draft</AppButton>
+                <AppButton type="submit" :loading="form.processing" :disabled="!form.upload_id" class="flex-1 md:flex-none">Save draft</AppButton>
             </div>
         </form>
     </ProjectLayout>

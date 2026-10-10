@@ -1,10 +1,9 @@
 <script setup>
-import FileUpload from '@/Components/Form/FileUpload.vue';
+import LargeFileUploader from '@/Components/Uploads/LargeFileUploader.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import FormSelect from '@/Components/Form/FormSelect.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
-import Icon from '@/Components/UI/Icon.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { Link, useForm } from '@inertiajs/vue3';
 
@@ -15,7 +14,7 @@ const props = defineProps({
     maxMb: { type: Number, required: true },
 });
 
-const form = useForm({ drawing_number: '', title: '', discipline: 'architectural', revision_code: 'R0', remarks: '', file: null });
+const form = useForm({ drawing_number: '', title: '', discipline: 'architectural', revision_code: 'R0', remarks: '', upload_id: null });
 
 function submit() {
     form.transform((d) => ({ ...d, remarks: d.remarks || null })).post(route('projects.drawings.store', props.project.id), { forceFormData: true });
@@ -38,9 +37,9 @@ function submit() {
                     <FormInput v-model="form.revision_code" label="First revision code" required maxlength="10" uppercase help="e.g. R0, P1 or A. Codes are never reused." :error="form.errors.revision_code" />
                     <FormInput v-model="form.remarks" label="Remarks" maxlength="1000" :error="form.errors.remarks" />
                     <div class="sm:col-span-2">
-                        <FileUpload :accept="extensions.map((e) => `.${e}`).join(',')" :max-mb="maxMb" hint="PDF, DWG, DXF or images" :error="form.errors.file" @select="form.file = $event" />
-                        <p v-if="form.file" class="mt-1 flex items-center gap-1 text-xs text-slate-600"><Icon name="paperclip" :size="12" />{{ form.file.name }}</p>
-                        <p class="mt-1 text-xs text-slate-500">{{ extensions.join(', ').toUpperCase() }}. PDF and images can be previewed; DWG / DXF are download only.</p>
+                        <LargeFileUploader persist module="drawing" source-type="project" :source-id="project.id" @completed="(file) => (form.upload_id = file.id)" />
+                        <p v-if="form.errors.file || form.errors.upload_id" class="mt-1 text-xs text-red-700">{{ form.errors.file || form.errors.upload_id }}</p>
+                        <p class="mt-1 text-xs text-slate-500">{{ extensions.join(', ').toUpperCase() }} and other non-executable project files. PDF and images can be previewed; other files are download only.</p>
                     </div>
                 </div>
             </AppCard>
@@ -49,7 +48,7 @@ function submit() {
                     :href="route('projects.drawings.index', project.id)"
                     class="inline-flex h-10 flex-1 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 md:flex-none"
                 >Cancel</Link>
-                <AppButton type="submit" :loading="form.processing" :disabled="!form.file" class="flex-1 md:flex-none">Register drawing</AppButton>
+                <AppButton type="submit" :loading="form.processing" :disabled="!form.upload_id" class="flex-1 md:flex-none">Register drawing</AppButton>
             </div>
         </form>
     </ProjectLayout>

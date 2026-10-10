@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Contracts\Files\FileSecurityScannerInterface;
 use App\Events\Approval\ApprovalCompleted;
 use App\Events\Approval\ApprovalRejected;
 use App\Events\Approval\ApprovalRequested;
@@ -182,6 +183,9 @@ use App\Policies\SitePolicy;
 use App\Policies\Subcontract\SubcontractorBillPolicy;
 use App\Policies\Subcontract\WorkOrderPolicy;
 use App\Policies\UserPolicy;
+use App\Services\Files\LocalPreviewConverter;
+use App\Services\Files\PreviewConverter;
+use App\Services\Uploads\NullFileSecurityScanner;
 use App\Support\Reports\DashboardCache;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -202,6 +206,8 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(CurrentCompany::class);
+        $this->app->singleton(FileSecurityScannerInterface::class, NullFileSecurityScanner::class);
+        $this->app->singleton(PreviewConverter::class, LocalPreviewConverter::class);
         $this->app->scoped(DashboardCache::class);
 
         foreach (MasterPolicy::PERMISSIONS as $prefix) {
@@ -426,6 +432,9 @@ class AppServiceProvider extends ServiceProvider
         ));
         RateLimiter::for('two-factor', fn (Request $request) => Limit::perMinute(5)->by(
             ($request->user()?->id ?? 'guest').'|'.$request->ip()
+        ));
+        RateLimiter::for('uploads', fn (Request $request) => Limit::perMinute(600)->by(
+            (string) ($request->user()?->id ?? $request->ip())
         ));
         RateLimiter::for('tally-connect', fn (Request $request) => Limit::perMinute(5)->by(
             ($request->user()?->id ?? 'guest').'|'.$request->ip()

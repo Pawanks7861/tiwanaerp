@@ -5,6 +5,7 @@ namespace App\Services\SiteExecution;
 use App\Models\SiteExecution\SiteDiary;
 use App\Models\SiteExecution\SiteDiaryPhoto;
 use App\Services\Attachments\FileTypeGuard;
+use App\Services\Files\FilePreviewService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -24,7 +25,10 @@ class SiteDiaryPhotoService
 
     private const THUMB_EDGE = 360;
 
-    public function __construct(private readonly FileTypeGuard $guard) {}
+    public function __construct(
+        private readonly FileTypeGuard $guard,
+        private readonly FilePreviewService $previews,
+    ) {}
 
     /**
      * @param  array{uuid?: ?string, caption?: ?string, latitude?: mixed, longitude?: mixed, taken_at?: ?string}  $meta
@@ -45,6 +49,9 @@ class SiteDiaryPhotoService
         if (! $this->guard->isImage($file) || ! $this->guard->isAllowed($file)) {
             throw ValidationException::withMessages(['photo' => 'Upload a JPG, PNG or WebP image.']);
         }
+        if ($file->getSize() > (int) config('uploads.max_file_size_bytes')) {
+            throw ValidationException::withMessages(['photo' => 'File exceeds 1 GB']);
+        }
         if (SiteDiaryPhoto::query()->where('site_diary_id', $diary->id)->count() >= self::MAX_PER_DIARY) {
             throw ValidationException::withMessages(['photo' => 'A diary can hold at most '.self::MAX_PER_DIARY.' photos.']);
         }
@@ -54,7 +61,9 @@ class SiteDiaryPhotoService
         $extension = strtolower($file->getClientOriginalExtension());
         $directory = sprintf('company/%d/site-diaries/%s', $diary->company_id, now()->format('Y/m'));
         $path = $file->storeAs($directory, "{$uuid}.{$extension}", ['disk' => $disk]);
-        $thumbnail = $this->thumbnail($file, $disk, "{$directory}/{$uuid}_thumb.jpg");
+        $thumbnail = $file->getSize() > (12 * 1024 * 1024)
+            ? null
+            : $this->thumbnail($file, $disk, "{$directory}/{$uuid}_thumb.jpg");
 
         try {
             return DB::transaction(function () use ($diary, $file, $meta, $uuid, $disk, $path, $thumbnail) {
@@ -84,8 +93,10 @@ class SiteDiaryPhotoService
 
     public function delete(SiteDiaryPhoto $photo): void
     {
+        $id = (int) $photo->id;
         DB::transaction(fn () => $photo->delete());
         Storage::disk($photo->disk)->delete(array_filter([$photo->path, $photo->thumbnail_path]));
+        $this->previews->purge('site_photo', $id);
     }
 
     public function stream(SiteDiaryPhoto $photo, bool $thumbnail = false): StreamedResponse
@@ -96,7 +107,7 @@ class SiteDiaryPhotoService
         return Storage::disk($photo->disk)->response($path, basename($path), [
             'Content-Type' => $useThumb ? 'image/jpeg' : $photo->mime,
             'X-Content-Type-Options' => 'nosniff',
-            'Cache-Control' => 'private, max-age=3600',
+            'Cache-Control' => 'private, no-store',
         ]);
     }
 

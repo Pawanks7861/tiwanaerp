@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Admin;
 use App\Enums\IndianState;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\CompanyRequest;
-use App\Services\Branding\CompanyBranding;
 use App\Support\Math\Decimal;
 use App\Support\Procurement\ProcurementSettings;
 use App\Support\Tenancy\CurrentCompany;
@@ -40,7 +39,9 @@ class CompanySettingsController extends Controller
             'branding' => [
                 'logo_url' => $company->logo_path ? route('company.branding.show', ['kind' => 'logo', 'v' => $company->updated_at?->getTimestamp()]) : null,
                 'favicon_url' => $company->favicon_path ? route('company.branding.show', ['kind' => 'favicon', 'v' => $company->updated_at?->getTimestamp()]) : null,
-                'max_kb' => CompanyBranding::MAX_KB,
+                'max_kb' => (int) config('uploads.logo_max_kb'),
+                'logo_max_kb' => (int) config('uploads.logo_max_kb'),
+                'favicon_max_kb' => (int) config('uploads.favicon_max_kb'),
             ],
         ]);
     }

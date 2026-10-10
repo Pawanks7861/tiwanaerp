@@ -13,7 +13,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 /**
  * Company logo and favicon. Files stay on the private disk under company/{id}/branding and are
  * served only for the active company. SVG is refused: it cannot be sanitized safely here.
- * The 2 MB cap matches the current WAMP upload_max_filesize.
+ * These are image assets, not generic attachments, so they stay on a small single-request cap.
  */
 class CompanyBranding
 {
@@ -23,14 +23,14 @@ class CompanyBranding
 
     public function storeLogo(Company $company, UploadedFile $file): void
     {
-        $this->store($company, $file, 'logo_path', $this->imageTypes());
+        $this->store($company, $file, 'logo_path', $this->imageTypes(), (int) config('uploads.logo_max_kb'));
     }
 
     public function storeFavicon(Company $company, UploadedFile $file): void
     {
         $extension = strtolower($file->getClientOriginalExtension());
         if ($extension === 'ico') {
-            $this->assertSize($file);
+            $this->assertSize($file, (int) config('uploads.favicon_max_kb'));
             if (! $this->hasIcoSignature($file)) {
                 throw ValidationException::withMessages(['file' => 'This file type is not allowed.']);
             }
@@ -39,7 +39,7 @@ class CompanyBranding
             return;
         }
 
-        $this->store($company, $file, 'favicon_path', $this->imageTypes());
+        $this->store($company, $file, 'favicon_path', $this->imageTypes(), (int) config('uploads.favicon_max_kb'));
     }
 
     public function removeLogo(Company $company): void
@@ -114,9 +114,9 @@ class CompanyBranding
     /**
      * @param  array<string, list<string>>  $types
      */
-    private function store(Company $company, UploadedFile $file, string $column, array $types): void
+    private function store(Company $company, UploadedFile $file, string $column, array $types, int $maxKb): void
     {
-        $this->assertSize($file);
+        $this->assertSize($file, $maxKb);
         if (! $this->guard->accepts($file, $types)) {
             throw ValidationException::withMessages(['file' => 'Use a PNG, JPG or WEBP image.']);
         }
@@ -153,13 +153,14 @@ class CompanyBranding
         }
     }
 
-    private function assertSize(UploadedFile $file): void
+    private function assertSize(UploadedFile $file, int $maxKb): void
     {
+        $label = max(1, (int) round($maxKb / 1024));
         if (! $file->isValid()) {
-            throw ValidationException::withMessages(['file' => 'The file is larger than the server limit of 2 MB.']);
+            throw ValidationException::withMessages(['file' => "The file is larger than the server limit of {$label} MB."]);
         }
-        if ($file->getSize() > self::MAX_KB * 1024) {
-            throw ValidationException::withMessages(['file' => 'The file must be 2 MB or smaller.']);
+        if ($file->getSize() > $maxKb * 1024) {
+            throw ValidationException::withMessages(['file' => "The file must be {$label} MB or smaller."]);
         }
     }
 

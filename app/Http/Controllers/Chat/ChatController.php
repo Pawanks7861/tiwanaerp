@@ -9,6 +9,7 @@ use App\Models\Chat\MessageAttachment;
 use App\Services\Chat\ChatFileStore;
 use App\Services\Chat\ChatPresenter;
 use App\Services\Chat\ChatService;
+use App\Services\Uploads\LargeFileUploadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -25,6 +26,7 @@ class ChatController extends Controller
         private readonly ChatService $chat,
         private readonly ChatPresenter $presenter,
         private readonly ChatFileStore $files,
+        private readonly LargeFileUploadService $uploads,
     ) {}
 
     public function index(Request $request, ?Conversation $conversation = null): Response
@@ -95,13 +97,26 @@ class ChatController extends Controller
     public function store(Request $request, Conversation $conversation): JsonResponse
     {
         $this->chat->participant($conversation, $request->user());
+        $data = $request->validate([
+            'body' => ['nullable', 'string', 'max:8000'],
+            'upload_ids' => ['nullable', 'array', 'max:'.ChatFileStore::MAX_FILES],
+            'upload_ids.*' => ['uuid'],
+            'reply_to_message_id' => ['nullable', 'integer'],
+        ]);
+        $files = array_values($request->file('files', []) ?? []);
+        foreach ($data['upload_ids'] ?? [] as $id) {
+            $files[] = $this->uploads->claim($request->user(), $id);
+        }
         $message = $this->chat->send(
             $conversation,
             $request->user(),
-            $request->input('body'),
-            $request->file('files', []),
-            $request->filled('reply_to_message_id') ? (int) $request->input('reply_to_message_id') : null,
+            $data['body'] ?? $request->input('body'),
+            $files,
+            isset($data['reply_to_message_id']) ? (int) $data['reply_to_message_id'] : null,
         );
+        foreach ($data['upload_ids'] ?? [] as $id) {
+            $this->uploads->release($request->user(), $id);
+        }
 
         return response()->json(['message' => $this->presenter->message($message)]);
     }

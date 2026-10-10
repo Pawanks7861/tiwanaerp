@@ -90,10 +90,6 @@ class ChatService
             foreach ($uploads as $upload) {
                 $stored[] = $this->files->put($upload, (int) $conversation->company_id);
             }
-            if (array_sum(array_column($stored, 'size_bytes')) > ChatFileStore::MAX_TOTAL_BYTES) {
-                throw ValidationException::withMessages(['files' => 'Those files together must be 6 MB or smaller.']);
-            }
-
             $message = DB::transaction(function () use ($conversation, $sender, $text, $replyId, $stored) {
                 $message = new Message;
                 $message->forceFill([

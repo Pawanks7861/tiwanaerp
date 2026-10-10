@@ -1,6 +1,7 @@
 <script setup>
+import UniversalFileViewer from '@/Components/Files/UniversalFileViewer.vue';
 import AuditTrail from '@/Components/Audit/AuditTrail.vue';
-import FileUpload from '@/Components/Form/FileUpload.vue';
+import LargeFileUploader from '@/Components/Uploads/LargeFileUploader.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import FormSelect from '@/Components/Form/FormSelect.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
@@ -14,6 +15,8 @@ import { formatBytes } from '@/lib/files';
 import { formatDateTime } from '@/lib/format';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+
+const viewing = ref(null);
 
 const props = defineProps({
     project: { type: Object, required: true },
@@ -36,7 +39,7 @@ function saveDetails() {
 }
 
 const uploading = ref(false);
-const uploadForm = useForm({ revision_code: '', remarks: '', file: null });
+const uploadForm = useForm({ revision_code: '', remarks: '', upload_id: null });
 function openUpload() {
     uploadForm.reset();
     uploadForm.clearErrors();
@@ -138,9 +141,9 @@ const timeline = (r) =>
                                 </ul>
                             </div>
                             <div class="flex flex-wrap gap-2 lg:justify-end">
-                                <a v-if="r.preview_url" :href="r.preview_url" target="_blank" rel="noopener" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                                    <Icon name="document" :size="14" />Preview
-                                </a>
+                                <button v-if="r.download_url" type="button" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="viewing = r">
+                                    <Icon name="document" :size="14" />View Drawing
+                                </button>
                                 <a v-if="r.download_url" :href="r.download_url" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">
                                     <Icon name="download" :size="14" />Download
                                 </a>
@@ -157,6 +160,14 @@ const timeline = (r) =>
 
             <AuditTrail :entries="audit" title="Audit history" />
         </div>
+
+        <UniversalFileViewer
+            :show="!!viewing"
+            source="drawing_revision"
+            :file-id="viewing?.id ?? null"
+            :gallery="revisions.filter((revision) => revision.download_url).map((revision) => ({ source: 'drawing_revision', id: revision.id }))"
+            @close="viewing = null"
+        />
 
         <AppModal :show="editing" title="Drawing details" @close="editing = false">
             <div class="grid gap-4 sm:grid-cols-2">
@@ -184,13 +195,13 @@ const timeline = (r) =>
                 <FormInput v-model="uploadForm.revision_code" label="Revision code" required maxlength="10" uppercase help="Must be new for this drawing." :error="uploadForm.errors.revision_code" />
                 <FormInput v-model="uploadForm.remarks" label="Remarks" maxlength="1000" :error="uploadForm.errors.remarks" />
                 <div class="sm:col-span-2">
-                    <FileUpload :accept="extensions.map((e) => `.${e}`).join(',')" :max-mb="maxMb" hint="PDF, DWG, DXF or images" :error="uploadForm.errors.file" @select="uploadForm.file = $event" />
-                    <p v-if="uploadForm.file" class="mt-1 text-xs break-all text-slate-600">{{ uploadForm.file.name }}</p>
+                    <LargeFileUploader persist module="drawing" source-type="drawing" :source-id="drawing.id" @completed="(file) => (uploadForm.upload_id = file.id)" />
+                    <p v-if="uploadForm.errors.file || uploadForm.errors.upload_id" class="mt-1 text-xs text-red-700">{{ uploadForm.errors.file || uploadForm.errors.upload_id }}</p>
                 </div>
             </div>
             <template #footer>
                 <AppButton variant="secondary" @click="uploading = false">Back</AppButton>
-                <AppButton :loading="uploadForm.processing" :disabled="!uploadForm.file || !uploadForm.revision_code" @click="upload">Upload</AppButton>
+                <AppButton :loading="uploadForm.processing" :disabled="!uploadForm.upload_id || !uploadForm.revision_code" @click="upload">Upload</AppButton>
             </template>
         </AppModal>
 

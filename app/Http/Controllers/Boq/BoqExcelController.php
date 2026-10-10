@@ -32,7 +32,7 @@ class BoqExcelController extends Controller
         Gate::authorize('import', $boq);
 
         $request->validate([
-            'file' => ['required', 'file', 'max:10240', 'extensions:xlsx,xls,csv'],
+            'file' => ['required', 'file', 'max:'.(int) config('uploads.import_max_kb'), 'extensions:xlsx,xls,csv'],
         ]);
 
         $count = $this->imports->import($boq, $request->file('file'), $request->user()->can('boq.view_costs'));

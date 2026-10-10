@@ -1,6 +1,7 @@
 <script setup>
-import FileUpload from '@/Components/Form/FileUpload.vue';
+import UniversalFileViewer from '@/Components/Files/UniversalFileViewer.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
+import LargeFileUploader from '@/Components/Uploads/LargeFileUploader.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
 import EmptyState from '@/Components/UI/EmptyState.vue';
@@ -22,17 +23,14 @@ const props = defineProps({
     placeholder: { type: String, default: 'GST certificate, PAN, cancelled cheque…' },
 });
 
-const form = useForm({ attachable_type: props.attachableType, attachable_id: props.attachableId, category: '', file: null });
+const form = useForm({ attachable_type: props.attachableType, attachable_id: props.attachableId, category: '' });
+const viewing = ref(null);
 const removing = ref(null);
 const removeProcessing = ref(false);
 
-function upload(file) {
-    form.file = file;
-    form.post(route('attachments.store'), {
-        forceFormData: true,
-        preserveScroll: true,
-        onSuccess: () => form.reset('file', 'category'),
-    });
+function uploaded() {
+    form.reset('category');
+    router.reload({ preserveScroll: true });
 }
 
 function remove() {
@@ -59,10 +57,13 @@ function size(bytes) {
     <AppCard title="Documents" :subtitle="`${attachments.length} file${attachments.length === 1 ? '' : 's'}`" :padded="false">
         <div v-if="canUpload" class="space-y-3 border-b border-line p-4">
             <FormInput v-model="form.category" label="Document type (optional)" :placeholder="placeholder" maxlength="50" :error="form.errors.category" />
-            <FileUpload :error="form.errors.file" :disabled="form.processing" @select="upload" />
-            <div v-if="form.progress" class="h-1.5 overflow-hidden rounded-full bg-slate-100">
-                <div class="h-full bg-brand-500 transition-all" :style="{ width: `${form.progress.percentage}%` }" />
-            </div>
+            <LargeFileUploader
+                module="attachment"
+                :source-type="attachableType"
+                :source-id="attachableId"
+                :category="form.category"
+                @completed="uploaded"
+            />
         </div>
 
         <ul v-if="attachments.length" class="divide-y divide-line">
@@ -71,7 +72,7 @@ function size(bytes) {
                     {{ file.extension }}
                 </div>
                 <div class="min-w-0 flex-1">
-                    <a :href="file.download_url" class="block truncate text-sm font-medium text-slate-800 hover:text-brand-700">{{ file.original_name }}</a>
+                    <button type="button" class="block max-w-full truncate text-left text-sm font-medium text-slate-800 hover:text-brand-700" @click="viewing = file">{{ file.original_name }}</button>
                     <p class="truncate text-xs text-slate-500">
                         <template v-if="file.category">{{ file.category }} · </template>{{ size(file.size_bytes) }} · {{ file.uploaded_by ?? 'Unknown' }} ·
                         {{ formatDateTime(file.created_at) }}
@@ -92,6 +93,14 @@ function size(bytes) {
             </li>
         </ul>
         <EmptyState v-else icon="paperclip" title="No documents yet" />
+
+        <UniversalFileViewer
+            :show="!!viewing"
+            source="attachment"
+            :file-id="viewing?.id ?? null"
+            :gallery="attachments.map((file) => ({ source: 'attachment', id: file.id }))"
+            @close="viewing = null"
+        />
 
         <ConfirmDialog
             :show="!!removing"

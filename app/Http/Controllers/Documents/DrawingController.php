@@ -12,8 +12,10 @@ use App\Models\Documents\Drawing;
 use App\Models\Documents\DrawingRevision;
 use App\Models\Projects\Project;
 use App\Models\User;
+use App\Services\Attachments\FileTypeGuard;
 use App\Services\Attachments\PrivateFileStore;
 use App\Services\Documents\DrawingService;
+use App\Services\Uploads\LargeFileUploadService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -27,6 +29,7 @@ class DrawingController extends Controller
     public function __construct(
         private readonly DrawingService $drawings,
         private readonly PrivateFileStore $files,
+        private readonly LargeFileUploadService $uploads,
     ) {}
 
     public function index(Request $request, Project $project): Response
@@ -93,7 +96,9 @@ class DrawingController extends Controller
             'remarks' => ['nullable', 'string', 'max:1000'],
             ...$this->fileRules(),
         ]);
-        [$drawing, $revision] = $this->drawings->create($project, $data, $request->file('file'), $request->user());
+        $file = $this->uploads->fileFromRequest($request);
+        [$drawing, $revision] = $this->drawings->create($project, $data, $file, $request->user());
+        $this->uploads->release($request->user(), $request->input('upload_id'));
 
         return redirect()->route('projects.drawings.show', [$project, $drawing])
             ->with('success', "Drawing {$drawing->drawing_number} registered with revision {$revision->revision_code} (draft). Submit it for review when ready.");
@@ -149,7 +154,9 @@ class DrawingController extends Controller
             'remarks' => ['nullable', 'string', 'max:1000'],
             ...$this->fileRules(),
         ]);
-        $revision = $this->drawings->uploadRevision($drawing, $data, $request->file('file'), $request->user());
+        $file = $this->uploads->fileFromRequest($request);
+        $revision = $this->drawings->uploadRevision($drawing, $data, $file, $request->user());
+        $this->uploads->release($request->user(), $request->input('upload_id'));
         $duplicate = $this->drawings->duplicateOf($revision);
 
         return back()->with('success', "Revision {$revision->revision_code} uploaded as draft."
@@ -223,9 +230,7 @@ class DrawingController extends Controller
      */
     private function fileRules(): array
     {
-        $maxKb = (int) config('uploads.max_kb');
-
-        return ['file' => ['required', 'file', "max:{$maxKb}", 'extensions:'.implode(',', config('uploads.drawing_extensions'))]];
+        return FileTypeGuard::fileRules();
     }
 
     /**

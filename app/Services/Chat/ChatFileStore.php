@@ -11,16 +11,13 @@ use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Private chat files. The allow-list is local so a text file or drawing here does not widen
- * every other upload in the ERP. Executables and scripts are not in the list.
+ * Private chat files. Types and the per-file ceiling come from the shared upload policy.
+ * At most five files are attached to one message so the browser is not asked to juggle
+ * several 1 GB transfers at once.
  */
 class ChatFileStore
 {
-    public const MAX_BYTES = 2 * 1024 * 1024;
-
     public const MAX_FILES = 5;
-
-    public const MAX_TOTAL_BYTES = 6 * 1024 * 1024;
 
     public function __construct(private readonly FileTypeGuard $guard) {}
 
@@ -30,13 +27,13 @@ class ChatFileStore
     public function put(UploadedFile $file, int $companyId): array
     {
         if (! $file->isValid()) {
-            throw ValidationException::withMessages(['files' => 'A file is larger than the server limit of 2 MB.']);
+            throw ValidationException::withMessages(['files' => 'Upload interrupted — Retry']);
         }
-        if ($file->getSize() > self::MAX_BYTES) {
-            throw ValidationException::withMessages(['files' => 'Each file must be 2 MB or smaller.']);
+        if ($file->getSize() > (int) config('uploads.max_file_size_bytes')) {
+            throw ValidationException::withMessages(['files' => 'File exceeds 1 GB']);
         }
-        if (! $this->guard->accepts($file, $this->types())) {
-            throw ValidationException::withMessages(['files' => 'This file type is not allowed.']);
+        if (! $this->guard->isAllowed($file)) {
+            throw ValidationException::withMessages(['files' => 'File type not permitted for security reasons']);
         }
 
         $extension = strtolower($file->getClientOriginalExtension());
@@ -90,15 +87,5 @@ class ChatFileStore
             'X-Content-Type-Options' => 'nosniff',
             'Cache-Control' => 'private, no-store',
         ], $inline ? 'inline' : 'attachment');
-    }
-
-    /**
-     * @return array<string, list<string>>
-     */
-    private function types(): array
-    {
-        $keep = ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'dwg', 'dxf'];
-
-        return array_intersect_key(config('uploads.allowed'), array_flip($keep)) + ['txt' => ['text/plain']];
     }
 }

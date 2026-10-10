@@ -7,6 +7,7 @@ use App\Models\Projects\Project;
 use App\Models\SiteExecution\SiteDiary;
 use App\Models\SiteExecution\SiteDiaryPhoto;
 use App\Services\SiteExecution\SiteDiaryPhotoService;
+use App\Services\Uploads\LargeFileUploadService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -18,11 +19,34 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class SiteDiaryPhotoController extends Controller
 {
-    public function __construct(private readonly SiteDiaryPhotoService $photos) {}
+    public function __construct(
+        private readonly SiteDiaryPhotoService $photos,
+        private readonly LargeFileUploadService $uploads,
+    ) {}
 
     public function store(Request $request, Project $project, SiteDiary $siteDiary): RedirectResponse
     {
         Gate::authorize('update', $siteDiary);
+
+        if ($request->filled('upload_id')) {
+            $data = $request->validate([
+                'upload_id' => ['required', 'uuid'],
+                'caption' => ['nullable', 'string', 'max:255'],
+                'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+                'longitude' => ['nullable', 'numeric', 'between:-180,180'],
+                'taken_at' => ['nullable', 'date', 'before_or_equal:'.now()->addDay()->toDateString()],
+            ]);
+            $file = $this->uploads->claim($request->user(), $data['upload_id']);
+            $this->photos->store($siteDiary, $file, [
+                'caption' => $data['caption'] ?? null,
+                'latitude' => isset($data['latitude']) ? round((float) $data['latitude'], 7) : null,
+                'longitude' => isset($data['longitude']) ? round((float) $data['longitude'], 7) : null,
+                'taken_at' => $data['taken_at'] ?? null,
+            ]);
+            $this->uploads->release($request->user(), $data['upload_id']);
+
+            return back()->with('success', 'Photo added.');
+        }
 
         $maxKb = (int) config('uploads.photo_max_kb');
         $data = $request->validate([

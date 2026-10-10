@@ -3,12 +3,13 @@ import DecimalInput from '@/Components/Form/DecimalInput.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import SearchSelect from '@/Components/Form/SearchSelect.vue';
 import PhotoCapture from '@/Components/SiteExecution/PhotoCapture.vue';
+import LargeFileUploader from '@/Components/Uploads/LargeFileUploader.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import Icon from '@/Components/UI/Icon.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatQty } from '@/lib/format';
-import { Link, useForm } from '@inertiajs/vue3';
+import { Link, router, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 const props = defineProps({
@@ -288,6 +289,16 @@ function save(intent = 'draft') {
                     :can-edit="true"
                     :max-kb="photoMaxKb"
                 />
+                <div v-if="editing" class="mt-4 border-t border-line pt-4">
+                    <p class="mb-2 text-xs text-slate-500">Large photos upload in parts. Camera shots above stay on the smaller capture limit.</p>
+                    <LargeFileUploader
+                        module="site_photo"
+                        source-type="site_diary"
+                        :source-id="diary.id"
+                        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                        @completed="(file) => router.post(route('projects.site-diaries.photos.store', [project.id, diary.id]), { upload_id: file.id }, { preserveScroll: true })"
+                    />
+                </div>
                 <div v-else class="flex flex-col items-start gap-3 text-sm text-slate-600">
                     <p>Save the draft first, then add photos from the camera or gallery.</p>
                     <AppButton icon="camera" class="min-h-11" :loading="form.processing" @click="save('photos')">Save draft &amp; add photos</AppButton>

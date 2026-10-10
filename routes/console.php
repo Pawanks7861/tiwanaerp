@@ -10,3 +10,4 @@ Artisan::command('inspire', function () {
 
 Schedule::command('inventory:scan-low-stock')->dailyAt('07:00')->withoutOverlapping();
 Schedule::command('planning:flag-delays')->dailyAt('06:30')->withoutOverlapping();
+Schedule::command('uploads:cleanup')->hourly()->withoutOverlapping();

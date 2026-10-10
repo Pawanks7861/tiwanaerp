@@ -1,6 +1,7 @@
 <script setup>
 import ReasonDialog from '@/Components/Inventory/ReasonDialog.vue';
 import PhotoCapture from '@/Components/SiteExecution/PhotoCapture.vue';
+import LargeFileUploader from '@/Components/Uploads/LargeFileUploader.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
@@ -189,6 +190,16 @@ const timeline = computed(() => [
                     :delete-route="can.update ? (photo) => route('projects.site-diaries.photos.destroy', [...base, photo.id]) : null"
                     :can-edit="can.update"
                 />
+                <div v-if="can.update" class="border-t border-line p-4">
+                    <p class="mb-2 text-xs text-slate-500">Large photos upload in parts. Camera shots above stay on the smaller capture limit.</p>
+                    <LargeFileUploader
+                        module="site_photo"
+                        source-type="site_diary"
+                        :source-id="diary.id"
+                        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                        @completed="(file) => router.post(route('projects.site-diaries.photos.store', base), { upload_id: file.id }, { preserveScroll: true })"
+                    />
+                </div>
             </AppCard>
         </div>
 

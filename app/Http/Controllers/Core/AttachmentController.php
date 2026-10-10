@@ -10,13 +10,14 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AttachmentController extends Controller
 {
     /** Morph aliases that accept attachments. */
-    private const ATTACHABLE = [
+    public const ATTACHABLE = [
         'vendor', 'subcontractor', 'client',
         'material_request', 'rfq', 'vendor_quotation', 'purchase_order', 'grn',
         'material_issue', 'stock_transfer', 'material_return', 'stock_adjustment',
@@ -36,7 +37,11 @@ class AttachmentController extends Controller
             'attachable_type' => ['required', 'string', 'in:'.implode(',', self::ATTACHABLE)],
             'attachable_id' => ['required', 'integer'],
             'category' => ['nullable', 'string', 'max:50'],
-            'file' => ['required', 'file', "max:{$maxKb}", 'extensions:'.implode(',', FileTypeGuard::extensions())],
+            'file' => ['required', 'file', "max:{$maxKb}", function (string $attribute, mixed $value, \Closure $fail): void {
+                if ($value instanceof UploadedFile && ! app(FileTypeGuard::class)->isAllowed($value)) {
+                    $fail('File type not permitted for security reasons');
+                }
+            }],
         ]);
 
         /** @var class-string<Model> $class */

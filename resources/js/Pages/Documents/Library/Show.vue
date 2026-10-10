@@ -1,6 +1,7 @@
 <script setup>
+import UniversalFileViewer from '@/Components/Files/UniversalFileViewer.vue';
 import AuditTrail from '@/Components/Audit/AuditTrail.vue';
-import FileUpload from '@/Components/Form/FileUpload.vue';
+import LargeFileUploader from '@/Components/Uploads/LargeFileUploader.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import FormSelect from '@/Components/Form/FormSelect.vue';
 import SearchSelect from '@/Components/Form/SearchSelect.vue';
@@ -15,6 +16,8 @@ import { formatBytes } from '@/lib/files';
 import { formatDateTime } from '@/lib/format';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+
+const viewing = ref(null);
 
 const props = defineProps({
     project: { type: Object, required: true },
@@ -47,7 +50,7 @@ function saveDetails() {
 }
 
 const uploading = ref(false);
-const versionForm = useForm({ revision_label: '', notes: '', file: null });
+const versionForm = useForm({ revision_label: '', notes: '', upload_id: null });
 function openUpload() {
     versionForm.reset();
     versionForm.clearErrors();
@@ -132,9 +135,9 @@ function confirmAction() {
                             <p class="mt-1 text-xs text-slate-500">Uploaded {{ formatDateTime(v.uploaded_at) }}<template v-if="v.uploaded_by"> by {{ v.uploaded_by }}</template></p>
                         </div>
                         <div class="flex flex-wrap gap-2 lg:justify-end">
-                            <a v-if="v.preview_url" :href="v.preview_url" target="_blank" rel="noopener" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                                <Icon name="document" :size="14" />Preview
-                            </a>
+                            <button type="button" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="viewing = v">
+                                <Icon name="document" :size="14" />View
+                            </button>
                             <a :href="v.download_url" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">
                                 <Icon name="download" :size="14" />Download
                             </a>
@@ -145,6 +148,14 @@ function confirmAction() {
 
             <AuditTrail :entries="audit" title="Audit history" />
         </div>
+
+        <UniversalFileViewer
+            :show="!!viewing"
+            source="document_version"
+            :file-id="viewing?.id ?? null"
+            :gallery="versions.map((version) => ({ source: 'document_version', id: version.id }))"
+            @close="viewing = null"
+        />
 
         <AppModal :show="editing" title="Document details" @close="editing = false">
             <div class="grid gap-4 sm:grid-cols-2">
@@ -167,14 +178,14 @@ function confirmAction() {
                 <FormInput v-model="versionForm.revision_label" label="Revision label" maxlength="30" :error="versionForm.errors.revision_label" />
                 <FormInput v-model="versionForm.notes" label="Notes" maxlength="1000" :error="versionForm.errors.notes" />
                 <div class="sm:col-span-2">
-                    <FileUpload :accept="extensions.map((e) => `.${e}`).join(',')" :max-mb="maxMb" :error="versionForm.errors.file" @select="versionForm.file = $event" />
-                    <p v-if="versionForm.file" class="mt-1 text-xs break-all text-slate-600">{{ versionForm.file.name }}</p>
+                    <LargeFileUploader persist module="document" source-type="document" :source-id="document.id" @completed="(file) => (versionForm.upload_id = file.id)" />
+                    <p v-if="versionForm.errors.file || versionForm.errors.upload_id" class="mt-1 text-xs text-red-700">{{ versionForm.errors.file || versionForm.errors.upload_id }}</p>
                 </div>
             </div>
             <p v-if="versionForm.errors.document" class="mt-2 text-sm text-red-700">{{ versionForm.errors.document }}</p>
             <template #footer>
                 <AppButton variant="secondary" @click="uploading = false">Back</AppButton>
-                <AppButton :loading="versionForm.processing" :disabled="!versionForm.file" @click="upload">Upload</AppButton>
+                <AppButton :loading="versionForm.processing" :disabled="!versionForm.upload_id" @click="upload">Upload</AppButton>
             </template>
         </AppModal>
 
