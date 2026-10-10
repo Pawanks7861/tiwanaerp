@@ -19,6 +19,17 @@ import { computed, ref } from 'vue';
 
 const viewing = ref(null);
 
+const retryNotice = ref('');
+
+function retryPreview(version) {
+    retryNotice.value = '';
+    window.axios.post(route('files.preview.retry', { source: 'document_version', id: version.id })).then(() => router.reload({ preserveScroll: true })).catch((error) => {
+        retryNotice.value = error?.response?.status === 429
+            ? 'Wait a moment before retrying the preview.'
+            : 'Preview generation failed';
+    });
+}
+
 const props = defineProps({
     project: { type: Object, required: true },
     document: { type: Object, required: true },
@@ -115,6 +126,7 @@ function confirmAction() {
                 <p v-if="errorMessage" class="border-t border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 sm:px-5">{{ errorMessage }}</p>
             </AppCard>
 
+            <p v-if="retryNotice" class="mb-3 text-sm text-slate-600">{{ retryNotice }}</p>
             <AppCard title="Version history" subtitle="Versions are immutable and never deleted. The newest version is current." :padded="false">
                 <ul class="divide-y divide-line">
                     <li v-for="v in versions" :key="v.id" class="flex flex-col gap-3 p-4 lg:flex-row lg:items-start lg:justify-between" :class="v.is_current ? 'bg-green-50/50' : ''">
@@ -135,9 +147,11 @@ function confirmAction() {
                             <p class="mt-1 text-xs text-slate-500">Uploaded {{ formatDateTime(v.uploaded_at) }}<template v-if="v.uploaded_by"> by {{ v.uploaded_by }}</template></p>
                         </div>
                         <div class="flex flex-wrap gap-2 lg:justify-end">
-                            <button type="button" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="viewing = v">
-                                <Icon name="document" :size="14" />View
+                            <button v-if="!['pending', 'processing', 'failed'].includes(v.preview?.status)" type="button" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="viewing = v">
+                                <Icon name="document" :size="14" />{{ ['dwg', 'dxf'].includes(v.extension) && v.preview?.status === 'ready' ? 'View Drawing' : 'View' }}
                             </button>
+                            <span v-if="['pending', 'processing'].includes(v.preview?.status)" class="inline-flex h-8 items-center text-xs text-slate-500">Generating Preview</span>
+                            <button v-if="v.preview?.status === 'failed'" type="button" class="inline-flex h-8 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700" @click="retryPreview(v)">Retry Preview</button>
                             <a :href="v.download_url" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">
                                 <Icon name="download" :size="14" />Download
                             </a>

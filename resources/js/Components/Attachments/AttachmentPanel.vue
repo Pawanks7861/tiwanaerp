@@ -28,6 +28,10 @@ const viewing = ref(null);
 const removing = ref(null);
 const removeProcessing = ref(false);
 
+function retry(file) {
+    window.axios.post(route('files.preview.retry', { source: 'attachment', id: file.id })).then(() => router.reload({ preserveScroll: true })).catch(() => {});
+}
+
 function uploaded() {
     form.reset('category');
     router.reload({ preserveScroll: true });
@@ -77,6 +81,11 @@ function size(bytes) {
                         <template v-if="file.category">{{ file.category }} · </template>{{ size(file.size_bytes) }} · {{ file.uploaded_by ?? 'Unknown' }} ·
                         {{ formatDateTime(file.created_at) }}
                     </p>
+                    <p v-if="file.preview?.status === 'pending' || file.preview?.status === 'processing'" class="text-xs text-slate-500">Generating drawing preview…</p>
+                    <p v-else-if="file.preview?.status === 'failed'" class="text-xs text-slate-500">Preview generation failed</p>
+                    <p v-else-if="file.preview?.status === 'unsupported'" class="text-xs text-slate-500">{{ file.preview.message }}</p>
+                    <button v-if="file.preview?.status === 'ready' && ['dwg', 'dxf'].includes(file.extension)" type="button" class="text-xs font-medium text-brand-700" @click="viewing = file">View Drawing</button>
+                    <button v-if="file.preview?.status === 'failed'" type="button" class="text-xs font-medium text-brand-700" @click="retry(file)">Retry Preview</button>
                 </div>
                 <a :href="file.download_url" class="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" :aria-label="`Download ${file.original_name}`">
                     <Icon name="download" :size="18" />

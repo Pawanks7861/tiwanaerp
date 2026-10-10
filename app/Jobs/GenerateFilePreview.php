@@ -23,13 +23,15 @@ class GenerateFilePreview implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 180;
+    public int $timeout = 210;
 
     public function __construct(
         public readonly string $source,
         public readonly int $id,
         public readonly int $companyId,
-    ) {}
+    ) {
+        $this->timeout = min(360, max(60, (int) config('previews.cad.timeout', 180) + 30));
+    }
 
     public function handle(FileSourceResolver $files, FilePreviewService $previews, CurrentCompany $current): void
     {

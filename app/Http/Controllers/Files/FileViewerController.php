@@ -3,9 +3,13 @@
 namespace App\Http\Controllers\Files;
 
 use App\Http\Controllers\Controller;
+use App\Models\Files\FileExternalAccess;
 use App\Services\Files\FilePreviewService;
 use App\Services\Files\FileSourceResolver;
+use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -40,5 +44,35 @@ class FileViewerController extends Controller
     public function download(string $source, int $id): Response
     {
         return $this->previews->download($this->files->authorize($source, $id));
+    }
+
+    public function retry(string $source, int $id): JsonResponse
+    {
+        $file = $this->files->authorize($source, $id);
+        $this->previews->retry($file);
+
+        return response()->json([
+            'file' => $this->previews->describe($file),
+        ]);
+    }
+
+    public function externalAccess(Request $request, string $source, int $id): JsonResponse
+    {
+        $file = $this->files->authorize($source, $id);
+        Gate::authorize('manageSettings', app(CurrentCompany::class)->require());
+        abort_unless(in_array($file->extension, ['dwg', 'dxf'], true), 404);
+
+        $request->validate(['allow' => ['required', 'boolean']]);
+
+        $row = FileExternalAccess::query()->firstOrNew([
+            'source_type' => $file->source,
+            'source_id' => $file->id,
+        ]);
+        $row->allow_external = $request->boolean('allow');
+        $row->save();
+
+        return response()->json([
+            'file' => $this->previews->describe($file),
+        ]);
     }
 }

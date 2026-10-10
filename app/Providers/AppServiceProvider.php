@@ -50,6 +50,8 @@ use App\Models\Equipment\EquipmentAssignment;
 use App\Models\Equipment\EquipmentFuelLog;
 use App\Models\Equipment\EquipmentRepair;
 use App\Models\Equipment\EquipmentUsageLog;
+use App\Models\Files\ExternalPreviewToken;
+use App\Models\Files\FileExternalAccess;
 use App\Models\Finance\ClientInvoice;
 use App\Models\Finance\ClientInvoiceItem;
 use App\Models\Finance\Expense;
@@ -183,6 +185,7 @@ use App\Policies\SitePolicy;
 use App\Policies\Subcontract\SubcontractorBillPolicy;
 use App\Policies\Subcontract\WorkOrderPolicy;
 use App\Policies\UserPolicy;
+use App\Services\Files\Cad\CadPreviewManager;
 use App\Services\Files\LocalPreviewConverter;
 use App\Services\Files\PreviewConverter;
 use App\Services\Uploads\NullFileSecurityScanner;
@@ -207,7 +210,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(CurrentCompany::class);
         $this->app->singleton(FileSecurityScannerInterface::class, NullFileSecurityScanner::class);
-        $this->app->singleton(PreviewConverter::class, LocalPreviewConverter::class);
+        $this->app->singleton(PreviewConverter::class, fn ($app) => new LocalPreviewConverter($app->make(CadPreviewManager::class)));
         $this->app->scoped(DashboardCache::class);
 
         foreach (MasterPolicy::PERMISSIONS as $prefix) {
@@ -338,6 +341,8 @@ class AppServiceProvider extends ServiceProvider
             'ncr' => Ncr::class,
             'drawing' => Drawing::class,
             'drawing_revision' => DrawingRevision::class,
+            'external_preview_token' => ExternalPreviewToken::class,
+            'file_external_access' => FileExternalAccess::class,
             'document_folder' => DocumentFolder::class,
             'document' => Document::class,
             'document_version' => DocumentVersion::class,

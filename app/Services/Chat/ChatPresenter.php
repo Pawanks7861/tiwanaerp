@@ -6,6 +6,7 @@ use App\Models\Chat\Conversation;
 use App\Models\Chat\Message;
 use App\Models\Chat\MessageAttachment;
 use App\Models\User;
+use App\Services\Files\FilePreviewService;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -154,6 +155,8 @@ class ChatPresenter
                 'size' => $file->size_bytes,
                 'mime' => $file->mime,
                 'image' => in_array($file->extension(), ['jpg', 'jpeg', 'png', 'webp'], true),
+                'extension' => $file->extension(),
+                'preview' => app(FilePreviewService::class)->card('chat', (int) $file->id, $file->extension()),
                 'url' => route('chat.attachments.show', $file),
             ])->all(),
         ];

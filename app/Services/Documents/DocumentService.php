@@ -10,6 +10,7 @@ use App\Models\Documents\DocumentVersion;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Attachments\PrivateFileStore;
+use App\Services\Files\FilePreviewService;
 use App\Services\Numbering\DocumentNumberService;
 use Closure;
 use Illuminate\Http\UploadedFile;
@@ -222,6 +223,7 @@ class DocumentService
             'file' => $stored['file_name'],
             'checksum' => $stored['checksum'],
         ]);
+        app(FilePreviewService::class)->enqueue('document_version', (int) $version->id);
 
         return $version;
     }

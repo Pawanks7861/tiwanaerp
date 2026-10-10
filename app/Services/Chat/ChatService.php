@@ -9,6 +9,7 @@ use App\Models\Chat\Message;
 use App\Models\Chat\MessageAttachment;
 use App\Models\Core\CompanyUser;
 use App\Models\User;
+use App\Services\Files\FilePreviewService;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -105,6 +106,7 @@ class ChatService
                         'message_id' => $message->id,
                         'uploaded_by' => $sender->id,
                     ])->save();
+                    app(FilePreviewService::class)->enqueue('chat', (int) $attachment->id);
                 }
 
                 $conversation->touch();

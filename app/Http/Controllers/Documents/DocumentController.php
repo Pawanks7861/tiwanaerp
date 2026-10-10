@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\Attachments\FileTypeGuard;
 use App\Services\Attachments\PrivateFileStore;
 use App\Services\Documents\DocumentService;
+use App\Services\Files\FilePreviewService;
 use App\Services\Uploads\LargeFileUploadService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -147,6 +148,7 @@ class DocumentController extends Controller
                 'is_current' => $v->id === $document->current_version_id,
                 'duplicate_of' => ($first = $firstByChecksum[$v->checksum] ?? null) !== null && $first !== $v->version_no ? $first : null,
                 'download_url' => route('projects.documents.versions.download', [$project, $document, $v]),
+                'preview' => app(FilePreviewService::class)->card('document_version', (int) $v->id, (string) $v->extension),
                 'preview_url' => PrivateFileStore::isPreviewable($v->extension) ? route('projects.documents.versions.preview', [$project, $document, $v]) : null,
             ])->all(),
             'folders' => $this->folderOptions($project),

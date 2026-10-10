@@ -14,6 +14,7 @@ use App\Models\Uploads\UploadSession;
 use App\Models\User;
 use App\Services\Attachments\FileTypeGuard;
 use App\Services\Chat\ChatService;
+use App\Services\Files\FilePreviewService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -647,6 +648,8 @@ class LargeFileUploadService
                     'scan_status' => $this->scanner->status(),
                     'completed_at' => now(),
                 ])->save();
+
+                app(FilePreviewService::class)->enqueue('attachment', (int) $attachment->id);
             });
         } catch (ValidationException $e) {
             Storage::disk($session->disk)->delete($final);

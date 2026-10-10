@@ -4,6 +4,9 @@ namespace App\Services\Files;
 
 use App\Jobs\GenerateFilePreview;
 use App\Models\Files\FilePreview;
+use App\Services\Files\Cad\CadPreviewValidator;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -42,6 +45,8 @@ class FilePreviewService
         private readonly SvgSanitizer $svg,
         private readonly DxfSvgEncoder $dxf,
         private readonly LocalPreviewConverter $staging,
+        private readonly CadPreviewValidator $drawings,
+        private readonly ShareCadPreview $sharecad,
     ) {}
 
     /**
@@ -50,7 +55,9 @@ class FilePreviewService
     public function describe(PreviewableFile $file): array
     {
         $strategy = $this->strategy($file);
-        $preview = in_array($strategy, ['office', 'cad'], true) ? $this->prepare($file) : null;
+        $decision = $strategy === 'cad' ? $this->sharecad->decision($file) : null;
+        $useSharecad = $decision !== null && $decision['use'] && $decision['mode'] === 'sharecad';
+        $preview = in_array($strategy, ['office', 'cad'], true) && ! $useSharecad ? $this->prepare($file) : null;
         $status = $preview?->status ?? ($strategy === 'download' ? FilePreview::UNSUPPORTED : FilePreview::READY);
         $message = $preview?->error_message;
         $truncated = false;
@@ -61,6 +68,23 @@ class FilePreviewService
             if ($status !== FilePreview::READY) {
                 $strategy = 'download';
             }
+        }
+
+        if ($decision !== null && $decision['use'] && $decision['mode'] === 'auto' && $preview?->status !== FilePreview::READY && ! $this->converter->cadAvailable()) {
+            $useSharecad = true;
+        }
+
+        $externalViewer = null;
+        if ($useSharecad) {
+            $strategy = 'external';
+            $status = FilePreview::READY;
+            $message = null;
+            $externalViewer = $this->sharecad->frame($file);
+        }
+
+        $message = $this->publicMessage($file, $status, $message);
+        if ($decision !== null && $decision['too_large'] && ! in_array($status, [FilePreview::READY, FilePreview::PENDING, FilePreview::PROCESSING], true) && ! in_array($message, [PreviewConversionException::TIMED_OUT, PreviewConversionException::LIMITED], true)) {
+            $message = ShareCadPreview::TOO_LARGE;
         }
 
         return [
@@ -76,6 +100,8 @@ class FilePreviewService
             'strategy' => $strategy,
             'status' => $status,
             'message' => $message,
+            'preview_format' => $useSharecad ? null : $preview?->preview_format,
+            'can_retry' => $strategy === 'cad' && $status === FilePreview::FAILED,
             'note' => $strategy === 'cad' && $status === FilePreview::READY
                 ? 'Preview generated from '.strtoupper($file->extension).'. Original file unchanged.'
                 : null,
@@ -84,6 +110,9 @@ class FilePreviewService
             'download_url' => route('files.download', ['source' => $file->source, 'id' => $file->id]),
             'stream_url' => route('files.stream', ['source' => $file->source, 'id' => $file->id]),
             'preview_url' => route('files.preview', ['source' => $file->source, 'id' => $file->id]),
+            'external_viewer' => $externalViewer,
+            'allow_external' => $this->sharecad->allows($file),
+            'can_manage_external' => $this->sharecad->canManage(),
         ];
     }
 
@@ -160,6 +189,62 @@ class FilePreviewService
         return $this->file($file->disk, $file->path, 'application/octet-stream', $this->safeName($file->name), false);
     }
 
+    /**
+     * Queue a DWG preview after the source row is committed. The HTTP response is not held for conversion.
+     */
+    public function enqueue(string $source, int $id): void
+    {
+        DB::afterCommit(function () use ($source, $id) {
+            $this->enqueueNow($source, $id);
+        });
+    }
+
+    /**
+     * @return array{status: ?string, message: ?string}|null
+     */
+    public function card(string $source, int $id, string $extension): ?array
+    {
+        if (! in_array(strtolower($extension), ['dwg', 'dxf'], true)) {
+            return null;
+        }
+
+        $row = FilePreview::query()->where('source_type', $source)->where('source_id', $id)->first();
+
+        return [
+            'status' => $row?->status,
+            'message' => $row === null ? null : $this->publicMessage(
+                new PreviewableFile($source, $id, (int) $row->company_id, 'private', '', '', strtolower($extension), 0, null, null, null),
+                $row->status,
+                $row->error_message,
+            ),
+        ];
+    }
+
+    public function retry(PreviewableFile $file): FilePreview
+    {
+        abort_unless(in_array($file->extension, ['dwg', 'dxf'], true), 404);
+
+        $existing = $this->fresh($file);
+        if ($existing?->status === FilePreview::READY) {
+            return $existing;
+        }
+
+        if ($existing !== null && in_array($existing->status, [FilePreview::PENDING, FilePreview::PROCESSING], true) && $existing->updated_at !== null && $existing->updated_at->gt(now()->subMinutes(15))) {
+            return $existing;
+        }
+
+        $key = $this->retryKey($file);
+        Cache::forget($key);
+        if (! Cache::add($key, 1, now()->addSeconds(30))) {
+            abort(429, 'Wait a moment before retrying the preview.');
+        }
+
+        $pending = $this->save($file, FilePreview::PENDING, null, null, null);
+        $this->dispatchJob($file);
+
+        return $pending->fresh() ?? $pending;
+    }
+
     public function purge(string $source, int $id): void
     {
         $rows = FilePreview::query()->where('source_type', $source)->where('source_id', $id)->get();
@@ -196,6 +281,10 @@ class FilePreviewService
             return $existing;
         }
 
+        if ($existing !== null && in_array($existing->status, [FilePreview::PENDING, FilePreview::PROCESSING], true) && $existing->updated_at !== null && $existing->updated_at->gt(now()->subMinutes(15))) {
+            return $existing;
+        }
+
         if ($file->extension === 'dxf' && $file->size <= 2_000_000) {
             $svg = $this->dxfSvg($file);
             if ($svg !== null) {
@@ -205,10 +294,6 @@ class FilePreviewService
 
         if (! $this->converterAvailable($file)) {
             return $this->save($file, FilePreview::UNSUPPORTED, $this->unavailableMessage($file), null, null);
-        }
-
-        if ($existing !== null && in_array($existing->status, [FilePreview::PENDING, FilePreview::PROCESSING], true) && $existing->updated_at !== null && $existing->updated_at->gt(now()->subMinutes(15))) {
-            return $existing;
         }
 
         $pending = $this->save($file, FilePreview::PENDING, null, null, null);
@@ -225,6 +310,8 @@ class FilePreviewService
         }
 
         $this->save($file, FilePreview::PROCESSING, null, $current?->preview_path, $current?->preview_format);
+        $directory = null;
+        $cad = false;
 
         try {
             if ($file->extension === 'dxf') {
@@ -242,17 +329,14 @@ class FilePreviewService
                 return;
             }
 
-            $directory = $this->stageDirectory();
+            $cad = in_array($file->extension, ['dwg', 'dxf'], true);
+            $directory = $cad ? $this->cadWorkspace() : $this->stageDirectory();
             $staged = $directory.DIRECTORY_SEPARATOR.$this->staging->stagedBasename($file->extension);
             $this->copyStream($file, $staged);
 
-            if (in_array($file->extension, ['dwg', 'dxf'], true)) {
+            if ($cad) {
                 $produced = $this->converter->toSvg($staged, $directory);
-                $svg = $this->svg->sanitize($this->readCapped($produced));
-                if ($svg === null) {
-                    throw new PreviewConversionException(PreviewConversionException::FAILED);
-                }
-                $this->storeGenerated($file, $svg, 'svg');
+                $this->storeCadOutput($file, $produced);
             } else {
                 $produced = $this->converter->toPdf($staged, $directory);
                 $this->storeFile($file, $produced, 'pdf');
@@ -263,9 +347,81 @@ class FilePreviewService
         } catch (\Throwable) {
             $this->save($file, FilePreview::FAILED, PreviewConversionException::FAILED, null, null);
         } finally {
+            Cache::forget($this->retryKey($file));
             if (isset($directory)) {
-                Storage::disk('private')->deleteDirectory('previews-tmp/'.basename($directory));
+                $cad ? $this->removeCadWorkspace($directory) : Storage::disk('private')->deleteDirectory('previews-tmp/'.basename($directory));
             }
+        }
+    }
+
+    private function retryKey(PreviewableFile $file): string
+    {
+        return 'cad-preview-retry:'.$file->companyId.':'.$file->source.':'.$file->id;
+    }
+
+    private function storeCadOutput(PreviewableFile $file, string $produced): void
+    {
+        $format = str_ends_with(strtolower($produced), '.pdf') ? 'pdf' : 'svg';
+        if (! $this->drawings->acceptable($produced, $format)) {
+            throw new PreviewConversionException(PreviewConversionException::FAILED);
+        }
+
+        if ($format === 'pdf') {
+            $this->storeFile($file, $produced, 'pdf');
+
+            return;
+        }
+
+        $svg = $this->svg->sanitize($this->readCapped($produced));
+        if ($svg === null || ! $this->drawings->containsDrawable($svg)) {
+            throw new PreviewConversionException(PreviewConversionException::FAILED);
+        }
+
+        $this->storeGenerated($file, $this->drawings->visibleStrokes($this->drawings->fitCanvas($svg)), 'svg');
+    }
+
+    private function enqueueNow(string $source, int $id): void
+    {
+        try {
+            $file = app(FileSourceResolver::class)->locate($source, $id);
+        } catch (\Throwable) {
+            return;
+        }
+
+        if ($file->extension !== 'dwg') {
+            return;
+        }
+
+        $existing = $this->fresh($file);
+        if ($existing?->status === FilePreview::READY) {
+            return;
+        }
+
+        if ($existing !== null && in_array($existing->status, [FilePreview::PENDING, FilePreview::PROCESSING], true) && $existing->updated_at !== null && $existing->updated_at->gt(now()->subMinutes(15))) {
+            return;
+        }
+
+        if (! $this->converter->cadAvailable()) {
+            $this->save($file, FilePreview::UNSUPPORTED, PreviewConversionException::UNAVAILABLE, null, null);
+
+            return;
+        }
+
+        $this->save($file, FilePreview::PENDING, null, null, null);
+        $this->dispatchJob($file);
+    }
+
+    private function dispatchJob(PreviewableFile $file): void
+    {
+        $pending = GenerateFilePreview::dispatch($file->source, $file->id, $file->companyId);
+        if (app()->runningInConsole() && config('queue.default') === 'sync') {
+            $pending->onConnection('database');
+
+            return;
+        }
+
+        if (! app()->runningInConsole()) {
+            $pending->afterResponse();
         }
     }
 
@@ -289,11 +445,60 @@ class FilePreviewService
 
     private function unavailableMessage(PreviewableFile $file): string
     {
-        return match ($file->extension) {
-            'dwg' => 'DWG preview unavailable on this server',
-            'dxf' => 'DXF preview unavailable on this server',
-            default => 'Preview not available',
-        };
+        return in_array($file->extension, ['dwg', 'dxf'], true)
+            ? PreviewConversionException::UNAVAILABLE
+            : 'Preview not available';
+    }
+
+    private function publicMessage(PreviewableFile $file, string $status, ?string $stored): ?string
+    {
+        if (! in_array($file->extension, ['dwg', 'dxf'], true)) {
+            return $stored;
+        }
+
+        if ($status === FilePreview::UNSUPPORTED) {
+            $user = auth()->user();
+
+            return $user !== null && $user->can('admin.settings.view')
+                ? 'CAD converter is not configured'
+                : 'Drawing preview is temporarily unavailable';
+        }
+
+        if ($status === FilePreview::FAILED) {
+            return in_array($stored, [PreviewConversionException::TIMED_OUT, PreviewConversionException::LIMITED], true)
+                ? $stored
+                : 'Preview generation failed';
+        }
+
+        return $status === FilePreview::READY ? null : $stored;
+    }
+
+    private function cadWorkspace(): string
+    {
+        $directory = storage_path('app/tmp/cad/'.Str::uuid()->toString());
+        if (! is_dir($directory) && ! mkdir($directory, 0700, true) && ! is_dir($directory)) {
+            throw new PreviewConversionException(PreviewConversionException::FAILED);
+        }
+
+        return $directory;
+    }
+
+    private function removeCadWorkspace(string $directory): void
+    {
+        $root = realpath(storage_path('app/tmp/cad'));
+        $target = realpath($directory);
+        if ($root === false || $target === false || ! str_starts_with($target, $root.DIRECTORY_SEPARATOR)) {
+            return;
+        }
+
+        $items = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($target, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($items as $item) {
+            $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+        }
+        @rmdir($target);
     }
 
     private function fresh(PreviewableFile $file): ?FilePreview

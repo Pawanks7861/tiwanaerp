@@ -10,6 +10,7 @@ use App\Models\Documents\DrawingRevision;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Attachments\PrivateFileStore;
+use App\Services\Files\FilePreviewService;
 use Closure;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -221,6 +222,7 @@ class DrawingService
             'uploaded_by' => $user->id,
         ])->save();
         $drawing->writeAudit('revision_uploaded', null, ['revision' => $code, 'file' => $stored['file_name'], 'checksum' => $stored['checksum']]);
+        app(FilePreviewService::class)->enqueue('drawing_revision', (int) $revision->id);
 
         return $revision;
     }

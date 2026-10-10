@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\Attachments\FileTypeGuard;
 use App\Services\Attachments\PrivateFileStore;
 use App\Services\Documents\DrawingService;
+use App\Services\Files\FilePreviewService;
 use App\Services\Uploads\LargeFileUploadService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -286,6 +287,7 @@ class DrawingController extends Controller
             'supersedes' => $r->supersedes?->revision_code,
             'previewable' => ! $withdrawn && PrivateFileStore::isPreviewable($r->extension),
             'download_url' => $withdrawn ? null : $route('download'),
+            'preview' => $withdrawn ? null : app(FilePreviewService::class)->card('drawing_revision', (int) $r->id, (string) $r->extension),
             'preview_url' => ! $withdrawn && PrivateFileStore::isPreviewable($r->extension) ? $route('preview') : null,
             'can' => [
                 'submit' => ! $withdrawn && $status === DrawingRevisionStatus::Draft && $user->can('upload', $drawing),

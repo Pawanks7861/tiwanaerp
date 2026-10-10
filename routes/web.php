@@ -28,6 +28,7 @@ use App\Http\Controllers\Equipment\EquipmentAssignmentController;
 use App\Http\Controllers\Equipment\EquipmentFuelController;
 use App\Http\Controllers\Equipment\EquipmentRepairController;
 use App\Http\Controllers\Equipment\EquipmentUsageController;
+use App\Http\Controllers\Files\ExternalFilePreviewController;
 use App\Http\Controllers\Files\FileViewerController;
 use App\Http\Controllers\Finance\CashFlowController;
 use App\Http\Controllers\Finance\ClientInvoiceController;
@@ -82,6 +83,12 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', fn () => redirect()->route(auth()->check() ? 'dashboard' : 'login'));
 
 Route::get('/firebase-messaging-sw.js', FcmServiceWorkerController::class)->name('fcm.worker');
+
+// ShareCAD fetches this URL itself. The token is the only authorization, and it expires.
+Route::get('/external-file-preview/{token}', ExternalFilePreviewController::class)
+    ->where('token', '[A-Za-z0-9_-]{40,80}')
+    ->middleware('throttle:60,1')
+    ->name('files.external-preview');
 
 Route::middleware(['auth', 'company'])->group(function () {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
@@ -631,6 +638,8 @@ Route::middleware(['auth', 'company'])->group(function () {
     Route::get('/files/{source}/{id}/preview', [FileViewerController::class, 'preview'])->whereIn('source', ['attachment', 'document_version', 'drawing_revision', 'chat', 'site_photo'])->whereNumber('id')->name('files.preview');
     Route::get('/files/{source}/{id}/stream', [FileViewerController::class, 'stream'])->whereIn('source', ['attachment', 'document_version', 'drawing_revision', 'chat', 'site_photo'])->whereNumber('id')->name('files.stream');
     Route::get('/files/{source}/{id}/download', [FileViewerController::class, 'download'])->whereIn('source', ['attachment', 'document_version', 'drawing_revision', 'chat', 'site_photo'])->whereNumber('id')->name('files.download');
+    Route::post('/files/{source}/{id}/preview/retry', [FileViewerController::class, 'retry'])->whereIn('source', ['attachment', 'document_version', 'drawing_revision', 'chat', 'site_photo'])->whereNumber('id')->middleware('throttle:6,1')->name('files.preview.retry');
+    Route::post('/files/{source}/{id}/external-access', [FileViewerController::class, 'externalAccess'])->whereIn('source', ['attachment', 'document_version', 'drawing_revision', 'chat', 'site_photo'])->whereNumber('id')->middleware('throttle:30,1')->name('files.external-access');
 
     // Attachments
     Route::post('/attachments', [AttachmentController::class, 'store'])->middleware('throttle:30,1')->name('attachments.store');
@@ -692,6 +701,7 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/company', [CompanySettingsController::class, 'edit'])->name('company.edit');
         Route::put('/company', [CompanySettingsController::class, 'update'])->name('company.update');
         Route::put('/company/procurement', [CompanySettingsController::class, 'updateProcurement'])->name('company.procurement');
+        Route::put('/company/dwg-preview', [CompanySettingsController::class, 'updateDwgPreview'])->name('company.dwg-preview');
         Route::post('/company/logo', [BrandingController::class, 'storeLogo'])->name('company.logo.store');
         Route::delete('/company/logo', [BrandingController::class, 'destroyLogo'])->name('company.logo.destroy');
         Route::post('/company/favicon', [BrandingController::class, 'storeFavicon'])->name('company.favicon.store');

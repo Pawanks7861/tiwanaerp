@@ -17,6 +17,10 @@ class PreviewConversionException extends RuntimeException
 
     public const FAILED = 'Conversion failed';
 
+    public const TIMED_OUT = 'DWG preview generation timed out.';
+
+    public const LIMITED = 'Preview limited for performance.';
+
     public function __construct(public readonly string $safeMessage)
     {
         parent::__construct($safeMessage);

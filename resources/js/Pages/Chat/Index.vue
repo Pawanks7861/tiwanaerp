@@ -214,7 +214,13 @@ onBeforeUnmount(() => {
                                 <div v-if="message.attachments?.length" class="mt-1 space-y-1">
                                     <button v-for="file in message.attachments" :key="file.id" type="button" class="block w-full rounded-lg bg-black/10 p-1 text-left" @click="viewing = file">
                                         <img v-if="file.image" :src="`${file.url}?inline=1`" :alt="file.name" class="max-h-40 rounded object-contain" />
-                                        <span v-else class="block px-1 text-xs">{{ file.name }} · {{ size(file.size) }}</span>
+                                        <span v-else class="block px-1 text-xs">
+                                            {{ file.name }} · {{ size(file.size) }}
+                                            <template v-if="file.preview?.status === 'pending' || file.preview?.status === 'processing'"> · Generating drawing preview…</template>
+                                            <template v-else-if="file.preview?.status === 'failed'"> · Preview generation failed</template>
+                                            <template v-else-if="file.preview?.status === 'unsupported'"> · {{ file.preview.message }}</template>
+                                            <template v-else-if="file.preview?.status === 'ready' && ['dwg', 'dxf'].includes(file.extension)"> · View Drawing</template>
+                                        </span>
                                     </button>
                                 </div>
                                 <p class="mt-1 text-[10px] opacity-70">

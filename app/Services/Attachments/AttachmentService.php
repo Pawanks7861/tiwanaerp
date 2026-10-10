@@ -3,6 +3,7 @@
 namespace App\Services\Attachments;
 
 use App\Models\Core\Attachment;
+use App\Services\Files\FilePreviewService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
@@ -36,7 +37,7 @@ class AttachmentService
         $path = $file->storeAs($directory, $storedName, ['disk' => $disk]);
 
         try {
-            return DB::transaction(fn () => $attachable->attachments()->create([
+            $attachment = DB::transaction(fn () => $attachable->attachments()->create([
                 'category' => $category,
                 'disk' => $disk,
                 'path' => $path,
@@ -47,6 +48,9 @@ class AttachmentService
                 'checksum' => hash_file('sha256', $file->getRealPath()),
                 'uploaded_by' => Auth::id(),
             ]));
+            app(FilePreviewService::class)->enqueue('attachment', (int) $attachment->id);
+
+            return $attachment;
         } catch (\Throwable $e) {
             Storage::disk($disk)->delete($path);
             throw $e;

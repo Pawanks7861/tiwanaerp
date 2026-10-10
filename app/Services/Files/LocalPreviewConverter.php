@@ -2,6 +2,7 @@
 
 namespace App\Services\Files;
 
+use App\Services\Files\Cad\CadPreviewManager;
 use Symfony\Component\Process\Process;
 
 /**
@@ -10,6 +11,8 @@ use Symfony\Component\Process\Process;
  */
 class LocalPreviewConverter implements PreviewConverter
 {
+    public function __construct(private readonly ?CadPreviewManager $cad = null) {}
+
     public function officeAvailable(): bool
     {
         return $this->officeBinary() !== null;
@@ -17,7 +20,7 @@ class LocalPreviewConverter implements PreviewConverter
 
     public function cadAvailable(): bool
     {
-        return $this->cadBinary() !== null;
+        return $this->cad?->available() ?? false;
     }
 
     public function toPdf(string $sourceAbsolute, string $directory): string
@@ -56,21 +59,11 @@ class LocalPreviewConverter implements PreviewConverter
 
     public function toSvg(string $sourceAbsolute, string $directory): string
     {
-        $binary = $this->cadBinary();
-        if ($binary === null) {
+        if ($this->cad === null) {
             throw new PreviewConversionException(PreviewConversionException::UNAVAILABLE);
         }
 
-        $target = $directory.DIRECTORY_SEPARATOR.'preview.svg';
-        $process = new Process([$binary, '-o', $target, $sourceAbsolute]);
-        $process->setTimeout(120);
-        $process->run();
-
-        if (! is_file($target)) {
-            throw new PreviewConversionException(PreviewConversionException::FAILED);
-        }
-
-        return $target;
+        return $this->cad->convert($sourceAbsolute, $directory)->path;
     }
 
     /**
@@ -95,11 +88,6 @@ class LocalPreviewConverter implements PreviewConverter
     private function officeBinary(): ?string
     {
         return $this->find(['soffice', 'soffice.exe', 'libreoffice', 'libreoffice.exe']);
-    }
-
-    private function cadBinary(): ?string
-    {
-        return $this->find(['dwg2SVG', 'dwg2SVG.exe']);
     }
 
     /**
