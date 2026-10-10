@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Integrations;
 
 use App\Http\Controllers\Controller;
 use App\Integrations\Tally\TallyConnectionTester;
+use App\Integrations\Tally\TallyHostGuard;
 use App\Integrations\Tally\TallyMasterSyncService;
 use App\Integrations\Tally\TallySyncService;
 use App\Models\Integrations\TallyConnection;
@@ -12,7 +13,6 @@ use App\Services\Audit\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -111,22 +111,10 @@ class TallySettingsController extends Controller
             'cost_centres_enabled' => ['required', 'boolean'],
         ]);
         if ($data['enabled']) {
-            $this->assertPrivateHost($data['host']);
+            app(TallyHostGuard::class)->assertAllowed($data['host']);
         }
 
         return $data;
-    }
-
-    private function assertPrivateHost(string $host): void
-    {
-        $host = trim($host);
-        if ($host === '' || str_contains($host, '://') || str_contains($host, '/')) {
-            throw ValidationException::withMessages(['host' => 'Enter a host name or IP, without a URL path.']);
-        }
-        $public = filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
-        if ($public !== false) {
-            throw ValidationException::withMessages(['host' => 'Tally must stay on localhost, a private LAN, or a VPN. Do not expose port 9000 to the internet.']);
-        }
     }
 
     /**

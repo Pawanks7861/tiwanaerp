@@ -6,6 +6,7 @@ use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Chat\ChatPresenter;
 use App\Services\Notifications\FcmClient;
+use App\Support\Permissions\DefaultRoles;
 use App\Support\Permissions\PermissionCatalog;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\Request;
@@ -76,7 +77,9 @@ class HandleInertiaRequests extends Middleware
                 ...$user->only(['id', 'name', 'email', 'mobile']),
                 'is_super_admin' => $user->isSuperAdmin(),
                 'email_verified_at' => $user->email_verified_at,
+                'two_factor_enabled' => $user->twoFactorConfirmed(),
             ],
+            'two_factor_recommended' => $this->twoFactorRecommended($user),
             'permissions' => match (true) {
                 $user->isSuperAdmin() => PermissionCatalog::all(),
                 $hasCompany => $user->getAllPermissions()->pluck('name')->values()->all(),
@@ -164,6 +167,27 @@ class HandleInertiaRequests extends Middleware
                 ? route('company.branding.show', ['kind' => 'favicon', 'v' => $version])
                 : null,
         ];
+    }
+
+    private function twoFactorRecommended(User $user): bool
+    {
+        if ($user->twoFactorConfirmed()) {
+            return false;
+        }
+
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        if (! app(CurrentCompany::class)->has()) {
+            return false;
+        }
+
+        return $user->hasAnyRole([
+            DefaultRoles::COMPANY_ADMIN,
+            DefaultRoles::DIRECTOR,
+            DefaultRoles::ACCOUNTANT,
+        ]) || $user->can('tally.manage');
     }
 
     private function scopedUnread(User $user, int $companyId): int

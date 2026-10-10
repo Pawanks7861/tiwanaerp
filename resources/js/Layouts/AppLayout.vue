@@ -26,6 +26,7 @@ const companyName = computed(() => page.props.company?.current?.name ?? '');
 const multiCompany = computed(() => page.props.features?.multi_company === true);
 const chatUnread = ref(page.props.chatUnread ?? 0);
 const showProjectSwitcher = computed(() => can('projects.view'));
+const recommendTwoFactor = computed(() => page.props.auth?.two_factor_recommended === true);
 
 watch(() => page.props.chatUnread, (count) => {
     chatUnread.value = count ?? 0;
@@ -201,6 +202,10 @@ onBeforeUnmount(() => {
             <slot name="header" />
 
             <main class="mx-auto w-full max-w-7xl px-3 py-5 sm:px-6 sm:py-6">
+                <div v-if="recommendTwoFactor" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    Two-factor authentication is recommended for this account.
+                    <Link :href="route('profile.edit')" class="font-semibold underline">Set it up</Link>
+                </div>
                 <slot />
             </main>
         </div>

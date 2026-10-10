@@ -8,6 +8,7 @@ use App\Support\Masters\IndianFormats;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
 
 /**
  * Company profile. Used by super admins (create / edit any company) and by company admins
@@ -64,7 +65,7 @@ class CompanyRequest extends FormRequest
             if ($company === null) {
                 $rules['admin_name'] = ['required', 'string', 'max:150'];
                 $rules['admin_email'] = ['required', 'email:rfc', 'max:255'];
-                $rules['admin_password'] = ['nullable', 'string', 'min:8'];
+                $rules['admin_password'] = ['nullable', 'string', Password::defaults()];
             }
         }
 

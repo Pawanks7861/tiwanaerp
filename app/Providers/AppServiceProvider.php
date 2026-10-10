@@ -60,6 +60,11 @@ use App\Models\Finance\ProjectCostEntry;
 use App\Models\Finance\RetentionRelease;
 use App\Models\Finance\VendorBill;
 use App\Models\Finance\VendorBillItem;
+use App\Models\Integrations\TallyConnection;
+use App\Models\Integrations\TallyCostCentreMapping;
+use App\Models\Integrations\TallyLedgerMapping;
+use App\Models\Integrations\TallyMasterMapping;
+use App\Models\Integrations\TallySyncRecord;
 use App\Models\Inventory\LowStockAlert;
 use App\Models\Inventory\MaterialIssue;
 use App\Models\Inventory\MaterialIssueItem;
@@ -189,6 +194,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\Rules\Password;
 use Spatie\Permission\Models\Permission;
 
 class AppServiceProvider extends ServiceProvider
@@ -206,6 +212,8 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Vite::prefetch(concurrency: 3);
+
+        Password::defaults(fn () => Password::min(10)->letters()->numbers());
 
         Model::shouldBeStrict(! $this->app->isProduction());
 
@@ -307,11 +315,11 @@ class AppServiceProvider extends ServiceProvider
             'vendor_bill_item' => VendorBillItem::class,
             'payment' => Payment::class,
             'payment_allocation' => PaymentAllocation::class,
-            'tally_connection' => \App\Models\Integrations\TallyConnection::class,
-            'tally_ledger_mapping' => \App\Models\Integrations\TallyLedgerMapping::class,
-            'tally_cost_centre_mapping' => \App\Models\Integrations\TallyCostCentreMapping::class,
-            'tally_master_mapping' => \App\Models\Integrations\TallyMasterMapping::class,
-            'tally_sync_record' => \App\Models\Integrations\TallySyncRecord::class,
+            'tally_connection' => TallyConnection::class,
+            'tally_ledger_mapping' => TallyLedgerMapping::class,
+            'tally_cost_centre_mapping' => TallyCostCentreMapping::class,
+            'tally_master_mapping' => TallyMasterMapping::class,
+            'tally_sync_record' => TallySyncRecord::class,
             'retention_release' => RetentionRelease::class,
             'lead' => Lead::class,
             'lead_activity' => LeadActivity::class,
@@ -415,6 +423,12 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('api-login', fn (Request $request) => Limit::perMinute(5)->by(
             strtolower((string) $request->input('email')).'|'.$request->ip()
+        ));
+        RateLimiter::for('two-factor', fn (Request $request) => Limit::perMinute(5)->by(
+            ($request->user()?->id ?? 'guest').'|'.$request->ip()
+        ));
+        RateLimiter::for('tally-connect', fn (Request $request) => Limit::perMinute(5)->by(
+            ($request->user()?->id ?? 'guest').'|'.$request->ip()
         ));
     }
 }

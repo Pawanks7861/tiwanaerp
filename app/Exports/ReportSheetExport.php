@@ -3,6 +3,7 @@
 namespace App\Exports;
 
 use App\Reports\ReportResult;
+use App\Support\Exports\SpreadsheetText;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithTitle;
@@ -73,7 +74,10 @@ class ReportSheetExport implements FromArray, WithEvents, WithTitle
             $rows[] = [$note];
         }
 
-        return $rows;
+        return array_map(
+            fn (array $row) => array_map(fn (mixed $cell) => SpreadsheetText::cell($cell), $row),
+            $rows,
+        );
     }
 
     /**
@@ -138,7 +142,15 @@ class ReportSheetExport implements FromArray, WithEvents, WithTitle
         $rows[] = array_map(fn ($c) => $c['label'], $columns);
         $headingRow = count($rows);
         foreach ($data as $row) {
-            $rows[] = array_map(fn ($c) => $this->value($row[$c['key']] ?? null), $columns);
+            $rows[] = array_map(function ($column) use ($row) {
+                $raw = $row[$column['key']] ?? null;
+                $type = $column['type'] ?? 'text';
+                if (in_array($type, self::NUMERIC, true) && is_numeric($raw)) {
+                    return $raw;
+                }
+
+                return SpreadsheetText::cell($this->value($raw));
+            }, $columns);
         }
         if ($totals) {
             $rows[] = array_map(fn ($c) => $this->value($totals[$c['key']] ?? null), $columns);

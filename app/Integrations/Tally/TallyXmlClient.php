@@ -21,12 +21,19 @@ class TallyXmlClient implements TallyClientInterface
 
     public function postXml(string $xml): string
     {
+        app(TallyHostGuard::class)->assertAllowed((string) $this->connection->host);
+
         try {
-            $response = Http::timeout($this->connection->timeout_seconds)
+            $response = Http::withOptions(['allow_redirects' => false])
+                ->timeout($this->connection->timeout_seconds)
                 ->withBody($xml, 'text/xml; charset=utf-8')
                 ->post($this->endpoint());
         } catch (ConnectionException $exception) {
             throw $this->transport($exception->getMessage());
+        }
+
+        if ($response->redirect()) {
+            throw new TallyResponseException('Unsafe redirect', 'unsafe_redirect');
         }
 
         if (! $response->successful()) {

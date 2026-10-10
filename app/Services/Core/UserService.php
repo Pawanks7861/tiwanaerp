@@ -109,6 +109,10 @@ class UserService
             ->firstOrFail();
         $membership->is_active = $active;
         $membership->save();
+
+        if (! $active && ! $user->memberships()->where('is_active', true)->exists()) {
+            $user->tokens()->delete();
+        }
     }
 
     /**

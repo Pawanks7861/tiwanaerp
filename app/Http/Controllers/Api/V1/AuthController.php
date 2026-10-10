@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Auth\TwoFactorService;
 use App\Support\Permissions\PermissionCatalog;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\JsonResponse;
@@ -25,6 +26,13 @@ class AuthController extends Controller
 
         if (! $user || ! $user->is_active || ! Hash::check($credentials['password'], $user->password)) {
             throw ValidationException::withMessages(['email' => trans('auth.failed')]);
+        }
+
+        if ($user->twoFactorConfirmed()) {
+            $code = (string) $request->input('code', '');
+            if ($code === '' || ! app(TwoFactorService::class)->challenge($user, $code)) {
+                throw ValidationException::withMessages(['code' => 'That authentication code is not valid.']);
+            }
         }
 
         $user->forceFill(['last_login_at' => now()])->saveQuietly();

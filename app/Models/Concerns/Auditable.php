@@ -16,7 +16,7 @@ trait Auditable
     /** @var list<string> */
     protected static array $auditAlwaysExcluded = [
         'created_at', 'updated_at', 'deleted_at', 'created_by', 'updated_by', 'deleted_by',
-        'password', 'remember_token',
+        'password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes',
     ];
 
     public static function bootAuditable(): void

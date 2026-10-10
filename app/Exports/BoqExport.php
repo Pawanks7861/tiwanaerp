@@ -5,6 +5,7 @@ namespace App\Exports;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqSection;
+use App\Support\Exports\SpreadsheetText;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
@@ -71,7 +72,12 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
             : [];
 
         return [
-            $section, $item->item_code, $item->name, $item->description, $item->hsn_sac, $item->unit?->symbol,
+            SpreadsheetText::cell($section),
+            SpreadsheetText::cell($item->item_code),
+            SpreadsheetText::cell($item->name),
+            SpreadsheetText::cell($item->description),
+            SpreadsheetText::cell($item->hsn_sac),
+            $item->unit?->symbol,
             $item->quantity, ...$costs, $item->client_rate, $item->client_amount,
         ];
     }

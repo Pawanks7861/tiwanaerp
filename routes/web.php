@@ -643,9 +643,9 @@ Route::middleware(['auth', 'company'])->group(function () {
     Route::prefix('/integrations/tally')->name('integrations.tally.')->group(function () {
         Route::get('/', [TallySettingsController::class, 'edit'])->name('edit');
         Route::put('/', [TallySettingsController::class, 'update'])->name('update');
-        Route::post('/test', [TallySettingsController::class, 'test'])->name('test');
-        Route::post('/masters', [TallySettingsController::class, 'syncMasters'])->name('masters');
-        Route::post('/pending', [TallySettingsController::class, 'syncPending'])->name('pending');
+        Route::post('/test', [TallySettingsController::class, 'test'])->middleware('throttle:tally-connect')->name('test');
+        Route::post('/masters', [TallySettingsController::class, 'syncMasters'])->middleware('throttle:tally-connect')->name('masters');
+        Route::post('/pending', [TallySettingsController::class, 'syncPending'])->middleware('throttle:tally-connect')->name('pending');
         Route::get('/mappings', [TallyMappingController::class, 'edit'])->name('mappings');
         Route::put('/mappings', [TallyMappingController::class, 'updateSystems'])->name('mappings.update');
         Route::post('/mappings/parties', [TallyMappingController::class, 'storeParty'])->name('mappings.parties');

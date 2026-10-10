@@ -42,7 +42,7 @@ class UserRequest extends FormRequest
                 $isUpdate ? Rule::unique('users', 'email')->ignore($target->id) : null,
             ]),
             'mobile' => ['nullable', 'string', 'regex:'.IndianFormats::MOBILE],
-            'password' => ['nullable', 'string', Password::min(8)->letters()->numbers(), 'confirmed'],
+            'password' => ['nullable', 'string', Password::defaults(), 'confirmed'],
             'roles' => ['present', 'array', 'max:10'],
             'roles.*' => ['integer', 'distinct'],
         ];

@@ -21,6 +21,12 @@ class ProfileController extends Controller
         return Inertia::render('Profile/Edit', [
             'mustVerifyEmail' => $request->user() instanceof MustVerifyEmail,
             'status' => session('status'),
+            'twoFactor' => [
+                'enabled' => $request->user()->twoFactorConfirmed(),
+                'pending' => $request->user()->twoFactorPending(),
+                'setup' => $request->session()->get('two_factor_setup'),
+                'recoveryCodes' => $request->session()->get('recovery_codes'),
+            ],
         ]);
     }
 

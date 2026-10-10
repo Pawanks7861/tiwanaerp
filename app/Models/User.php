@@ -23,14 +23,17 @@ use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
 #[Fillable(['name', 'email', 'mobile', 'password'])]
-#[Hidden(['password', 'remember_token'])]
+#[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use Auditable, Blameable, HasApiTokens, HasFactory, HasRoles, Notifiable;
 
     /** @var list<string> */
-    protected array $auditExclude = ['last_login_at', 'last_seen_at', 'current_company_id'];
+    protected array $auditExclude = [
+        'last_login_at', 'last_seen_at', 'current_company_id',
+        'two_factor_secret', 'two_factor_recovery_codes',
+    ];
 
     protected function casts(): array
     {
@@ -39,6 +42,9 @@ class User extends Authenticatable
             'last_login_at' => 'datetime',
             'last_seen_at' => 'datetime',
             'password' => 'hashed',
+            'two_factor_secret' => 'encrypted',
+            'two_factor_recovery_codes' => 'encrypted:array',
+            'two_factor_confirmed_at' => 'datetime',
             'is_super_admin' => 'boolean',
             'is_active' => 'boolean',
         ];
@@ -101,6 +107,34 @@ class User extends Authenticatable
     public function isSuperAdmin(): bool
     {
         return (bool) $this->is_super_admin;
+    }
+
+    /**
+     * Session authentication can hold a model loaded before these columns were selected.
+     * Read the timestamp from the database when this instance does not have it yet.
+     */
+    public function twoFactorConfirmed(): bool
+    {
+        if (! array_key_exists('two_factor_confirmed_at', $this->attributes)) {
+            $value = $this->newQuery()->whereKey($this->getKey())->value('two_factor_confirmed_at');
+            $this->setAttribute('two_factor_confirmed_at', $value);
+            $this->syncOriginalAttribute('two_factor_confirmed_at');
+        }
+
+        return $this->two_factor_confirmed_at !== null;
+    }
+
+    public function twoFactorPending(): bool
+    {
+        if ($this->twoFactorConfirmed()) {
+            return false;
+        }
+
+        if (! array_key_exists('two_factor_secret', $this->attributes)) {
+            return $this->newQuery()->whereKey($this->getKey())->whereNotNull('two_factor_secret')->exists();
+        }
+
+        return filled($this->two_factor_secret);
     }
 
     /**

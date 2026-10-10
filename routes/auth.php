@@ -7,6 +7,7 @@ use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
+use App\Http\Controllers\Auth\TwoFactorController;
 use App\Http\Controllers\Auth\VerifyEmailController;
 use Illuminate\Support\Facades\Route;
 
@@ -50,6 +51,17 @@ Route::middleware('auth')->group(function () {
     Route::post('confirm-password', [ConfirmablePasswordController::class, 'store']);
 
     Route::put('password', [PasswordController::class, 'update'])->name('password.update');
+
+    Route::get('two-factor/challenge', [TwoFactorController::class, 'challenge'])->name('two-factor.challenge');
+    Route::post('two-factor/challenge', [TwoFactorController::class, 'verify'])
+        ->middleware('throttle:two-factor')
+        ->name('two-factor.verify');
+    Route::post('two-factor', [TwoFactorController::class, 'store'])->name('two-factor.store');
+    Route::post('two-factor/confirm', [TwoFactorController::class, 'confirm'])
+        ->middleware('throttle:two-factor')
+        ->name('two-factor.confirm');
+    Route::post('two-factor/recovery-codes', [TwoFactorController::class, 'regenerate'])->name('two-factor.recovery');
+    Route::delete('two-factor', [TwoFactorController::class, 'destroy'])->name('two-factor.destroy');
 
     Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])
         ->name('logout');
