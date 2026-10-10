@@ -50,8 +50,6 @@ use App\Models\Equipment\EquipmentAssignment;
 use App\Models\Equipment\EquipmentFuelLog;
 use App\Models\Equipment\EquipmentRepair;
 use App\Models\Equipment\EquipmentUsageLog;
-use App\Models\Files\ExternalPreviewToken;
-use App\Models\Files\FileExternalAccess;
 use App\Models\Finance\ClientInvoice;
 use App\Models\Finance\ClientInvoiceItem;
 use App\Models\Finance\Expense;
@@ -341,8 +339,6 @@ class AppServiceProvider extends ServiceProvider
             'ncr' => Ncr::class,
             'drawing' => Drawing::class,
             'drawing_revision' => DrawingRevision::class,
-            'external_preview_token' => ExternalPreviewToken::class,
-            'file_external_access' => FileExternalAccess::class,
             'document_folder' => DocumentFolder::class,
             'document' => Document::class,
             'document_version' => DocumentVersion::class,

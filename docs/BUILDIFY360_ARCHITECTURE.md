@@ -1858,14 +1858,13 @@ Clicking a file opens `UniversalFileViewer.vue`. The same component is used for 
 | CSV | First 500 rows as a table, or the same text cap as raw text | Original |
 | XLS, XLSX | First 500 rows and 50 columns, formulas as text. Files over 8 MB are not opened | Original |
 | DOC, DOCX, PPT, PPTX | Local LibreOffice to a private PDF, queued | Original when LibreOffice is not installed |
-| DWG | Local `dwg2SVG` to a sanitized private SVG, queued. Raw DWG is not sent to the browser | Original when no converter is installed |
-| DXF | Built-in text parser to a private SVG of lines and circles. Binary DXF uses `dwg2SVG` when it is installed | Original otherwise |
+| DWG, DXF | Local browser viewer. The authorized stream sends the original bytes to the signed-in browser, which parses them with WebAssembly and draws them with WebGL or Canvas | Original |
 | MP4, WebM, OGV | HTML5 video with HTTP range requests | Original |
 | MP3, WAV, OGG, M4A | HTML5 audio | Original |
 | ZIP | Entry names only, never extracted | Original |
 | RAR, 7Z, and anything else | File card | Original |
 
-Generated previews live on the private disk and in `file_previews`, keyed by the source checksum. A changed checksum drops the old preview. `GenerateFilePreview` runs on the queue for DWG, DXF that the text parser cannot read, and Office files. The upload itself does not wait. Statuses are pending, processing, ready, failed, and unsupported. The viewer says "Generating drawing preview…" while a CAD job runs. An administrator sees "CAD converter is not configured" when no converter is installed; other users see "Drawing preview is temporarily unavailable". A failed job says "Preview generation failed", or "DWG preview generation timed out." when the process exceeds the configured limit. Failure text never includes a path or shell output.
+Generated previews live on the private disk and in `file_previews`, keyed by the source checksum. A changed checksum drops the old preview. `GenerateFilePreview` runs on the queue for Office files. Opening a DWG or DXF does not wait for that job. Statuses for queued Office previews are pending, processing, ready, failed, and unsupported. Failure text never includes a path or shell output.
 
 #### DWG Preview Deployment
 
@@ -1883,10 +1882,18 @@ Known LibreDWG 0.13.4 limits: `example_2004.dwg` converted to paths and circles,
 
 Conversion uses `Process` with a fixed binary and a staged name `input.{ext}`. The original filename is not an argument. Nothing is uploaded to Google Docs, Autodesk, or another public viewer. Preview is not a malware scan. The scanner status remains `not_configured` until a scanner is installed. Deleting a site photo also deletes its generated preview. Soft-deleted attachments keep their files, so their previews stay too.
 
-ShareCAD is an optional external fallback. It is off unless `SHARECAD_DWG_PREVIEW=true`, the company chooses ShareCAD or Automatic, a company admin acknowledges the warning, and that drawing has Allow external preview turned on. The default for every file is off. `DWG_PREVIEW_PROVIDER` accepts `local`, `sharecad`, or `auto`. `local` uses only the converter above. `sharecad` uses ShareCAD for an eligible DWG or DXF. `auto` uses a ready local preview or the local converter when one is installed, and uses ShareCAD only when that converter is unavailable. Files larger than 50 MB are never sent to ShareCAD. The viewer then says "This drawing is too large for the external CAD viewer."
+### Local Browser CAD Viewer
 
-Commercial licensing/permission must be confirmed before production use. ShareCAD's public viewer documentation says the free service is not for commercial use. The preferred production preview remains the local converter or a licensed CAD SDK. ShareCAD is not required infrastructure.
+DWG and DXF open inside the ERP. There is no ShareCAD iframe, no Autodesk or Google viewer, no temporary public drawing URL, and no company setting that chooses an external CAD provider.
 
-The iframe is `https://iframe.sharecad.org/cadframe/load?url=` plus the URL-encoded temporary file address. That address is `GET /external-file-preview/{token}`. The token is random, stored only as a SHA-256 hash, lasts 10 minutes, and is bound to one company, one DWG or DXF, and the ShareCAD provider. It is not a login session and it is not a general private-file link. The permanent storage path is never published. After expiry the fetch returns 410. The fetch does not require a user session. The viewer shows "External CAD Viewer" with the tooltip "This drawing is being rendered using ShareCAD." Content-Security-Policy adds `frame-src 'self' https://iframe.sharecad.org` only while the server switch is on. Log lines redact the token. The audit event "External DWG preview generated" records the user, file, provider, and time, and does not record the token or the URL.
+`UniversalFileViewer.vue` renders `CadFileViewer.vue` when the file strategy is `cad`. That component is the only place that talks to the CAD library, so a later commercially licensed engine can replace it. The browser calls `GET /files/{source}/{id}/stream` with the existing session, reads an `ArrayBuffer`, and passes it to `loadBuffer` with the real filename. The stream is same-origin. No extra CORS rule is added. The response keeps `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`.
 
-ShareCAD's servers must be able to reach `APP_URL`. A localhost address is not reachable from ShareCAD, so a local browser cannot complete a live ShareCAD render. The iframe does not receive the ERP session, cookies, or an API token.
+`@flyfish-dev/cad-viewer` 0.8.2 parses DWG in a Web Worker through LibreDWG WebAssembly and parses DXF in the page. `renderer: 'auto'` uses WebGL and falls back to Canvas2D. Runtime files `libredwg-web.js`, `libredwg-web.wasm`, `dwg-worker.js`, and `dwfv-render.wasm` are copied to `public/wasm/` by `npm run cad:assets`, which `npm run build` runs first. Those application assets may be cached. Drawing bytes are not.
+
+The viewer shows load progress, zoom, fit, extents, saved view, reset, a background toggle, fullscreen from the shared toolbar, and Download original. Pan and zoom use the library pointer controls. Layer names and visibility come from the parsed document. Geometry stays inside the viewer and is not copied into Vue state. A missing SHX font is named in the viewer. The user can supply that font from their computer; the bytes stay in the browser and are not fetched from another site. Closing the viewer calls `destroy()`.
+
+A drawing larger than `CAD_VIEWER_WARN_BYTES` (25 MiB by default) shows "Large drawing. Opening this file may use significant memory." The user can cancel the fetch. The viewer does not refuse the file for size.
+
+**LICENSE REVIEW REQUIRED.** `@flyfish-dev/cad-viewer` 0.8.2 is AGPL-3.0-only. That license is not automatically compatible with closed-source commercial redistribution of this ERP. Do not remove the package license notices. If legal review rejects AGPL, replace the loader behind `CadFileViewer.vue` with an approved commercially licensed self-hosted CAD SDK, such as an ODA solution. That replacement is not implemented here.
+
+The server converters remain available for an optional thumbnail job. Viewing a drawing does not require `dwg2SVG`, ODA File Converter, or `GenerateFilePreview`. A missing server converter does not show "DWG preview unavailable on this server".

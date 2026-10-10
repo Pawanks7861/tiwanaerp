@@ -1,4 +1,6 @@
 <script setup>
+import CadFileViewer from '@/Components/Files/CadFileViewer.vue';
+import { usesBrowserCad } from '@/lib/cadSession';
 import { formatBytes } from '@/lib/files';
 import { formatDateTime } from '@/lib/format';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -26,13 +28,10 @@ let timer = null;
 
 const position = computed(() => props.gallery.findIndex((item) => item.source === current.value.source && item.id === current.value.id));
 const visual = computed(() => ['image', 'svg'].includes(file.value?.strategy) && file.value?.status === 'ready');
-const cadSvg = computed(() => file.value?.status === 'ready' && file.value?.strategy === 'cad' && file.value?.preview_format === 'svg');
-const pdf = computed(() => file.value?.status === 'ready' && (file.value?.strategy === 'pdf' || file.value?.strategy === 'office' || (file.value?.strategy === 'cad' && file.value?.preview_format !== 'svg')));
+const cad = computed(() => file.value?.status === 'ready' && usesBrowserCad(file.value));
+const pdf = computed(() => file.value?.status === 'ready' && (file.value?.strategy === 'pdf' || file.value?.strategy === 'office'));
 const generating = computed(() => ['pending', 'processing'].includes(file.value?.status));
 const retrying = ref(false);
-const sharecadFailed = ref(false);
-const allowing = ref(false);
-const sharecad = computed(() => file.value?.strategy === 'external' && Boolean(file.value?.external_viewer?.url));
 const activeSheet = computed(() => body.value?.sheets?.[sheet.value] ?? null);
 
 watch(() => [props.show, props.source, props.fileId], () => {
@@ -56,7 +55,6 @@ function stop() {
 async function load() {
     stop();
     error.value = '';
-    sharecadFailed.value = false;
     body.value = null;
     scale.value = 1;
     rotation.value = 0;
@@ -98,19 +96,6 @@ function zoom(delta) {
 function fit() {
     scale.value = 1;
     rotation.value = 0;
-}
-
-async function setExternal(allow) {
-    allowing.value = true;
-    try {
-        const response = await window.axios.post(route('files.external-access', { source: current.value.source, id: current.value.id }), { allow });
-        file.value = response.data.file;
-        sharecadFailed.value = false;
-    } catch {
-        error.value = 'Preview not available';
-    } finally {
-        allowing.value = false;
-    }
 }
 
 async function retryPreview() {
@@ -157,7 +142,7 @@ onBeforeUnmount(() => {
                         {{ file.type_label }} · {{ formatBytes(file.size_bytes) }}
                         <template v-if="file.uploaded_by"> · {{ file.uploaded_by }}</template>
                         <template v-if="file.uploaded_at"> · {{ formatDateTime(file.uploaded_at) }}</template>
-                        <span v-if="sharecad" class="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600" :title="file.external_viewer.tooltip">{{ file.external_viewer.label }}</span>
+                        <span v-if="cad" class="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Local browser viewer</span>
                     </p>
                 </div>
                 <button ref="closeButton" type="button" class="rounded-md px-2 py-1 text-sm text-slate-600 hover:bg-slate-100" aria-label="Close" title="Close" @click="emit('close')">Close</button>
@@ -165,14 +150,9 @@ onBeforeUnmount(() => {
 
             <div class="flex min-w-0 max-w-full flex-wrap gap-1 border-b border-line px-3 py-2">
                 <a v-if="file" :href="file.download_url" class="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100" title="Download original">Download original</a>
-                <button v-if="sharecad" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" @click="load">Retry</button>
-                <label v-if="file?.can_manage_external && ['dwg', 'dxf'].includes(file.extension)" class="inline-flex shrink-0 items-center gap-1 px-2 py-1 text-xs text-slate-700">
-                    <input type="checkbox" class="rounded border-slate-300" :checked="file.allow_external" :disabled="allowing" @change="setExternal($event.target.checked)" />
-                    Allow external preview
-                </label>
-                <button v-if="visual || pdf || cadSvg" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Zoom out" title="Zoom out" @click="zoom(-0.25)">Zoom out</button>
-                <button v-if="visual || pdf || cadSvg" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Zoom in" title="Zoom in" @click="zoom(0.25)">Zoom in</button>
-                <button v-if="visual || pdf || cadSvg" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Fit" title="Fit" @click="fit">Fit</button>
+                <button v-if="visual || pdf" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Zoom out" title="Zoom out" @click="zoom(-0.25)">Zoom out</button>
+                <button v-if="visual || pdf" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Zoom in" title="Zoom in" @click="zoom(0.25)">Zoom in</button>
+                <button v-if="visual || pdf" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Fit" title="Fit" @click="fit">Fit</button>
                 <button v-if="visual" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Rotate" title="Rotate" @click="rotation = (rotation + 90) % 360">Rotate</button>
                 <button type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Full screen" title="Full screen" @click="fullscreen">Full screen</button>
                 <button v-if="gallery.length > 1" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40" aria-label="Previous file" title="Previous" :disabled="position <= 0" @click="step(-1)">Previous</button>
@@ -180,7 +160,7 @@ onBeforeUnmount(() => {
                 <button v-if="body?.kind === 'csv'" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" @click="csvMode = csvMode === 'table' ? 'raw' : 'table'">{{ csvMode === 'table' ? 'Raw text' : 'Table' }}</button>
             </div>
 
-            <div class="min-h-0 flex-1 overflow-auto bg-slate-100 p-3">
+            <div class="min-h-0 flex-1 overflow-auto bg-slate-100" :class="cad ? 'p-0' : 'p-3'">
                 <p v-if="error" class="rounded-lg bg-white p-4 text-sm text-slate-700">{{ error }}</p>
                 <p v-else-if="!file" class="p-4 text-sm text-slate-500">Opening…</p>
                 <div v-else-if="generating" class="rounded-lg bg-white p-6 text-center text-sm text-slate-700">
@@ -189,21 +169,15 @@ onBeforeUnmount(() => {
                 <div v-else-if="visual" class="flex min-h-full items-center justify-center overflow-auto">
                     <img :src="file.stream_url" :alt="file.name" class="max-w-full origin-center object-contain" :style="{ transform: `scale(${scale}) rotate(${rotation}deg)` }" />
                 </div>
-                <div v-else-if="cadSvg" class="flex h-[70vh] items-center justify-center overflow-auto rounded-lg bg-white">
-                    <img
-                        :src="file.stream_url"
-                        :alt="file.name"
-                        class="object-contain"
-                        :class="scale <= 1 ? 'max-h-full max-w-full' : ''"
-                        :style="scale > 1 ? { width: `${Math.round(scale * 100)}%`, maxWidth: 'none' } : undefined"
-                        draggable="false"
-                    />
-                </div>
+                <CadFileViewer
+                    v-else-if="cad"
+                    :stream-url="file.stream_url"
+                    :file-name="file.name"
+                    :size-bytes="file.size_bytes"
+                    :memory-warning="file.message || ''"
+                    class="h-full"
+                />
                 <iframe v-else-if="pdf" :src="file.stream_url" :title="file.name" class="h-full min-h-[70vh] border-0 bg-white" :style="{ width: `${Math.round(scale * 100)}%` }" />
-                <div v-else-if="sharecad" class="flex h-[70vh] min-h-0 w-full max-w-full flex-col overflow-hidden rounded-lg bg-white">
-                    <iframe :src="file.external_viewer.url" title="CAD preview" class="h-full min-h-0 w-full max-w-full flex-1 border-0" referrerpolicy="no-referrer" allow="fullscreen" allowfullscreen @error="sharecadFailed = true" />
-                    <p v-if="sharecadFailed" class="px-3 py-2 text-xs text-slate-600">{{ file.external_viewer.failure_message }}</p>
-                </div>
                 <video v-else-if="file.strategy === 'video'" :src="file.stream_url" controls class="max-h-full max-w-full" :aria-label="file.name" />
                 <audio v-else-if="file.strategy === 'audio'" :src="file.stream_url" controls class="w-full" :aria-label="file.name" />
                 <div v-else-if="body?.kind === 'text' || (body?.kind === 'csv' && csvMode === 'raw')" class="rounded-lg bg-white p-4">

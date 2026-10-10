@@ -18,17 +18,11 @@ return [
     ],
 
     /*
-     * Optional external DWG preview. local is the default and the preferred production path.
-     * ShareCAD's public viewer is not a commercial licence. Confirm permission before enabling it.
-     * The frame host is fixed so it cannot be pointed at an arbitrary site.
+     * Drawings open in the browser from the private stream.
+     * Above this size the viewer warns that parsing may use a lot of memory.
      */
     'dwg' => [
-        'provider' => env('DWG_PREVIEW_PROVIDER', 'local'),
-        'sharecad_enabled' => filter_var(env('SHARECAD_DWG_PREVIEW', false), FILTER_VALIDATE_BOOLEAN),
-        'frame' => 'https://iframe.sharecad.org/cadframe/load',
-        'origin' => 'https://iframe.sharecad.org',
-        'max_bytes' => 50 * 1024 * 1024,
-        'ttl_minutes' => 10,
+        'warn_bytes' => (int) env('CAD_VIEWER_WARN_BYTES', 25 * 1024 * 1024),
     ],
 
 ];

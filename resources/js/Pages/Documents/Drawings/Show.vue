@@ -18,17 +18,6 @@ import { computed, ref } from 'vue';
 
 const viewing = ref(null);
 
-const retryNotice = ref('');
-
-function retryPreview(revision) {
-    retryNotice.value = '';
-    window.axios.post(route('files.preview.retry', { source: 'drawing_revision', id: revision.id })).then(() => router.reload({ preserveScroll: true })).catch((error) => {
-        retryNotice.value = error?.response?.status === 429
-            ? 'Wait a moment before retrying the preview.'
-            : 'Preview generation failed';
-    });
-}
-
 const props = defineProps({
     project: { type: Object, required: true },
     drawing: { type: Object, required: true },
@@ -128,7 +117,6 @@ const timeline = (r) =>
                 <p v-if="errorMessage" class="border-t border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 sm:px-5">{{ errorMessage }}</p>
             </AppCard>
 
-            <p v-if="retryNotice" class="mb-3 text-sm text-slate-600">{{ retryNotice }}</p>
             <AppCard title="Revision history" subtitle="Newest first. Superseded, rejected and withdrawn revisions stay on record." :padded="false">
                 <ul class="divide-y divide-line">
                     <li v-for="r in revisions" :key="r.id" class="p-4" :class="r.is_current ? 'bg-green-50/50' : ''">
@@ -153,13 +141,9 @@ const timeline = (r) =>
                                 </ul>
                             </div>
                             <div class="flex flex-wrap gap-2 lg:justify-end">
-                                <button v-if="r.download_url && !['pending', 'processing', 'failed'].includes(r.preview?.status)" type="button" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="viewing = r">
+                                <button v-if="r.download_url" type="button" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="viewing = r">
                                     <Icon name="document" :size="14" />{{ ['dwg', 'dxf'].includes(r.extension) ? 'View Drawing' : 'View' }}
                                 </button>
-                                <span v-if="['pending', 'processing'].includes(r.preview?.status)" class="inline-flex h-8 items-center text-xs text-slate-500">Generating Preview</span>
-                                <span v-if="r.preview?.status === 'failed'" class="inline-flex h-8 items-center text-xs text-slate-500">{{ r.preview.message || 'Preview generation failed' }}</span>
-                                <button v-if="r.preview?.status === 'failed'" type="button" class="inline-flex h-8 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700" @click="retryPreview(r)">Retry Preview</button>
-                                <span v-if="r.preview?.status === 'unsupported'" class="inline-flex h-8 items-center text-xs text-slate-500">{{ r.preview.message }}</span>
                                 <a v-if="r.download_url" :href="r.download_url" class="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">
                                     <Icon name="download" :size="14" />Download
                                 </a>

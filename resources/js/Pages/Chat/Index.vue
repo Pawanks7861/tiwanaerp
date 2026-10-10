@@ -216,10 +216,7 @@ onBeforeUnmount(() => {
                                         <img v-if="file.image" :src="`${file.url}?inline=1`" :alt="file.name" class="max-h-40 rounded object-contain" />
                                         <span v-else class="block px-1 text-xs">
                                             {{ file.name }} · {{ size(file.size) }}
-                                            <template v-if="file.preview?.status === 'pending' || file.preview?.status === 'processing'"> · Generating drawing preview…</template>
-                                            <template v-else-if="file.preview?.status === 'failed'"> · Preview generation failed</template>
-                                            <template v-else-if="file.preview?.status === 'unsupported'"> · {{ file.preview.message }}</template>
-                                            <template v-else-if="file.preview?.status === 'ready' && ['dwg', 'dxf'].includes(file.extension)"> · View Drawing</template>
+                                            <template v-if="['dwg', 'dxf'].includes(file.extension)"> · View Drawing</template>
                                         </span>
                                     </button>
                                 </div>

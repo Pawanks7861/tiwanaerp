@@ -46,7 +46,6 @@ class FilePreviewService
         private readonly DxfSvgEncoder $dxf,
         private readonly LocalPreviewConverter $staging,
         private readonly CadPreviewValidator $drawings,
-        private readonly ShareCadPreview $sharecad,
     ) {}
 
     /**
@@ -55,9 +54,11 @@ class FilePreviewService
     public function describe(PreviewableFile $file): array
     {
         $strategy = $this->strategy($file);
-        $decision = $strategy === 'cad' ? $this->sharecad->decision($file) : null;
-        $useSharecad = $decision !== null && $decision['use'] && $decision['mode'] === 'sharecad';
-        $preview = in_array($strategy, ['office', 'cad'], true) && ! $useSharecad ? $this->prepare($file) : null;
+        if ($strategy === 'cad') {
+            return $this->cadBrowser($file);
+        }
+
+        $preview = $strategy === 'office' ? $this->prepare($file) : null;
         $status = $preview?->status ?? ($strategy === 'download' ? FilePreview::UNSUPPORTED : FilePreview::READY);
         $message = $preview?->error_message;
         $truncated = false;
@@ -70,22 +71,7 @@ class FilePreviewService
             }
         }
 
-        if ($decision !== null && $decision['use'] && $decision['mode'] === 'auto' && $preview?->status !== FilePreview::READY && ! $this->converter->cadAvailable()) {
-            $useSharecad = true;
-        }
-
-        $externalViewer = null;
-        if ($useSharecad) {
-            $strategy = 'external';
-            $status = FilePreview::READY;
-            $message = null;
-            $externalViewer = $this->sharecad->frame($file);
-        }
-
         $message = $this->publicMessage($file, $status, $message);
-        if ($decision !== null && $decision['too_large'] && ! in_array($status, [FilePreview::READY, FilePreview::PENDING, FilePreview::PROCESSING], true) && ! in_array($message, [PreviewConversionException::TIMED_OUT, PreviewConversionException::LIMITED], true)) {
-            $message = ShareCadPreview::TOO_LARGE;
-        }
 
         return [
             'source' => $file->source,
@@ -100,7 +86,7 @@ class FilePreviewService
             'strategy' => $strategy,
             'status' => $status,
             'message' => $message,
-            'preview_format' => $useSharecad ? null : $preview?->preview_format,
+            'preview_format' => $preview?->preview_format,
             'can_retry' => $strategy === 'cad' && $status === FilePreview::FAILED,
             'note' => $strategy === 'cad' && $status === FilePreview::READY
                 ? 'Preview generated from '.strtoupper($file->extension).'. Original file unchanged.'
@@ -110,9 +96,40 @@ class FilePreviewService
             'download_url' => route('files.download', ['source' => $file->source, 'id' => $file->id]),
             'stream_url' => route('files.stream', ['source' => $file->source, 'id' => $file->id]),
             'preview_url' => route('files.preview', ['source' => $file->source, 'id' => $file->id]),
-            'external_viewer' => $externalViewer,
-            'allow_external' => $this->sharecad->allows($file),
-            'can_manage_external' => $this->sharecad->canManage(),
+        ];
+    }
+
+    /**
+     * DWG and DXF open from the original private file in the browser.
+     *
+     * @return array<string, mixed>
+     */
+    private function cadBrowser(PreviewableFile $file): array
+    {
+        $warnAt = (int) config('previews.dwg.warn_bytes', 25 * 1024 * 1024);
+
+        return [
+            'source' => $file->source,
+            'id' => $file->id,
+            'name' => $file->name,
+            'extension' => $file->extension,
+            'type_label' => strtoupper($file->extension),
+            'size_bytes' => $file->size,
+            'uploaded_by' => $file->uploadedBy,
+            'uploaded_at' => $file->uploadedAt,
+            'checksum' => $file->checksum,
+            'strategy' => 'cad',
+            'status' => FilePreview::READY,
+            'message' => $file->size > $warnAt ? 'Large drawing. Opening this file may use significant memory.' : null,
+            'preview_format' => null,
+            'can_retry' => false,
+            'note' => 'Opened in this browser. The original file stays on this server.',
+            'truncated' => false,
+            'scan_status' => 'not_configured',
+            'viewer' => 'browser',
+            'download_url' => route('files.download', ['source' => $file->source, 'id' => $file->id]),
+            'stream_url' => route('files.stream', ['source' => $file->source, 'id' => $file->id]),
+            'preview_url' => route('files.preview', ['source' => $file->source, 'id' => $file->id]),
         ];
     }
 
@@ -172,7 +189,13 @@ class FilePreviewService
             return $this->bytes($sanitized, 'image/svg+xml', $this->safeName($file->name));
         }
 
-        if (in_array($strategy, ['office', 'cad'], true)) {
+        if ($strategy === 'cad') {
+            $mime = $file->extension === 'dxf' ? 'image/vnd.dxf' : 'image/vnd.dwg';
+
+            return $this->file($file->disk, $file->path, $mime, $this->safeName($file->name), true);
+        }
+
+        if ($strategy === 'office') {
             $preview = $this->fresh($file);
             abort_unless($preview?->status === FilePreview::READY && $preview->preview_path, 404);
 
@@ -208,15 +231,9 @@ class FilePreviewService
             return null;
         }
 
-        $row = FilePreview::query()->where('source_type', $source)->where('source_id', $id)->first();
-
         return [
-            'status' => $row?->status,
-            'message' => $row === null ? null : $this->publicMessage(
-                new PreviewableFile($source, $id, (int) $row->company_id, 'private', '', '', strtolower($extension), 0, null, null, null),
-                $row->status,
-                $row->error_message,
-            ),
+            'status' => FilePreview::READY,
+            'message' => null,
         ];
     }
 
@@ -224,25 +241,7 @@ class FilePreviewService
     {
         abort_unless(in_array($file->extension, ['dwg', 'dxf'], true), 404);
 
-        $existing = $this->fresh($file);
-        if ($existing?->status === FilePreview::READY) {
-            return $existing;
-        }
-
-        if ($existing !== null && in_array($existing->status, [FilePreview::PENDING, FilePreview::PROCESSING], true) && $existing->updated_at !== null && $existing->updated_at->gt(now()->subMinutes(15))) {
-            return $existing;
-        }
-
-        $key = $this->retryKey($file);
-        Cache::forget($key);
-        if (! Cache::add($key, 1, now()->addSeconds(30))) {
-            abort(429, 'Wait a moment before retrying the preview.');
-        }
-
-        $pending = $this->save($file, FilePreview::PENDING, null, null, null);
-        $this->dispatchJob($file);
-
-        return $pending->fresh() ?? $pending;
+        return $this->fresh($file) ?? new FilePreview;
     }
 
     public function purge(string $source, int $id): void
@@ -382,33 +381,8 @@ class FilePreviewService
 
     private function enqueueNow(string $source, int $id): void
     {
-        try {
-            $file = app(FileSourceResolver::class)->locate($source, $id);
-        } catch (\Throwable) {
-            return;
-        }
-
-        if ($file->extension !== 'dwg') {
-            return;
-        }
-
-        $existing = $this->fresh($file);
-        if ($existing?->status === FilePreview::READY) {
-            return;
-        }
-
-        if ($existing !== null && in_array($existing->status, [FilePreview::PENDING, FilePreview::PROCESSING], true) && $existing->updated_at !== null && $existing->updated_at->gt(now()->subMinutes(15))) {
-            return;
-        }
-
-        if (! $this->converter->cadAvailable()) {
-            $this->save($file, FilePreview::UNSUPPORTED, PreviewConversionException::UNAVAILABLE, null, null);
-
-            return;
-        }
-
-        $this->save($file, FilePreview::PENDING, null, null, null);
-        $this->dispatchJob($file);
+        // Drawings open from the authorized original stream. No server preview job is required.
+        unset($source, $id);
     }
 
     private function dispatchJob(PreviewableFile $file): void

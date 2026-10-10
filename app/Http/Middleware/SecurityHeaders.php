@@ -30,7 +30,7 @@ class SecurityHeaders
 
     private function policy(Request $request): string
     {
-        $script = ["'self'", "'unsafe-inline'"];
+        $script = ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"];
         $style = ["'self'", "'unsafe-inline'", 'https://fonts.bunny.net'];
         $font = ["'self'", 'https://fonts.bunny.net', 'data:'];
         $connect = ["'self'"];
@@ -46,11 +46,6 @@ class SecurityHeaders
             $connect[] = 'ws://localhost:5173';
         }
 
-        $frame = ["'self'"];
-        if (config('previews.dwg.sharecad_enabled')) {
-            $frame[] = (string) config('previews.dwg.origin');
-        }
-
         $directives = [
             "default-src 'self'",
             'script-src '.implode(' ', $script),
@@ -58,7 +53,8 @@ class SecurityHeaders
             'img-src '.implode(' ', $img),
             'font-src '.implode(' ', $font),
             'connect-src '.implode(' ', $connect),
-            'frame-src '.implode(' ', $frame),
+            "worker-src 'self'",
+            "frame-src 'self'",
             "frame-ancestors 'self'",
             "object-src 'none'",
             "base-uri 'self'",

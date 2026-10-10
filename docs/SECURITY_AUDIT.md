@@ -184,9 +184,13 @@ Logo and favicon stay at 2 MB. Spreadsheet imports stay at 10 MB because they ar
 
 The upload directory must stay outside the document root, and PHP must not be allowed to execute files there.
 
-Preview uses the same private disk and the same parent-record check. Images, PDF, text, CSV, capped spreadsheets, video, and audio stream from `/files/{source}/{id}/stream`. Office files become a private PDF only when LibreOffice is installed locally. DWG is converted on this server by the configured local CAD driver (`auto`: ODA when `ODA_CONVERTER_BINARY` is set, otherwise LibreDWG `dwg2SVG`). The process is a fixed argument list, not a shell string. LibreDWG 0.13.4 is invoked as `dwg2SVG` plus the staged path `input.dwg`, and SVG is read from stdout into `preview.svg`. The original filename, a user-chosen executable, and remote URLs are never arguments. The temp workspace is `storage/app/tmp/cad/{uuid}/` and is removed after the job. SVG is sanitized before storage: script, event handlers, foreignObject, iframe, external references, and javascript URLs are stripped. An empty drawing is stored as failed. Text DXF is converted in-process to an SVG of lines and circles. ZIP listings do not extract the archive. No file is sent to a public viewer or a public conversion API. A missing converter leaves the original downloadable and does not mark the file safe. CAD conversion reads untrusted uploads; production should run the worker as a user that cannot reach the rest of the filesystem, and isolate the converter in a container where practical. The converter path is not shown to users. Company Settings reports availability, driver, version, and the last success for administrators only.
+Preview uses the same private disk and the same parent-record check. Images, PDF, text, CSV, capped spreadsheets, video, and audio stream from `/files/{source}/{id}/stream`. Office files become a private PDF only when LibreOffice is installed locally. DWG and DXF use that same authorized stream. The browser parses the bytes locally. No drawing is sent to ShareCAD, Autodesk, Google, or any other preview service. There is no public drawing URL. ZIP listings do not extract the archive. A missing office converter leaves the original downloadable and does not mark the file safe.
 
-ShareCAD is optional and off by default (`SHARECAD_DWG_PREVIEW=false`, provider `local`). Commercial licensing/permission must be confirmed before production use. A company admin must acknowledge that a DWG will be temporarily shared, and each file's Allow external preview flag defaults to off. The fetch route is `GET /external-file-preview/{token}` with a 10-minute random token stored as a hash. It streams only that approved DWG or DXF, up to 50 MB, and returns 410 when the token is expired, altered, or no longer approved. It is not a general file share and it does not publish `/storage/company/...`. The audit row does not store the token. CSP `frame-src` adds only `https://iframe.sharecad.org` while the server switch is on. `frame-src *` and `default-src *` are not used.
+Optional server CAD conversion, when a job still calls it, uses a fixed argument list. LibreDWG 0.13.4 is invoked as `dwg2SVG` plus the staged path `input.dwg`, and SVG is read from stdout. The original filename is never an argument. That path is not required to view a drawing. The converter path is not shown to users.
+
+CSP allows `'wasm-unsafe-eval'` and `worker-src 'self'` so the local CAD worker and WebAssembly can start. `frame-src` stays `'self'`. `frame-src *` and `default-src *` are not used. Drawing streams keep `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`.
+
+**LICENSE REVIEW REQUIRED.** `@flyfish-dev/cad-viewer` 0.8.2 is AGPL-3.0-only. This is not a claim that the dependency is safe for proprietary commercial redistribution. If that license is incompatible with how the ERP is distributed, replace the viewer behind `CadFileViewer.vue` with a commercially licensed self-hosted CAD SDK. License notices in the package must stay.
 
 ## Production checklist
 
@@ -210,6 +214,8 @@ ShareCAD is optional and off by default (`SHARECAD_DWG_PREVIEW=false`, provider 
 
 - Security tests: 14 in `tests/Feature/Security/SecurityHardeningTest.php`
 - Large-file tests: 11 in `tests/Feature/Uploads/LargeFileUploadTest.php`, plus the BOQ import cap test
-- Full suite: 618 passed, 7223 assertions, 0 failed
-- `npm run build`: exit 0, Vite 8.3.2, 971 modules, built in 14.77s. Warnings: Node engine, chunk size, plugin timings. No build error.
+- Full suite: 608 passed, 7176 assertions, 0 failed
+- `npm run build`: exit 0, Vite 8.3.2, 1028 modules transformed, built in 9.24s. Warnings: Node engine, chunk size, plugin timings. No build error.
+- `npm audit`: 0 vulnerabilities. `@flyfish-dev/cad-viewer` 0.8.2 is AGPL-3.0-only. LICENSE REVIEW REQUIRED.
+- Built CAD runtime assets `GET /wasm/libredwg-web.wasm` and `GET /wasm/dwg-worker.js` returned HTTP 200 from `php artisan serve`, not only the Vite dev server.
 - Browser at 1366 and 390: login, dashboard charts, profile two-factor setup, company settings, chat, and Tally settings loaded. Horizontal overflow at 390px was 0. HSTS was absent on local HTTP, as intended.
