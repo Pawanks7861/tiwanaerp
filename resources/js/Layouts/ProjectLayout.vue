@@ -3,12 +3,13 @@ import AppTabs from '@/Components/UI/AppTabs.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { usePermissions } from '@/lib/permissions';
+import { buildProjectTabs } from '@/lib/projectNavigation';
 import { Link } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
 /**
- * Layout for every page inside a project (/projects/{id}/...). Later phases add tabs
- * (BOQ, Planning, DPR, Procurement, ...) here as their modules ship.
+ * Layout for every page inside a project (/projects/{id}/...). Tab order is the
+ * construction workflow: drawings before BOQ, then planning, procurement, inventory, site execution.
  */
 const props = defineProps({
     project: { type: Object, required: true },
@@ -42,29 +43,12 @@ const financeHome = computed(() => {
 });
 
 const tabs = computed(() =>
-    [
-        { key: 'overview', label: 'Overview', icon: 'home', href: route('projects.show', props.project.id) },
-        can('sites.view') && { key: 'sites', label: 'Sites', icon: 'map-pin', href: route('projects.sites.index', props.project.id) },
-        { key: 'team', label: 'Team', icon: 'users', href: route('projects.team.index', props.project.id) },
-        can('boq.view') && { key: 'boq', label: 'BOQ', icon: 'document', href: route('projects.boqs.index', props.project.id) },
-        can('rate_analysis.view') &&
-            can('boq.view_costs') && { key: 'rate-analysis', label: 'Rate Analysis', icon: 'scale', href: route('projects.rate-analyses.index', props.project.id) },
-        can('budget.view') && can('boq.view_costs') && { key: 'budget', label: 'Budget', icon: 'banknotes', href: route('projects.budget.index', props.project.id) },
-        can('planning.view') && { key: 'planning', label: 'Planning', icon: 'calendar', href: route('projects.planning.tasks.index', props.project.id) },
-        can('site_diary.view') && { key: 'site-diaries', label: 'Site Diary', icon: 'camera', href: route('projects.site-diaries.index', props.project.id) },
-        can('dpr.view') && { key: 'dprs', label: 'DPR', icon: 'clipboard', href: route('projects.dprs.index', props.project.id) },
-        can('planning.view') && { key: 'progress', label: 'Progress', icon: 'check-circle', href: route('projects.progress', props.project.id) },
-        procurementHome.value && { key: 'procurement', label: 'Procurement', icon: 'truck', href: procurementHome.value },
-        can('inventory.view') && { key: 'inventory', label: 'Inventory', icon: 'archive', href: route('projects.inventory.index', props.project.id) },
-        can('labour.view') && { key: 'labour', label: 'Labour', icon: 'users', href: route('projects.attendance.index', props.project.id) },
-        can('subcontract.view') && { key: 'subcontract', label: 'Subcontract', icon: 'briefcase', href: route('projects.work-orders.index', props.project.id) },
-        can('equipment.view') && { key: 'equipment', label: 'Equipment', icon: 'wrench', href: route('projects.equipment-assignments.index', props.project.id) },
-        financeHome.value && { key: 'finance', label: 'Finance', icon: 'banknotes', href: financeHome.value },
-        can('quality.view') && { key: 'quality', label: 'Quality', icon: 'check-circle', href: route('projects.inspections.index', props.project.id) },
-        can('drawings.view') && { key: 'drawings', label: 'Drawings', icon: 'grid', href: route('projects.drawings.index', props.project.id) },
-        can('documents.view') && { key: 'documents', label: 'Documents', icon: 'folder', href: route('projects.documents.index', props.project.id) },
-        can('reports.view') && { key: 'reports', label: 'Reports', icon: 'document', href: route('reports.project-index', props.project.id) },
-    ].filter(Boolean),
+    buildProjectTabs({
+        projectId: props.project.id,
+        can,
+        procurementHome: procurementHome.value,
+        financeHome: financeHome.value,
+    }),
 );
 </script>
 

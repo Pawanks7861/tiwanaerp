@@ -10,6 +10,7 @@ use App\Models\Documents\DrawingRevision;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Attachments\PrivateFileStore;
+use App\Services\Boq\BoqService;
 use App\Services\Files\FilePreviewService;
 use Closure;
 use Illuminate\Http\UploadedFile;
@@ -142,6 +143,10 @@ class DrawingService
                 'current_revision' => $r->revision_code,
                 'superseded' => $previous?->revision_code,
             ]);
+
+            if ($previous !== null) {
+                app(BoqService::class)->recordNewerApprovedRevision($previous, $r);
+            }
         });
     }
 

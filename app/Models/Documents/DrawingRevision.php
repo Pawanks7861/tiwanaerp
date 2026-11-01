@@ -3,12 +3,14 @@
 namespace App\Models\Documents;
 
 use App\Enums\Documents\DrawingRevisionStatus;
+use App\Models\Boq\Boq;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Validation\ValidationException;
 use LogicException;
@@ -115,5 +117,15 @@ class DrawingRevision extends Model
     public function decider(): BelongsTo
     {
         return $this->belongsTo(User::class, 'decided_by');
+    }
+
+    /**
+     * BOQs prepared from this revision. Approving a later revision never rewrites these links.
+     *
+     * @return BelongsToMany<Boq, $this>
+     */
+    public function boqs(): BelongsToMany
+    {
+        return $this->belongsToMany(Boq::class, 'boq_drawing_revisions')->withTimestamps();
     }
 }

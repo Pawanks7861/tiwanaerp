@@ -10,13 +10,17 @@ use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqSection;
 use App\Models\Boq\RateAnalysis;
+use App\Models\Documents\Drawing;
+use App\Models\Documents\DrawingRevision;
 use App\Models\Masters\Unit;
 use App\Models\Projects\Project;
+use App\Models\User;
 use App\Services\Approval\ApprovalService;
 use App\Services\Boq\BoqRevisionService;
 use App\Services\Boq\BoqService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -61,10 +65,12 @@ class BoqController extends Controller
             ])->all(),
             'filters' => $filters,
             'statuses' => BoqStatus::options(),
+            'approved_drawings' => $this->drawingOptions($project, $this->boqs->eligibleDrawingRevisions($project), $user),
             'can' => [
                 'create' => $user->can('create', [Boq::class, $project]),
                 'view_costs' => $withCosts,
                 'import' => $user->can('boq.import'),
+                'view_drawings' => $user->can('viewAny', [Drawing::class, $project]),
             ],
         ]);
     }
@@ -73,7 +79,14 @@ class BoqController extends Controller
     {
         Gate::authorize('create', [Boq::class, $project]);
 
-        $data = $request->validate(['title' => ['required', 'string', 'max:200']]);
+        $data = $request->validate([
+            'title' => ['required', 'string', 'max:200'],
+            'drawing_revision_ids' => ['required', 'array', 'min:1'],
+            'drawing_revision_ids.*' => ['integer', 'distinct', 'min:1'],
+        ], [
+            'drawing_revision_ids.required' => 'BOQ creation is restricted. At least one drawing must be approved before creating a BOQ for this project.',
+            'drawing_revision_ids.min' => 'BOQ creation is restricted. At least one drawing must be approved before creating a BOQ for this project.',
+        ]);
         $boq = $this->boqs->create($project, $data);
 
         return redirect()->route('projects.boqs.show', [$project, $boq])->with('success', "BOQ {$boq->boq_number} created.");
@@ -97,10 +110,16 @@ class BoqController extends Controller
             : [];
 
         $pending = $boq->pendingApprovalRequest();
+        $canViewDrawings = $user->can('viewAny', [Drawing::class, $project]);
+        $linked = $this->linkedDrawingRevisions($boq);
+        $drawings = $linked->map(fn (DrawingRevision $revision) => BoqPresenter::drawingRevision($revision, $project, $canViewDrawings))->all();
 
         return Inertia::render('Boq/Show', [
             'project' => ProjectHeader::for($project),
             'boq' => BoqPresenter::header($boq, $withCosts),
+            'drawings' => $drawings,
+            'approved_drawings' => $this->drawingOptions($project, $this->pickerRevisions($project, $linked), $user),
+            'has_newer_approved_revision' => collect($drawings)->contains(fn (array $row) => $row['newer_revision'] !== null),
             'sections' => $sections->map(fn (BoqSection $s) => $s->only(['id', 'parent_id', 'code', 'name', 'discipline', 'sort_order']))->all(),
             'items' => $items->map(fn (BoqItem $i) => BoqPresenter::item($i, $withCosts))->all(),
             'units' => Unit::query()->active()->orderBy('symbol')->get(['id', 'name', 'symbol'])
@@ -121,7 +140,7 @@ class BoqController extends Controller
                 'can_act' => $this->approvals->canAct($pending, $user),
                 'can_cancel' => (int) $pending->submitted_by === (int) $user->id,
             ] : null,
-            'can' => [...BoqPresenter::abilities($user, $boq), 'view_costs' => $withCosts],
+            'can' => [...BoqPresenter::abilities($user, $boq), 'view_costs' => $withCosts, 'view_drawings' => $canViewDrawings],
         ]);
     }
 
@@ -132,6 +151,22 @@ class BoqController extends Controller
         $this->boqs->update($boq, $request->validate(['title' => ['required', 'string', 'max:200']]));
 
         return back()->with('success', 'BOQ updated.');
+    }
+
+    public function syncDrawings(Request $request, Project $project, Boq $boq): RedirectResponse
+    {
+        Gate::authorize('update', $boq);
+
+        $data = $request->validate([
+            'drawing_revision_ids' => ['required', 'array', 'min:1'],
+            'drawing_revision_ids.*' => ['integer', 'distinct', 'min:1'],
+        ], [
+            'drawing_revision_ids.required' => 'Select at least one approved drawing revision.',
+            'drawing_revision_ids.min' => 'Select at least one approved drawing revision.',
+        ]);
+        $this->boqs->syncDrawingRevisions($boq, $data['drawing_revision_ids']);
+
+        return back()->with('success', 'Source drawings updated.');
     }
 
     public function destroy(Project $project, Boq $boq): RedirectResponse
@@ -168,5 +203,54 @@ class BoqController extends Controller
 
         return redirect()->route('projects.boqs.show', [$project, $revision])
             ->with('success', "Revision v{$revision->version} created as a draft.");
+    }
+
+    /**
+     * @param  Collection<int, DrawingRevision>  $revisions
+     * @return list<array<string, mixed>>
+     */
+    private function drawingOptions(Project $project, Collection $revisions, User $user): array
+    {
+        $canViewFiles = $user->can('viewAny', [Drawing::class, $project]);
+
+        return $revisions
+            ->map(fn (DrawingRevision $revision) => BoqPresenter::drawingRevision($revision, $project, $canViewFiles))
+            ->all();
+    }
+
+    /**
+     * @return Collection<int, DrawingRevision>
+     */
+    private function linkedDrawingRevisions(Boq $boq): Collection
+    {
+        return $boq->drawingRevisions()
+            ->with([
+                'drawing.currentRevision.decider:id,name',
+                'drawing:id,company_id,project_id,drawing_number,title,current_revision_id,status',
+                'decider:id,name',
+            ])
+            ->orderBy('drawing_revisions.id')
+            ->get();
+    }
+
+    /**
+     * Eligible current revisions plus any historically linked (possibly superseded) rows so an
+     * editor can keep the original source instead of being forced onto the latest approval.
+     *
+     * @param  Collection<int, DrawingRevision>  $linked
+     * @return Collection<int, DrawingRevision>
+     */
+    private function pickerRevisions(Project $project, Collection $linked): Collection
+    {
+        $eligible = $this->boqs->eligibleDrawingRevisions($project)->keyBy('id');
+
+        foreach ($linked as $revision) {
+            $eligible->put($revision->id, $revision);
+        }
+
+        return $eligible->sortBy(fn (DrawingRevision $revision) => [
+            $revision->drawing?->drawing_number,
+            $revision->revision_code,
+        ])->values();
     }
 }

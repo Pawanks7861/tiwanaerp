@@ -133,6 +133,7 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::prefix('/boqs/{boq}')->whereNumber('boq')->name('projects.boqs.')->group(function () {
             Route::get('/', [BoqController::class, 'show'])->name('show');
             Route::put('/', [BoqController::class, 'update'])->name('update');
+            Route::put('/drawings', [BoqController::class, 'syncDrawings'])->name('drawings.sync');
             Route::delete('/', [BoqController::class, 'destroy'])->name('destroy');
             Route::put('/items', [BoqController::class, 'saveItems'])->name('items.save');
             Route::post('/submit', [BoqController::class, 'submit'])->name('submit');

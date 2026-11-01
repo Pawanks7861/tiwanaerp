@@ -210,23 +210,31 @@ class SiteDiaryService
      */
     private function replaceLines(SiteDiary $diary, Project $project, array $data): void
     {
-        $workItems = array_values($data['work_items'] ?? []);
-        $labours = array_values($data['labours'] ?? []);
-        $equipment = array_values($data['equipment'] ?? []);
-        $materials = array_values($data['materials'] ?? []);
+        $workItems = array_key_exists('work_items', $data) ? array_values($data['work_items'] ?? []) : null;
+        $labours = array_key_exists('labours', $data) ? array_values($data['labours'] ?? []) : null;
+        $equipment = array_key_exists('equipment', $data) ? array_values($data['equipment'] ?? []) : null;
+        $materials = array_key_exists('materials', $data) ? array_values($data['materials'] ?? []) : null;
 
         foreach (['work_items' => $workItems, 'labours' => $labours, 'equipment' => $equipment, 'materials' => $materials] as $key => $rows) {
-            if (count($rows) > self::MAX_LINES) {
+            if ($rows !== null && count($rows) > self::MAX_LINES) {
                 throw ValidationException::withMessages([$key => 'At most '.self::MAX_LINES.' lines.']);
             }
         }
 
-        SiteDiaryWorkItem::query()->where('site_diary_id', $diary->id)->get()->each->delete();
-        SiteDiaryLabour::query()->where('site_diary_id', $diary->id)->get()->each->delete();
-        SiteDiaryEquipment::query()->where('site_diary_id', $diary->id)->get()->each->delete();
-        SiteDiaryMaterial::query()->where('site_diary_id', $diary->id)->get()->each->delete();
+        if ($workItems !== null) {
+            SiteDiaryWorkItem::query()->where('site_diary_id', $diary->id)->get()->each->delete();
+        }
+        if ($labours !== null) {
+            SiteDiaryLabour::query()->where('site_diary_id', $diary->id)->get()->each->delete();
+        }
+        if ($equipment !== null) {
+            SiteDiaryEquipment::query()->where('site_diary_id', $diary->id)->get()->each->delete();
+        }
+        if ($materials !== null) {
+            SiteDiaryMaterial::query()->where('site_diary_id', $diary->id)->get()->each->delete();
+        }
 
-        foreach ($workItems as $i => $row) {
+        foreach ($workItems ?? [] as $i => $row) {
             $target = $this->workTarget($project, $row, "work_items.{$i}");
             (new SiteDiaryWorkItem)->forceFill([
                 'site_diary_id' => $diary->id,
@@ -239,7 +247,7 @@ class SiteDiaryService
             ])->save();
         }
 
-        foreach ($labours as $i => $row) {
+        foreach ($labours ?? [] as $i => $row) {
             (new SiteDiaryLabour)->forceFill([
                 'site_diary_id' => $diary->id,
                 'labour_trade_id' => $this->labourTrade($row['labour_trade_id'] ?? null, "labours.{$i}.labour_trade_id")->id,
@@ -250,7 +258,7 @@ class SiteDiaryService
             ])->save();
         }
 
-        foreach ($equipment as $i => $row) {
+        foreach ($equipment ?? [] as $i => $row) {
             $type = $this->equipmentType($row['equipment_type_id'] ?? null, "equipment.{$i}.equipment_type_id");
             if ($type === null && blank($row['description'] ?? null)) {
                 throw ValidationException::withMessages(["equipment.{$i}.equipment_type_id" => 'Choose the equipment type or describe the equipment.']);
@@ -264,7 +272,7 @@ class SiteDiaryService
             ])->save();
         }
 
-        foreach ($materials as $i => $row) {
+        foreach ($materials ?? [] as $i => $row) {
             $resolved = $this->materialWithUnit($row['material_id'] ?? null, $row['unit_id'] ?? null, "materials.{$i}");
             (new SiteDiaryMaterial)->forceFill([
                 'site_diary_id' => $diary->id,

@@ -16,6 +16,7 @@ use App\Support\Math\Decimal;
 use App\Support\Procurement\ProcurementSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -38,12 +39,18 @@ class GrnService
      */
     public function create(PurchaseOrder $po, array $data): Grn
     {
-        return DB::transaction(function () use ($po, $data) {
+        $uuid = $data['uuid'] ?? null;
+        if ($uuid !== null && ($existing = $this->byUuid($po, $uuid))) {
+            return $existing;
+        }
+
+        return DB::transaction(function () use ($po, $data, $uuid) {
             $po = PurchaseOrder::query()->whereKey($po->id)->lockForUpdate()->firstOrFail();
             $this->assertReceivable($po);
 
             $grn = new Grn($this->header($data));
             $grn->forceFill([
+                'uuid' => $uuid ?? (string) Str::uuid(),
                 'project_id' => $po->project_id,
                 'purchase_order_id' => $po->id,
                 'vendor_id' => $po->vendor_id,
@@ -266,6 +273,18 @@ class GrnService
         if ($grn->warehouse_id === null) {
             throw ValidationException::withMessages(['warehouse_id' => 'Choose the receiving warehouse; accepted stock is posted there on approval.']);
         }
+    }
+
+    private function byUuid(PurchaseOrder $po, string $uuid): ?Grn
+    {
+        $existing = Grn::query()->withoutGlobalScopes()->where('uuid', $uuid)->first();
+        if ($existing === null) {
+            return null;
+        }
+
+        $mine = Grn::query()->whereKey($existing->id)->where('purchase_order_id', $po->id)->first();
+
+        return $mine ?? throw ValidationException::withMessages(['uuid' => 'This GRN reference is already in use.']);
     }
 
     private function assertReceivable(PurchaseOrder $po): void

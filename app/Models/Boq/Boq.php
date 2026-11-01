@@ -9,12 +9,14 @@ use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\HasApprovals;
+use App\Models\Documents\DrawingRevision;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Boq\BoqService;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Validation\ValidationException;
@@ -119,6 +121,16 @@ class Boq extends Model implements Approvable
     public function approver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    /**
+     * Approved (or historically linked) drawing revisions this BOQ was prepared from.
+     *
+     * @return BelongsToMany<DrawingRevision, $this>
+     */
+    public function drawingRevisions(): BelongsToMany
+    {
+        return $this->belongsToMany(DrawingRevision::class, 'boq_drawing_revisions')->withTimestamps();
     }
 
     public function isEditable(): bool

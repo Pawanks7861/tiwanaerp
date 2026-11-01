@@ -37,13 +37,14 @@ class SecurityHeaders
         $img = ["'self'", 'data:', 'blob:'];
 
         if (app()->environment('local')) {
-            $vite = 'http://127.0.0.1:5173';
-            $script[] = $vite;
-            $style[] = $vite;
-            $connect[] = $vite;
-            $connect[] = 'ws://127.0.0.1:5173';
-            $connect[] = 'http://localhost:5173';
-            $connect[] = 'ws://localhost:5173';
+            foreach (['http://127.0.0.1:5173', 'http://localhost:5173'] as $origin) {
+                $script[] = $origin;
+                $style[] = $origin;
+                $connect[] = $origin;
+            }
+            foreach (['ws://127.0.0.1:5173', 'ws://localhost:5173'] as $ws) {
+                $connect[] = $ws;
+            }
         }
 
         $directives = [

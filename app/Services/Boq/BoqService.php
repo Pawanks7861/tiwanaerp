@@ -4,10 +4,12 @@ namespace App\Services\Boq;
 
 use App\Enums\Boq\BoqStatus;
 use App\Enums\Boq\RateAnalysisStatus;
+use App\Enums\Documents\DrawingRevisionStatus;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqSection;
 use App\Models\Boq\RateAnalysis;
+use App\Models\Documents\DrawingRevision;
 use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
 use App\Models\User;
@@ -35,11 +37,13 @@ class BoqService
     ) {}
 
     /**
-     * @param  array{title: string}  $data
+     * @param  array{title: string, drawing_revision_ids?: list<int|string>}  $data
      */
     public function create(Project $project, array $data): Boq
     {
         return DB::transaction(function () use ($project, $data) {
+            $revisionIds = $this->assertEligibleRevisions($project, $data['drawing_revision_ids'] ?? []);
+
             $boq = new Boq(['title' => $data['title']]);
             $boq->forceFill([
                 'project_id' => $project->id,
@@ -49,8 +53,86 @@ class BoqService
                 'is_current' => false,
             ])->save();
 
+            $boq->drawingRevisions()->sync($revisionIds);
+            $boq->writeAudit('drawings_linked', null, ['drawing_revision_ids' => $revisionIds]);
+
             return $boq;
         });
+    }
+
+    /**
+     * Replace the source drawings of an editable BOQ. Already-linked superseded revisions may be
+     * kept so a later approval never silently rewrites the original source; new picks must be the
+     * currently approved revision of a drawing on this project.
+     *
+     * @param  list<int|string>  $ids
+     */
+    public function syncDrawingRevisions(Boq $boq, array $ids): Boq
+    {
+        $boq->assertEditable();
+
+        return DB::transaction(function () use ($boq, $ids) {
+            $locked = Boq::query()->whereKey($boq->id)->lockForUpdate()->firstOrFail();
+            $locked->assertEditable();
+            $locked->load('project');
+
+            $previous = $locked->drawingRevisions()->pluck('drawing_revisions.id')->map(fn ($id) => (int) $id)->sort()->values()->all();
+            $revisionIds = $this->assertEligibleRevisions($locked->project, $ids, $previous);
+            $locked->drawingRevisions()->sync($revisionIds);
+
+            $next = collect($revisionIds)->sort()->values()->all();
+            if ($previous !== $next) {
+                $locked->writeAudit('drawings_linked', ['drawing_revision_ids' => $previous], ['drawing_revision_ids' => $next]);
+            }
+
+            return $locked;
+        });
+    }
+
+    /**
+     * Currently approved drawing revisions of this project (the drawing's current_revision_id).
+     *
+     * @return Collection<int, DrawingRevision>
+     */
+    public function eligibleDrawingRevisions(Project $project): Collection
+    {
+        return DrawingRevision::query()
+            ->where('status', DrawingRevisionStatus::Approved)
+            ->whereHas('drawing', fn (Builder $q) => $q
+                ->where('project_id', $project->id)
+                ->whereColumn('current_revision_id', 'drawing_revisions.id'))
+            ->with([
+                'drawing:id,company_id,project_id,drawing_number,title,current_revision_id,status',
+                'drawing.currentRevision.decider:id,name',
+                'decider:id,name',
+            ])
+            ->orderBy('id')
+            ->get()
+            ->sortBy(fn (DrawingRevision $revision) => [
+                $revision->drawing?->drawing_number,
+                $revision->revision_code,
+            ])
+            ->values();
+    }
+
+    /**
+     * A later revision of a linked drawing was approved. The BOQ keeps its original source;
+     * this only records that a review may be needed.
+     */
+    public function recordNewerApprovedRevision(DrawingRevision $previous, DrawingRevision $current): void
+    {
+        Boq::query()
+            ->whereHas('drawingRevisions', fn (Builder $q) => $q->whereKey($previous->id))
+            ->orderBy('id')
+            ->each(function (Boq $boq) use ($previous, $current) {
+                $boq->writeAudit('newer_drawing_revision_available', [
+                    'drawing_revision_id' => $previous->id,
+                    'revision_code' => $previous->revision_code,
+                ], [
+                    'drawing_revision_id' => $current->id,
+                    'revision_code' => $current->revision_code,
+                ]);
+            });
     }
 
     /**
@@ -286,6 +368,66 @@ class BoqService
                 'approved_at' => now(),
             ])->save();
         });
+    }
+
+    /**
+     * Lock and re-check selected revisions inside the caller's transaction so eligibility cannot
+     * change between the form and the insert.
+     *
+     * @param  list<int|string>  $ids
+     * @param  list<int>  $alreadyLinked
+     * @return list<int>
+     */
+    private function assertEligibleRevisions(Project $project, array $ids, array $alreadyLinked = []): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+
+        if ($ids === []) {
+            throw ValidationException::withMessages([
+                'drawing_revision_ids' => 'BOQ creation is restricted. At least one drawing must be approved before creating a BOQ for this project.',
+            ]);
+        }
+
+        $revisions = DrawingRevision::query()
+            ->with(['drawing' => fn ($q) => $q->withTrashed()])
+            ->whereIn('id', $ids)
+            ->lockForUpdate()
+            ->get()
+            ->keyBy(fn (DrawingRevision $revision) => (int) $revision->id);
+
+        if ($revisions->count() !== count($ids)) {
+            throw ValidationException::withMessages([
+                'drawing_revision_ids' => 'One or more selected drawing revisions could not be found.',
+            ]);
+        }
+
+        foreach ($ids as $i => $id) {
+            $revision = $revisions->get($id);
+            $drawing = $revision?->drawing;
+            $key = "drawing_revision_ids.{$i}";
+
+            if ($drawing === null || $drawing->trashed() || (int) $drawing->project_id !== (int) $project->id) {
+                throw ValidationException::withMessages([
+                    $key => 'Each selected drawing revision must belong to this project.',
+                ]);
+            }
+
+            $keepHistorical = in_array($id, $alreadyLinked, true)
+                && $revision->status === DrawingRevisionStatus::Superseded;
+
+            if ($keepHistorical) {
+                continue;
+            }
+
+            if ($revision->status !== DrawingRevisionStatus::Approved
+                || (int) $drawing->current_revision_id !== (int) $revision->id) {
+                throw ValidationException::withMessages([
+                    $key => 'Only currently approved drawing revisions of this project can be linked to a BOQ.',
+                ]);
+            }
+        }
+
+        return $ids;
     }
 
     private function relinkTasks(Boq $old, Boq $new): void

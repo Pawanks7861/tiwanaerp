@@ -1,5 +1,7 @@
 <script setup>
+import ApprovedDrawingPicker from '@/Components/Boq/ApprovedDrawingPicker.vue';
 import CellDecimal from '@/Components/Boq/CellDecimal.vue';
+import UniversalFileViewer from '@/Components/Files/UniversalFileViewer.vue';
 import DecimalInput from '@/Components/Form/DecimalInput.vue';
 import FileUpload from '@/Components/Form/FileUpload.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
@@ -15,7 +17,7 @@ import Icon from '@/Components/UI/Icon.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { boqLine, sum } from '@/lib/boqCalc';
-import { formatDateTime, formatMoney, formatPercent, formatQty, formatRate } from '@/lib/format';
+import { formatDate, formatDateTime, formatMoney, formatPercent, formatQty, formatRate } from '@/lib/format';
 import { Link, router, useForm } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -29,10 +31,34 @@ const props = defineProps({
     versions: { type: Array, required: true },
     approval: { type: Object, default: null },
     can: { type: Object, required: true },
+    drawings: { type: Array, default: () => [] },
+    approved_drawings: { type: Array, default: () => [] },
+    has_newer_approved_revision: { type: Boolean, default: false },
 });
 
 const COST_FIELDS = ['material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent'];
 const editable = computed(() => props.can.update);
+const viewingDrawing = ref(null);
+const showDrawings = ref(false);
+const drawingsForm = useForm({ drawing_revision_ids: [] });
+const drawingFieldErrors = computed(() => Object.fromEntries(
+    Object.entries(drawingsForm.errors).filter(([key]) => key.startsWith('drawing_revision_ids.')),
+));
+const viewableDrawings = computed(() => props.drawings.filter((drawing) => drawing.download_url || drawing.file_url));
+
+function openDrawings() {
+    drawingsForm.reset();
+    drawingsForm.clearErrors();
+    drawingsForm.drawing_revision_ids = props.drawings.map((drawing) => drawing.id);
+    showDrawings.value = true;
+}
+
+function saveDrawings() {
+    drawingsForm.put(route('projects.boqs.drawings.sync', [props.project.id, props.boq.id]), {
+        preserveScroll: true,
+        onSuccess: () => (showDrawings.value = false),
+    });
+}
 const costs = computed(() => props.can.view_costs);
 
 // ---- Rows (local editable copy; the server recalculates everything on save) -------------------
@@ -411,6 +437,66 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                 </div>
             </AppCard>
 
+            <div v-if="has_newer_approved_revision" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                A newer approved drawing revision is available. Review whether this BOQ requires an update.
+            </div>
+
+            <AppCard title="Approved Drawings" subtitle="Source drawings used to prepare this BOQ. Later approvals do not change these links or quantities." :padded="false">
+                <template v-if="editable" #actions>
+                    <AppButton size="sm" variant="secondary" @click="openDrawings">{{ drawings.length ? 'Update drawings' : 'Link drawings' }}</AppButton>
+                </template>
+                <EmptyState
+                    v-if="!drawings.length"
+                    icon="document"
+                    title="No source drawings"
+                    :description="editable ? 'This is a historical BOQ. Link currently approved drawings if this version should record its sources.' : 'This BOQ has no linked drawing revisions.'"
+                />
+                <div v-else class="overflow-x-auto">
+                    <table class="min-w-full text-xs">
+                        <thead class="bg-slate-50 text-[11px] tracking-wide text-slate-600 uppercase">
+                            <tr>
+                                <th class="px-4 py-2 text-left">Drawing Number</th>
+                                <th class="px-4 py-2 text-left">Drawing Title</th>
+                                <th class="px-4 py-2 text-left">Revision</th>
+                                <th class="px-4 py-2 text-left">Approval Status</th>
+                                <th class="px-4 py-2 text-left">Approved</th>
+                                <th class="px-4 py-2 text-right" />
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-line">
+                            <tr v-for="drawing in drawings" :key="drawing.id">
+                                <td class="px-4 py-2 font-mono font-medium text-slate-900">{{ drawing.drawing_number }}</td>
+                                <td class="px-4 py-2 text-slate-800">{{ drawing.title }}</td>
+                                <td class="px-4 py-2 tabular text-slate-700">{{ drawing.revision_code }}</td>
+                                <td class="px-4 py-2">
+                                    <StatusBadge :status="drawing.status" :label="drawing.status_label" />
+                                    <p v-if="drawing.newer_revision" class="mt-1 text-[11px] text-amber-800">
+                                        Current approved: {{ drawing.newer_revision.revision_code }}
+                                    </p>
+                                </td>
+                                <td class="px-4 py-2 text-slate-600">
+                                    <div v-if="drawing.approved_at">{{ formatDate(drawing.approved_at) }}</div>
+                                    <div v-if="drawing.approved_by" class="text-slate-400">{{ drawing.approved_by }}</div>
+                                </td>
+                                <td class="px-4 py-2 text-right whitespace-nowrap">
+                                    <button
+                                        v-if="drawing.file_url"
+                                        type="button"
+                                        class="text-brand-700 hover:text-brand-800"
+                                        @click="viewingDrawing = drawing"
+                                    >View</button>
+                                    <a
+                                        v-if="drawing.download_url"
+                                        :href="drawing.download_url"
+                                        class="ml-3 text-slate-600 hover:text-slate-800"
+                                    >Download</a>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </AppCard>
+
             <div v-if="errorSummary.length" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
                 <p class="font-medium">Nothing was saved. Please fix these lines:</p>
                 <ul class="mt-1 list-disc space-y-0.5 pl-5 text-xs">
@@ -741,6 +827,29 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
             :processing="processing"
             @close="deletingSection = null"
             @confirm="deleteSection"
+        />
+
+        <AppModal :show="showDrawings" title="Source drawings" @close="showDrawings = false">
+            <ApprovedDrawingPicker
+                v-model="drawingsForm.drawing_revision_ids"
+                :drawings="approved_drawings"
+                :error="drawingsForm.errors.drawing_revision_ids"
+                :errors="drawingFieldErrors"
+                empty-title="No approved drawings"
+                empty-description="Approve a drawing revision for this project before linking it to the BOQ."
+            />
+            <template #footer>
+                <AppButton variant="secondary" @click="showDrawings = false">Cancel</AppButton>
+                <AppButton :loading="drawingsForm.processing" :disabled="!drawingsForm.drawing_revision_ids.length" @click="saveDrawings">Save drawings</AppButton>
+            </template>
+        </AppModal>
+
+        <UniversalFileViewer
+            :show="!!viewingDrawing"
+            source="drawing_revision"
+            :file-id="viewingDrawing?.id ?? null"
+            :gallery="viewableDrawings.map((drawing) => ({ source: 'drawing_revision', id: drawing.id }))"
+            @close="viewingDrawing = null"
         />
     </ProjectLayout>
 </template>

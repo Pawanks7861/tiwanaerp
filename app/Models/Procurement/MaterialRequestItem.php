@@ -66,6 +66,16 @@ class MaterialRequestItem extends Model
     }
 
     /**
+     * Item master on the line. Same relation as material(); the mobile API loads it as items.item.
+     *
+     * @return BelongsTo<Material, $this>
+     */
+    public function item(): BelongsTo
+    {
+        return $this->material();
+    }
+
+    /**
      * @return BelongsTo<Unit, $this>
      */
     public function unit(): BelongsTo

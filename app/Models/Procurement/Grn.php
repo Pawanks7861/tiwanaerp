@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Str;
 
 /**
  * Goods receipt against a purchase order. Approved GRNs are immutable; they drive the PO and MR
@@ -34,6 +35,11 @@ class Grn extends Model implements Approvable
     use Auditable, BelongsToCompany, Blameable, HasApprovals, HasAttachments, LocksWhenNotEditable, SoftDeletes;
 
     public const LIFECYCLE_COLUMNS = ['status', 'approved_by', 'approved_at', 'updated_by', 'updated_at'];
+
+    protected static function booted(): void
+    {
+        static::creating(fn (self $grn) => $grn->uuid ??= (string) Str::uuid());
+    }
 
     protected function casts(): array
     {

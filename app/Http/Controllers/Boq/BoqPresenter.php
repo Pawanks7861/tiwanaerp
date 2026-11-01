@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Boq;
 
 use App\Enums\Boq\BoqStatus;
+use App\Enums\Documents\DrawingRevisionStatus;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
 use App\Models\Boq\RateAnalysis;
+use App\Models\Documents\DrawingRevision;
+use App\Models\Projects\Project;
 use App\Models\User;
 
 /**
@@ -88,6 +91,46 @@ final class BoqPresenter
             'unit_id' => $analysis->unit_id,
             'unit_rate' => $analysis->unit_rate,
             'snapshot' => $snapshot,
+        ];
+    }
+
+    /**
+     * Drawing revision as shown on BOQ create/detail (approval facts come from the linked revision,
+     * not a denormalised copy on the BOQ).
+     *
+     * @return array<string, mixed>
+     */
+    public static function drawingRevision(DrawingRevision $revision, Project $project, bool $canViewFiles): array
+    {
+        $drawing = $revision->drawing;
+        $current = $drawing && $drawing->relationLoaded('currentRevision') ? $drawing->currentRevision : null;
+        $newer = $current !== null
+            && (int) $current->id !== (int) $revision->id
+            && $current->status === DrawingRevisionStatus::Approved;
+
+        return [
+            'id' => $revision->id,
+            'drawing_id' => $drawing?->id,
+            'drawing_number' => $drawing?->drawing_number,
+            'title' => $drawing?->title,
+            'revision_code' => $revision->revision_code,
+            'status' => $revision->status->value,
+            'status_label' => $revision->status->label(),
+            'is_current' => $drawing !== null && (int) $drawing->current_revision_id === (int) $revision->id,
+            'approved_at' => $revision->decided_at?->toIso8601String(),
+            'approved_by' => $revision->decider?->name,
+            'newer_revision' => $newer ? [
+                'id' => $current->id,
+                'revision_code' => $current->revision_code,
+                'approved_at' => $current->decided_at?->toIso8601String(),
+                'approved_by' => $current->relationLoaded('decider') ? $current->decider?->name : null,
+            ] : null,
+            'file_url' => $canViewFiles && $drawing !== null
+                ? route('files.show', ['source' => 'drawing_revision', 'id' => $revision->id])
+                : null,
+            'download_url' => $canViewFiles && $drawing !== null
+                ? route('projects.drawings.revisions.download', [$project, $drawing, $revision])
+                : null,
         ];
     }
 }

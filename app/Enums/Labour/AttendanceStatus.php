@@ -35,6 +35,23 @@ enum AttendanceStatus: string
         };
     }
 
+    /** @return list<string> */
+    public static function shorts(): array
+    {
+        return ['P', 'H', 'A', 'L'];
+    }
+
+    public static function fromShort(string $code): self
+    {
+        return match (strtoupper(trim($code))) {
+            'P' => self::Present,
+            'H' => self::HalfDay,
+            'A' => self::Absent,
+            'L' => self::Leave,
+            default => throw new \InvalidArgumentException("Unknown attendance code [{$code}]."),
+        };
+    }
+
     public function isWorking(): bool
     {
         return $this === self::Present || $this === self::HalfDay;

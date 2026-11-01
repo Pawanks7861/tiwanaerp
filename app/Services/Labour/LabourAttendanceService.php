@@ -85,6 +85,7 @@ class LabourAttendanceService
                     'site_id' => $site?->id,
                     'labour_id' => $labour->id,
                     'attendance_date' => $date->toDateString(),
+                    'sync_uuid' => $data['uuid'] ?? $attendance->sync_uuid,
                     'latitude' => $data['latitude'] ?? $attendance->latitude,
                     'longitude' => $data['longitude'] ?? $attendance->longitude,
                     'approval_status' => AttendanceApproval::Marked,

@@ -1,4 +1,5 @@
 <script setup>
+import ApprovedDrawingPicker from '@/Components/Boq/ApprovedDrawingPicker.vue';
 import DataTable from '@/Components/Data/DataTable.vue';
 import FilterBar from '@/Components/Data/FilterBar.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
@@ -9,7 +10,7 @@ import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatDate, formatMoney } from '@/lib/format';
-import { router, useForm } from '@inertiajs/vue3';
+import { Link, router, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 const props = defineProps({
@@ -18,6 +19,7 @@ const props = defineProps({
     filters: { type: Object, required: true },
     statuses: { type: Array, required: true },
     can: { type: Object, required: true },
+    approved_drawings: { type: Array, default: () => [] },
 });
 
 const columns = computed(() => [
@@ -30,9 +32,20 @@ const columns = computed(() => [
 ].filter(Boolean));
 
 const showCreate = ref(false);
-const createForm = useForm({ title: '' });
+const createForm = useForm({ title: '', drawing_revision_ids: [] });
 const confirming = ref(null);
 const processing = ref(false);
+const hasApprovedDrawings = computed(() => props.approved_drawings.length > 0);
+const drawingFieldErrors = computed(() => Object.fromEntries(
+    Object.entries(createForm.errors).filter(([key]) => key.startsWith('drawing_revision_ids.')),
+));
+
+function openCreate() {
+    createForm.reset();
+    createForm.clearErrors();
+    createForm.drawing_revision_ids = [];
+    showCreate.value = true;
+}
 
 function create() {
     createForm.post(route('projects.boqs.store', props.project.id), { onSuccess: () => (showCreate.value = false) });
@@ -57,7 +70,7 @@ function confirmAction() {
     <ProjectLayout :project="project" active="boq" title="BOQ">
         <AppCard title="Bills of quantities" subtitle="Each BOQ is versioned. Approved versions are locked; changes go through a revision." :padded="false">
             <template #actions>
-                <AppButton v-if="can.create" size="sm" icon="plus" @click="(createForm.reset(), (showCreate = true))">New BOQ</AppButton>
+                <AppButton v-if="can.create" size="sm" icon="plus" @click="openCreate">New BOQ</AppButton>
             </template>
 
             <FilterBar
@@ -104,13 +117,36 @@ function confirmAction() {
         </AppCard>
 
         <AppModal :show="showCreate" title="New BOQ" @close="showCreate = false">
-            <form id="boq-create" @submit.prevent="create">
+            <form v-if="hasApprovedDrawings" id="boq-create" class="space-y-4" @submit.prevent="create">
                 <FormInput v-model="createForm.title" label="Title" required autofocus maxlength="200" :error="createForm.errors.title" placeholder="e.g. Civil & structural works" />
-                <p class="mt-2 text-xs text-slate-500">The BOQ number is assigned automatically.</p>
+                <div>
+                    <p class="mb-1 text-sm font-medium text-slate-700">Select Approved Drawing <span class="text-red-600">*</span></p>
+                    <ApprovedDrawingPicker
+                        v-model="createForm.drawing_revision_ids"
+                        :drawings="approved_drawings"
+                        :error="createForm.errors.drawing_revision_ids"
+                        :errors="drawingFieldErrors"
+                    />
+                </div>
+                <p class="text-xs text-slate-500">The BOQ number is assigned automatically.</p>
             </form>
+            <div v-else class="space-y-3">
+                <p class="text-sm text-slate-700">BOQ creation is restricted. At least one drawing must be approved before creating a BOQ for this project.</p>
+                <Link
+                    v-if="can.view_drawings"
+                    :href="route('projects.drawings.index', project.id)"
+                    class="inline-flex text-sm font-medium text-brand-700 hover:text-brand-800"
+                >Open Drawing Management</Link>
+            </div>
             <template #footer>
                 <AppButton variant="secondary" @click="showCreate = false">Cancel</AppButton>
-                <AppButton type="submit" form="boq-create" :loading="createForm.processing">Create BOQ</AppButton>
+                <AppButton
+                    v-if="hasApprovedDrawings"
+                    type="submit"
+                    form="boq-create"
+                    :loading="createForm.processing"
+                    :disabled="!createForm.drawing_revision_ids.length"
+                >Create BOQ</AppButton>
             </template>
         </AppModal>
 

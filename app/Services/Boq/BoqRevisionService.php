@@ -50,6 +50,7 @@ class BoqRevisionService
 
             $sectionMap = $this->cloneSections($source, $revision);
             $this->cloneItems($source, $revision, $sectionMap);
+            $this->cloneDrawingLinks($source, $revision);
 
             return $revision;
         });
@@ -85,5 +86,19 @@ class BoqRevisionService
             $copy->boq_section_id = $sectionMap[$item->boq_section_id];
             $copy->save();
         });
+    }
+
+    /**
+     * Copy the source drawing links as they stood. A later approved revision must not replace them.
+     */
+    private function cloneDrawingLinks(Boq $source, Boq $revision): void
+    {
+        $ids = $source->drawingRevisions()->pluck('drawing_revisions.id')->map(fn ($id) => (int) $id)->all();
+        if ($ids === []) {
+            return;
+        }
+
+        $revision->drawingRevisions()->sync($ids);
+        $revision->writeAudit('drawings_linked', null, ['drawing_revision_ids' => $ids, 'copied_from_boq_id' => $source->id]);
     }
 }
