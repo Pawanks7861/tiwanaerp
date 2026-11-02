@@ -111,6 +111,12 @@ export function buildNavigation({ can, isSuperAdmin, multiCompany = false }) {
                     href: route('admin.roles.index'),
                     active: route().current('admin.roles.*'),
                 },
+                can('admin.workflows.view') && {
+                    label: 'Approval Workflows',
+                    icon: 'check-circle',
+                    href: route('admin.workflows.index'),
+                    active: route().current('admin.workflows.*'),
+                },
                 can('admin.settings.view') && {
                     label: 'Company Settings',
                     icon: 'cog',

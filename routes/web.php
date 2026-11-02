@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\ApprovalWorkflowController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\BrandingController;
 use App\Http\Controllers\Admin\CompanySettingsController;
@@ -683,6 +684,10 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/users/{user}/edit', [UserController::class, 'edit'])->name('users.edit');
         Route::put('/users/{user}', [UserController::class, 'update'])->name('users.update');
         Route::patch('/users/{user}/status', [UserController::class, 'updateStatus'])->name('users.status');
+
+        Route::get('/workflows', [ApprovalWorkflowController::class, 'index'])->name('workflows.index');
+        Route::get('/workflows/{type}/edit', [ApprovalWorkflowController::class, 'edit'])->where('type', '[a-z_]+')->name('workflows.edit');
+        Route::put('/workflows/{type}', [ApprovalWorkflowController::class, 'update'])->where('type', '[a-z_]+')->name('workflows.update');
 
         Route::get('/roles', [RoleController::class, 'index'])->name('roles.index');
         Route::get('/roles/create', [RoleController::class, 'create'])->name('roles.create');

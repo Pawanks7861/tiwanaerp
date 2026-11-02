@@ -8,8 +8,9 @@ import { registerStoredPush } from '@/lib/fcm';
 import { initials } from '@/lib/format';
 import { buildNavigation } from '@/lib/navigation';
 import { usePermissions } from '@/lib/permissions';
+import { scrollToActiveSidebarItem } from '@/lib/scrollToActiveSidebarItem';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 defineProps({
     title: { type: String, default: null },
@@ -18,6 +19,26 @@ defineProps({
 const page = usePage();
 const { can } = usePermissions();
 const sidebarOpen = ref(false);
+const sidebarNav = ref(null);
+let positionedForUrl = null;
+
+function positionActiveSidebarItem({ instant = false } = {}) {
+    const nav = sidebarNav.value;
+    const url = page.url;
+
+    if (!nav) {
+        return;
+    }
+
+    if (positionedForUrl === url) {
+        return;
+    }
+
+    positionedForUrl = url;
+    nextTick(() => {
+        scrollToActiveSidebarItem(sidebarNav.value, { instant });
+    });
+}
 
 const user = computed(() => page.props.auth.user);
 const unread = computed(() => page.props.unreadNotifications ?? 0);
@@ -56,9 +77,23 @@ const navigation = computed(() => {
 
 const removeListener = router.on('navigate', () => (sidebarOpen.value = false));
 onMounted(() => {
+    positionActiveSidebarItem({ instant: true });
     refreshChat();
     presenceTimer = setInterval(refreshChat, 15000);
     registerStoredPush(page.props.fcm?.web).catch(() => {});
+});
+watch(
+    () => page.url,
+    () => {
+        positionActiveSidebarItem({ instant: false });
+    },
+);
+watch(sidebarOpen, (open) => {
+    if (open) {
+        nextTick(() => {
+            scrollToActiveSidebarItem(sidebarNav.value, { instant: true });
+        });
+    }
 });
 onBeforeUnmount(() => {
     removeListener();
@@ -99,7 +134,7 @@ onBeforeUnmount(() => {
                 <CompanySwitcher />
             </div>
 
-            <nav class="sidebar-scroll flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-2 py-4" aria-label="Main">
+            <nav ref="sidebarNav" class="sidebar-scroll flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-2 py-4" aria-label="Main">
                 <div v-for="(section, i) in navigation" :key="section.title ?? i">
                     <p v-if="section.title" class="mb-1 px-3 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
                         {{ section.title }}

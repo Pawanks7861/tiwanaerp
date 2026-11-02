@@ -137,6 +137,7 @@ use App\Models\Subcontract\WorkOrder;
 use App\Models\Subcontract\WorkOrderItem;
 use App\Models\Subcontract\WorkOrderMilestone;
 use App\Models\User;
+use App\Policies\ApprovalWorkflowPolicy;
 use App\Policies\AttachmentPolicy;
 use App\Policies\BoqPolicy;
 use App\Policies\CompanyPolicy;
@@ -352,6 +353,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Company::class, CompanyPolicy::class);
         Gate::policy(User::class, UserPolicy::class);
         Gate::policy(Role::class, RolePolicy::class);
+        Gate::policy(ApprovalWorkflow::class, ApprovalWorkflowPolicy::class);
         Gate::policy(Project::class, ProjectPolicy::class);
         Gate::policy(Site::class, SitePolicy::class);
         Gate::policy(Attachment::class, AttachmentPolicy::class);

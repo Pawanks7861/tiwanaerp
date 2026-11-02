@@ -1,21 +1,56 @@
 <script setup>
+import { scrollToActiveProjectTab } from '@/lib/scrollToActiveProjectTab';
 import { Link } from '@inertiajs/vue3';
+import { nextTick, onMounted, ref, watch } from 'vue';
 import Icon from './Icon.vue';
 
 /**
  * Tabs as links (each tab is its own page) or buttons when `modelValue` is used.
  * items: [{ key, label, href?, icon?, count? }]
  */
-defineProps({
+const props = defineProps({
     items: { type: Array, required: true },
     active: { type: String, default: null },
 });
 
 const model = defineModel({ type: String, default: null });
+const tabNav = ref(null);
+let positionedForKey = null;
+
+function positionKey() {
+    const key = props.active ?? model.value;
+    const firstHref = props.items?.[0]?.href ?? '';
+
+    return `${firstHref}::${key}`;
+}
+
+function positionActiveTab({ instant = false } = {}) {
+    const key = positionKey();
+
+    if (positionedForKey === key) {
+        return;
+    }
+
+    positionedForKey = key;
+    nextTick(() => {
+        scrollToActiveProjectTab(tabNav.value, { instant });
+    });
+}
+
+onMounted(() => {
+    positionActiveTab({ instant: true });
+});
+
+watch(
+    () => props.active ?? model.value,
+    () => {
+        positionActiveTab({ instant: false });
+    },
+);
 </script>
 
 <template>
-    <nav class="-mb-px flex gap-1 overflow-x-auto" aria-label="Tabs">
+    <nav ref="tabNav" class="-mb-px flex gap-1 overflow-x-auto" aria-label="Tabs">
         <template v-for="item in items" :key="item.key">
             <component
                 :is="item.href ? Link : 'button'"
