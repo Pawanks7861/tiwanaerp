@@ -63,6 +63,38 @@ class HandleInertiaRequests extends Middleware
                 'success' => $request->session()->get('success'),
                 'error' => $request->session()->get('error'),
             ],
+            'aiAssistant' => fn () => $this->aiAssistant($request->user()),
+            'onboarding' => fn () => $this->onboarding($request->user()),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function onboarding(?User $user): array
+    {
+        if ($user === null || ! app(CurrentCompany::class)->has()) {
+            return ['show' => false];
+        }
+
+        return app(\App\Services\Tutorial\TutorialProgressService::class)->inertiaPayload($user);
+    }
+
+    /**
+     * @return array{enabled: bool, can_use: bool}
+     */
+    private function aiAssistant(?User $user): array
+    {
+        if ($user === null || ! app(CurrentCompany::class)->has()) {
+            return ['enabled' => false, 'can_use' => false];
+        }
+
+        $enabled = (bool) config('ai.enabled', true);
+
+        return [
+            'enabled' => $enabled,
+            'configured' => true,
+            'can_use' => $user->can('ai.use') && $enabled,
         ];
     }
 

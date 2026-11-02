@@ -72,6 +72,11 @@ const colors = {
     minor: 'slate',
     major: 'orange',
     critical: 'red',
+    uploaded: 'slate',
+    validating: 'amber',
+    ready: 'brand',
+    processing: 'brand',
+    completed_with_errors: 'orange',
 };
 
 const key = computed(() => (props.status === true ? 'active' : props.status === false ? 'inactive' : props.status));

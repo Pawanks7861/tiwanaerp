@@ -74,6 +74,7 @@ class ProjectTaskController extends Controller
                 'delete' => $user->can('planning.delete'),
                 'update_progress' => $user->can('planning.update_progress'),
                 'view_costs' => $withCosts,
+                'import' => $user->can('planning.import'),
             ],
         ]);
     }

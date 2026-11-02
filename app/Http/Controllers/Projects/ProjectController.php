@@ -56,7 +56,10 @@ class ProjectController extends Controller
             'projects' => $projects,
             'filters' => $filters,
             'statuses' => ProjectStatus::options(),
-            'can' => ['create' => $request->user()->can('create', Project::class)],
+            'can' => [
+                'create' => $request->user()->can('create', Project::class),
+                'import' => $request->user()->can('projects.import'),
+            ],
         ]);
     }
 

@@ -125,6 +125,7 @@ class MaterialRequestController extends Controller
             'attachments' => ProcurementPresenter::attachments($mr),
             'can' => [
                 ...$this->abilities($user, $mr),
+                'import' => $mr->isEditable() && $user->can('material_requests.import') && $user->can('update', $mr),
                 'create_rfq' => $mr->status->isProcurable() && $user->can('create', [Rfq::class, $project]),
                 'attach' => $user->can('update', $mr),
             ],

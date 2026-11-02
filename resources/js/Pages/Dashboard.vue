@@ -45,7 +45,8 @@ const selectClass = 'rounded-lg border-slate-300 py-2 text-sm shadow-sm focus:bo
 
 <template>
     <AppLayout title="Dashboard">
-        <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div data-tour="dashboard-main" class="space-y-4">
+        <div class="mb-0 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
                 <h1 class="text-xl font-semibold text-slate-900 sm:text-2xl">{{ greeting }}, {{ page.props.auth.user.name.split(' ')[0] }}</h1>
                 <p class="mt-1 text-sm text-slate-500">{{ page.props.company?.current?.name }} · {{ period.label }} · as of {{ formatDate(period.as_of) }}</p>
@@ -127,5 +128,6 @@ const selectClass = 'rounded-lg border-slate-300 py-2 text-sm shadow-sm focus:bo
             </ul>
             <p v-else class="p-5 text-sm text-slate-500">No open projects.</p>
         </AppCard>
+        </div>
     </AppLayout>
 </template>

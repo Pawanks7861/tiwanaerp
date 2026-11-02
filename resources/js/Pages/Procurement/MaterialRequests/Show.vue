@@ -9,6 +9,8 @@ import AppModal from '@/Components/UI/AppModal.vue';
 import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
 import Icon from '@/Components/UI/Icon.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
+import ImportTemplateDownload from '@/Components/Imports/ImportTemplateDownload.vue';
+import UniversalImportModal from '@/Components/Imports/UniversalImportModal.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatDate, formatDateTime, formatQty } from '@/lib/format';
 import { Link, router, useForm } from '@inertiajs/vue3';
@@ -43,6 +45,7 @@ function confirmAction() {
     }
 }
 
+const showImport = ref(false);
 const showCancel = ref(false);
 const cancelForm = useForm({ reason: '' });
 function cancelRequest() {
@@ -85,6 +88,8 @@ const lockedReason = computed(() => {
                         <p v-if="mr.approved_at" class="mt-2 text-xs text-slate-500">Approved {{ formatDateTime(mr.approved_at) }}<template v-if="mr.approved_by"> by {{ mr.approved_by }}</template></p>
                     </div>
                     <div class="flex flex-wrap gap-2 lg:justify-end">
+                        <ImportTemplateDownload v-if="can.import" module="material_requests.items" :project-id="project.id" size="sm" />
+                        <AppButton v-if="can.import" size="sm" variant="secondary" @click="showImport = true">Import</AppButton>
                         <AppButton v-if="can.update" size="sm" variant="secondary" icon="pencil" :href="route('projects.material-requests.edit', [project.id, mr.id])">Edit</AppButton>
                         <AppButton v-if="can.submit" size="sm" @click="confirming = 'submit'">Submit for approval</AppButton>
                         <ApprovalActions :approval="approval" noun="material request" />
@@ -179,6 +184,15 @@ const lockedReason = computed(() => {
             :processing="processing"
             @close="confirming = null"
             @confirm="confirmAction"
+        />
+
+        <UniversalImportModal
+            :show="showImport"
+            module="material_requests.items"
+            :project-id="project.id"
+            :context="{ material_request_id: mr.id }"
+            @close="showImport = false"
+            @imported="() => ((showImport = false), router.reload())"
         />
 
         <AppModal :show="showCancel" title="Cancel material request" @close="showCancel = false">

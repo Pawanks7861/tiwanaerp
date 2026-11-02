@@ -106,7 +106,7 @@ class MasterController extends Controller
     }
 
     /**
-     * @return array{create: bool, update: bool, delete: bool}
+     * @return array{create: bool, update: bool, delete: bool, import: bool}
      */
     private function abilities(Request $request, MasterDefinition $definition): array
     {
@@ -117,6 +117,7 @@ class MasterController extends Controller
             'create' => $user->can("{$prefix}.create"),
             'update' => $user->can("{$prefix}.update"),
             'delete' => $user->can("{$prefix}.delete"),
+            'import' => $user->can("{$prefix}.import"),
         ];
     }
 }

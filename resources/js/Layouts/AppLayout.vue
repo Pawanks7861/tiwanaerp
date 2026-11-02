@@ -1,6 +1,8 @@
 <script setup>
+import AiAssistantWidget from '@/Components/Ai/AiAssistantWidget.vue';
 import CompanySwitcher from '@/Components/Layout/CompanySwitcher.vue';
 import ProjectSwitcher from '@/Components/Layout/ProjectSwitcher.vue';
+import UserOnboardingTour from '@/Components/Tutorial/UserOnboardingTour.vue';
 import AppDropdown from '@/Components/UI/AppDropdown.vue';
 import FlashMessages from '@/Components/UI/FlashMessages.vue';
 import Icon from '@/Components/UI/Icon.vue';
@@ -116,6 +118,7 @@ onBeforeUnmount(() => {
 
         <!-- Sidebar -->
         <aside
+            data-tour="sidebar"
             class="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-navy-900 transition-transform duration-200 lg:translate-x-0"
             :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
         >
@@ -146,6 +149,7 @@ onBeforeUnmount(() => {
                                 class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition"
                                 :class="item.active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'"
                                 :aria-current="item.active ? 'page' : undefined"
+                                :data-tour="item.label === 'Projects' ? 'nav-projects' : item.label === 'Reports' ? 'nav-reports' : item.label === 'Dashboard' ? 'nav-dashboard' : undefined"
                             >
                                 <Icon :name="item.icon" :size="18" :class="item.active ? 'text-accent-400' : ''" />
                                 <span class="truncate">{{ item.label }}</span>
@@ -236,7 +240,7 @@ onBeforeUnmount(() => {
 
             <slot name="header" />
 
-            <main class="mx-auto w-full max-w-7xl px-3 py-5 sm:px-6 sm:py-6">
+            <main data-tour="main-content" class="mx-auto w-full max-w-7xl px-3 py-5 sm:px-6 sm:py-6">
                 <div v-if="recommendTwoFactor" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                     Two-factor authentication is recommended for this account.
                     <Link :href="route('profile.edit')" class="font-semibold underline">Set it up</Link>
@@ -244,5 +248,7 @@ onBeforeUnmount(() => {
                 <slot />
             </main>
         </div>
+        <AiAssistantWidget />
+        <UserOnboardingTour />
     </div>
 </template>

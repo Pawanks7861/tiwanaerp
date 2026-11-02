@@ -69,7 +69,9 @@ class DrawingController extends Controller
             'filters' => $filters,
             'disciplines' => Discipline::options(),
             'statuses' => DrawingStatus::options(),
-            'can' => ['create' => $request->user()->can('create', [Drawing::class, $project])],
+            'can' => [
+                'create' => $request->user()->can('create', [Drawing::class, $project]),
+            ],
         ]);
     }
 

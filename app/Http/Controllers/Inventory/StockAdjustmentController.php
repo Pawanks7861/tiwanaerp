@@ -107,7 +107,15 @@ class StockAdjustmentController extends Controller
                 ...($valuation ? ['unit_cost' => $i->unit_cost, 'value' => $i->value] : []),
             ])->all(),
             'attachments' => ProcurementPresenter::attachments($adjustment),
-            'can' => [...$this->abilities($user, $adjustment), 'attach' => $adjustment->isEditable() && $user->can('update', $adjustment), 'view_valuation' => $valuation],
+            'can' => [
+                ...$this->abilities($user, $adjustment),
+                'import' => $adjustment->isEditable()
+                    && $adjustment->reason === AdjustmentReason::Opening
+                    && $user->can('inventory.import')
+                    && $user->can('update', $adjustment),
+                'attach' => $adjustment->isEditable() && $user->can('update', $adjustment),
+                'view_valuation' => $valuation,
+            ],
         ]);
     }
 

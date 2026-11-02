@@ -135,6 +135,21 @@ export function buildNavigation({ can, isSuperAdmin, multiCompany = false }) {
                     href: route('admin.audit-logs.index'),
                     active: route().current('admin.audit-logs.*'),
                 },
+                (can('projects.import') ||
+                    can('masters.items.import') ||
+                    can('masters.vendors.import') ||
+                    can('boq.import') ||
+                    can('material_requests.import') ||
+                    can('inventory.import') ||
+                    can('expenses.import') ||
+                    can('labour.import') ||
+                    can('planning.import') ||
+                    can('quality.import')) && {
+                    label: 'Import History',
+                    icon: 'document',
+                    href: route('imports.history'),
+                    active: route().current('imports.*'),
+                },
             ],
         },
         isSuperAdmin && multiCompany && {

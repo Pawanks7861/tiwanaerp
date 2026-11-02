@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\Admin\ApprovalWorkflowController;
+use App\Http\Controllers\Ai\AiAssistantController;
+use App\Http\Controllers\Tutorial\TutorialController;
+use App\Http\Controllers\Imports\DataImportController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\BrandingController;
 use App\Http\Controllers\Admin\CompanySettingsController;
@@ -101,10 +104,37 @@ Route::middleware(['auth', 'company'])->group(function () {
     Route::get('/chat', [ChatController::class, 'index'])->name('chat.index');
     Route::get('/chat/{conversation}', [ChatController::class, 'index'])->whereNumber('conversation')->name('chat.show');
 
+    // Tiwana AI Assistant (read-only)
+    Route::prefix('/ai')->name('ai.')->middleware('throttle:60,1')->group(function () {
+        Route::get('/bootstrap', [AiAssistantController::class, 'bootstrap'])->name('bootstrap');
+        Route::post('/ask', [AiAssistantController::class, 'ask'])->middleware('throttle:30,1')->name('ask');
+        Route::get('/conversations/{conversation}', [AiAssistantController::class, 'show'])->whereNumber('conversation')->name('conversations.show');
+        Route::delete('/conversations/{conversation}', [AiAssistantController::class, 'destroy'])->whereNumber('conversation')->name('conversations.destroy');
+    });
+
+    // Mandatory onboarding tutorial (progress persisted per user)
+    Route::prefix('/tutorial')->name('tutorial.')->middleware('throttle:60,1')->group(function () {
+        Route::get('/status', [TutorialController::class, 'status'])->name('status');
+        Route::post('/acknowledge', [TutorialController::class, 'acknowledge'])->name('acknowledge');
+        Route::post('/goto', [TutorialController::class, 'goTo'])->name('goto');
+        Route::post('/complete', [TutorialController::class, 'complete'])->name('complete');
+        Route::post('/pause', [TutorialController::class, 'pause'])->name('pause');
+    });
+
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
 
     Route::post('/company/switch', CompanySwitchController::class)->middleware('feature:multi_company')->name('company.switch');
+
+    // Universal Excel/CSV import
+    Route::get('/imports', [DataImportController::class, 'history'])->name('imports.history');
+    Route::get('/imports/{module}/template', [DataImportController::class, 'template'])->where('module', '[a-z0-9_.-]+')->name('imports.template');
+    Route::get('/imports/{module}/meta', [DataImportController::class, 'meta'])->where('module', '[a-z0-9_.-]+')->name('imports.meta');
+    Route::post('/imports', [DataImportController::class, 'store'])->middleware('throttle:20,1')->name('imports.store');
+    Route::get('/imports/{import}', [DataImportController::class, 'show'])->whereNumber('import')->name('imports.show');
+    Route::post('/imports/{import}/validate', [DataImportController::class, 'validateMapping'])->whereNumber('import')->middleware('throttle:30,1')->name('imports.validate');
+    Route::post('/imports/{import}/confirm', [DataImportController::class, 'confirm'])->whereNumber('import')->middleware('throttle:10,1')->name('imports.confirm');
+    Route::get('/imports/{import}/errors', [DataImportController::class, 'errorReport'])->whereNumber('import')->name('imports.errors');
 
     // Projects
     Route::get('/projects', [ProjectController::class, 'index'])->name('projects.index');

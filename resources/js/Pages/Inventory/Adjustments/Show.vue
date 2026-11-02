@@ -7,6 +7,8 @@ import AppCard from '@/Components/UI/AppCard.vue';
 import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
 import Icon from '@/Components/UI/Icon.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
+import ImportTemplateDownload from '@/Components/Imports/ImportTemplateDownload.vue';
+import UniversalImportModal from '@/Components/Imports/UniversalImportModal.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatDate, formatDateTime, formatMoney, formatQty, formatRate } from '@/lib/format';
 import { Link, router, usePage } from '@inertiajs/vue3';
@@ -21,6 +23,7 @@ const props = defineProps({
 });
 
 const page = usePage();
+const showImport = ref(false);
 const confirming = ref(null);
 const reasonFor = ref(null);
 const processing = ref(false);
@@ -74,6 +77,8 @@ const statusNote = computed(
                         </dl>
                     </div>
                     <div class="flex flex-wrap gap-2 lg:justify-end">
+                        <ImportTemplateDownload v-if="can.import" module="inventory.opening" :project-id="project.id" size="sm" />
+                        <AppButton v-if="can.import" size="sm" variant="secondary" @click="showImport = true">Import</AppButton>
                         <AppButton v-if="can.update" size="sm" variant="secondary" icon="pencil" :href="route('projects.stock-adjustments.edit', [project.id, adjustment.id])">Edit</AppButton>
                         <AppButton v-if="can.submit" size="sm" @click="confirming = 'submit'">Submit for approval</AppButton>
                         <AppButton v-if="can.approve" size="sm" @click="confirming = 'approve'">Approve</AppButton>
@@ -150,6 +155,15 @@ const statusNote = computed(
             :message="reasonFor ? REASONS[reasonFor].message : null"
             :confirm-label="reasonFor ? REASONS[reasonFor].label : ''"
             @close="reasonFor = null"
+        />
+
+        <UniversalImportModal
+            :show="showImport"
+            module="inventory.opening"
+            :project-id="project.id"
+            :context="{ stock_adjustment_id: adjustment.id }"
+            @close="showImport = false"
+            @imported="() => ((showImport = false), router.reload())"
         />
     </ProjectLayout>
 </template>

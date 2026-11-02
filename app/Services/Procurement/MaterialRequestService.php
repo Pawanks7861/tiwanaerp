@@ -139,6 +139,35 @@ class MaterialRequestService
     }
 
     /**
+     * Append import rows to an editable material request without removing existing lines.
+     *
+     * @param  list<array<string, mixed>>  $rows  material_id, unit_id, quantity, boq_item_id?, task_id?, remarks?
+     */
+    public function appendItems(MaterialRequest $mr, array $rows): void
+    {
+        if ($rows === []) {
+            return;
+        }
+
+        DB::transaction(function () use ($mr, $rows) {
+            $locked = MaterialRequest::query()->whereKey($mr->id)->lockForUpdate()->firstOrFail();
+            $locked->assertEditable();
+
+            $existing = $locked->items()->get()->map(fn (MaterialRequestItem $item) => [
+                'id' => $item->id,
+                'material_id' => $item->material_id,
+                'boq_item_id' => $item->boq_item_id,
+                'task_id' => $item->task_id,
+                'unit_id' => $item->unit_id,
+                'quantity' => $item->quantity,
+                'remarks' => $item->remarks,
+            ])->all();
+
+            $this->syncItems($locked, array_merge($existing, $rows));
+        });
+    }
+
+    /**
      * Replace the lines with the submitted rows. Rows with an id update that line (it must belong
      * to this request); lines not present are removed.
      *

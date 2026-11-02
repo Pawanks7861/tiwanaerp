@@ -2,11 +2,15 @@
 import DataTable from '@/Components/Data/DataTable.vue';
 import FilterBar from '@/Components/Data/FilterBar.vue';
 import Pagination from '@/Components/Data/Pagination.vue';
+import ImportTemplateDownload from '@/Components/Imports/ImportTemplateDownload.vue';
+import UniversalImportModal from '@/Components/Imports/UniversalImportModal.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import PageHeader from '@/Components/UI/PageHeader.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { router } from '@inertiajs/vue3';
+import { ref } from 'vue';
 
 defineProps({
     checklists: { type: Object, required: true },
@@ -14,6 +18,8 @@ defineProps({
     disciplines: { type: Array, required: true },
     can: { type: Object, required: true },
 });
+
+const showImport = ref(false);
 
 const columns = [
     { key: 'name', label: 'Checklist' },
@@ -27,6 +33,8 @@ const columns = [
     <AppLayout title="Quality checklists">
         <PageHeader title="Quality checklists" subtitle="Inspection templates. Each inspection copies the checkpoints when it is requested, so editing a template never changes past inspections.">
             <template #actions>
+                <ImportTemplateDownload v-if="can.import" module="quality.checklists" />
+                <AppButton v-if="can.import" variant="secondary" @click="showImport = true">Import</AppButton>
                 <AppButton v-if="can.create" icon="plus" :href="route('quality.checklists.create')">New checklist</AppButton>
             </template>
         </PageHeader>
@@ -55,5 +63,12 @@ const columns = [
             </DataTable>
             <Pagination :paginator="checklists" />
         </AppCard>
+
+        <UniversalImportModal
+            :show="showImport"
+            module="quality.checklists"
+            @close="showImport = false"
+            @imported="() => ((showImport = false), router.reload({ only: ['checklists'] }))"
+        />
     </AppLayout>
 </template>

@@ -2,12 +2,16 @@
 import DataTable from '@/Components/Data/DataTable.vue';
 import FilterBar from '@/Components/Data/FilterBar.vue';
 import Pagination from '@/Components/Data/Pagination.vue';
+import ImportTemplateDownload from '@/Components/Imports/ImportTemplateDownload.vue';
+import UniversalImportModal from '@/Components/Imports/UniversalImportModal.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import PageHeader from '@/Components/UI/PageHeader.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { formatMoneyShort } from '@/lib/format';
 import { usePermissions } from '@/lib/permissions';
+import { router } from '@inertiajs/vue3';
+import { ref } from 'vue';
 
 defineProps({
     projects: { type: Object, required: true },
@@ -17,6 +21,7 @@ defineProps({
 });
 
 const permissions = usePermissions();
+const showImport = ref(false);
 
 const columns = [
     { key: 'name', label: 'Project' },
@@ -32,6 +37,8 @@ const columns = [
     <AppLayout title="Projects">
         <PageHeader title="Projects" subtitle="All construction projects you can access.">
             <template #actions>
+                <ImportTemplateDownload v-if="can.import" module="projects" />
+                <AppButton v-if="can.import" variant="secondary" @click="showImport = true">Import</AppButton>
                 <AppButton v-if="can.create" :href="route('projects.create')" icon="plus">New project</AppButton>
             </template>
         </PageHeader>
@@ -67,5 +74,12 @@ const columns = [
             </DataTable>
             <Pagination :paginator="projects" />
         </div>
+
+        <UniversalImportModal
+            :show="showImport"
+            module="projects"
+            @close="showImport = false"
+            @imported="() => ((showImport = false), router.reload({ only: ['projects'] }))"
+        />
     </AppLayout>
 </template>

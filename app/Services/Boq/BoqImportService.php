@@ -58,6 +58,22 @@ class BoqImportService
             throw $this->rowErrors($errors);
         }
 
+        $this->appendRows($boq, $parsed, $canEditCosts);
+
+        return count($parsed);
+    }
+
+    /**
+     * Append already-validated rows to an editable BOQ (used by the universal import engine).
+     *
+     * @param  list<array<string, mixed>>  $parsed
+     */
+    public function appendRows(Boq $boq, array $parsed, bool $canEditCosts): void
+    {
+        if ($parsed === []) {
+            return;
+        }
+
         DB::transaction(function () use ($boq, $parsed, $canEditCosts) {
             Boq::query()->whereKey($boq->id)->lockForUpdate()->firstOrFail()->assertEditable();
 
@@ -65,9 +81,9 @@ class BoqImportService
             $nextSort = (int) $boq->items()->max('sort_order');
 
             foreach ($parsed as $row) {
-                $section = $this->section($boq, $sections, $row['section_code'], $row['section_name'], null);
-                if ($row['subsection_name'] !== null) {
-                    $section = $this->section($boq, $sections, $row['subsection_code'], $row['subsection_name'], $section);
+                $section = $this->section($boq, $sections, $row['section_code'] ?? null, $row['section_name'], null);
+                if (($row['subsection_name'] ?? null) !== null) {
+                    $section = $this->section($boq, $sections, $row['subsection_code'] ?? null, $row['subsection_name'], $section);
                 }
 
                 $item = new BoqItem(['line_uid' => (string) Str::uuid()]);
@@ -80,8 +96,25 @@ class BoqImportService
 
             $this->boqs->recalculateTotals($boq);
         });
+    }
 
-        return count($parsed);
+    /**
+     * Validate one mapped spreadsheet row for the universal importer.
+     *
+     * @param  array<string, mixed>  $mapped
+     * @return array<string, mixed>
+     */
+    public function validateMappedRow(array $mapped): array
+    {
+        [$parsed, $errors] = $this->parse([$mapped]);
+        if ($errors !== []) {
+            throw ValidationException::withMessages(['row' => [$errors[0]]]);
+        }
+        if ($parsed === []) {
+            throw ValidationException::withMessages(['row' => ['This row is empty.']]);
+        }
+
+        return $parsed[0];
     }
 
     /**

@@ -2,6 +2,8 @@
 import DataTable from '@/Components/Data/DataTable.vue';
 import FilterBar from '@/Components/Data/FilterBar.vue';
 import Pagination from '@/Components/Data/Pagination.vue';
+import ImportTemplateDownload from '@/Components/Imports/ImportTemplateDownload.vue';
+import UniversalImportModal from '@/Components/Imports/UniversalImportModal.vue';
 import MasterForm from '@/Components/Masters/MasterForm.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppDrawer from '@/Components/UI/AppDrawer.vue';
@@ -26,6 +28,10 @@ const editing = ref(null);
 const form = shallowRef(useForm({}));
 const deleting = ref(null);
 const deleteProcessing = ref(false);
+const showImport = ref(false);
+const importableSlugs = ['items', 'vendors', 'subcontractors', 'equipment', 'labour'];
+const canImportHere = computed(() => props.can.import && importableSlugs.includes(props.definition.slug));
+const importModule = computed(() => (props.definition.slug === 'labour' ? 'labour' : `masters.${props.definition.slug}`));
 
 function blankValues() {
     return Object.fromEntries(props.definition.fields.map((f) => [f.name, f.default ?? (f.type === 'switch' ? true : null)]));
@@ -85,6 +91,8 @@ const titleSlot = computed(() => `cell-${props.definition.columns[0].key}`);
     <AppLayout :title="definition.title">
         <PageHeader :title="definition.title" :subtitle="`Company master · ${records.total} ${records.total === 1 ? 'record' : 'records'}`">
             <template #actions>
+                <ImportTemplateDownload v-if="canImportHere" :module="importModule" />
+                <AppButton v-if="canImportHere" variant="secondary" @click="showImport = true">Import</AppButton>
                 <AppButton v-if="can.create" icon="plus" @click="openCreate">New {{ definition.singular.toLowerCase() }}</AppButton>
             </template>
         </PageHeader>
@@ -157,6 +165,13 @@ const titleSlot = computed(() => `cell-${props.definition.columns[0].key}`);
             :processing="deleteProcessing"
             @close="deleting = null"
             @confirm="destroy"
+        />
+
+        <UniversalImportModal
+            :show="showImport"
+            :module="importModule"
+            @close="showImport = false"
+            @imported="() => ((showImport = false), router.reload({ only: ['records'] }))"
         />
     </AppLayout>
 </template>

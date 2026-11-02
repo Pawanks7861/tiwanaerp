@@ -21,12 +21,12 @@ final class PermissionCatalog
             'dashboard' => ['label' => 'Dashboard', 'group' => 'General', 'actions' => ['view', 'view_financials']],
             'approvals' => ['label' => 'Approvals Inbox', 'group' => 'General', 'actions' => ['view']],
 
-            'projects' => ['label' => 'Projects', 'group' => 'Projects', 'actions' => [...$std, 'view_all', 'manage_team', 'close']],
+            'projects' => ['label' => 'Projects', 'group' => 'Projects', 'actions' => [...$std, 'view_all', 'manage_team', 'close', 'import']],
             'sites' => ['label' => 'Sites', 'group' => 'Projects', 'actions' => $std],
             'boq' => ['label' => 'BOQ', 'group' => 'Projects', 'actions' => [...$std, 'submit', 'approve', 'revise', 'import', 'export', 'view_costs']],
             'rate_analysis' => ['label' => 'Rate Analysis', 'group' => 'Projects', 'actions' => [...$std, 'approve']],
             'budget' => ['label' => 'Budget', 'group' => 'Projects', 'actions' => ['view', 'update', 'approve']],
-            'planning' => ['label' => 'Planning', 'group' => 'Projects', 'actions' => [...$std, 'update_progress']],
+            'planning' => ['label' => 'Planning', 'group' => 'Projects', 'actions' => [...$std, 'update_progress', 'import']],
             'site_diary' => ['label' => 'Site Diary', 'group' => 'Site', 'actions' => [...$std, 'submit', 'review', 'approve']],
             'dpr' => ['label' => 'DPR', 'group' => 'Site', 'actions' => ['view', 'create', 'update', 'submit', 'approve', 'export']],
 
@@ -34,37 +34,37 @@ final class PermissionCatalog
             'crm.clients' => ['label' => 'Clients', 'group' => 'CRM', 'actions' => $std],
             'crm.quotations' => ['label' => 'Quotations', 'group' => 'CRM', 'actions' => [...$std, 'approve', 'convert']],
 
-            'material_requests' => ['label' => 'Material Requests', 'group' => 'Procurement', 'actions' => [...$std, 'submit', 'approve']],
+            'material_requests' => ['label' => 'Material Requests', 'group' => 'Procurement', 'actions' => [...$std, 'submit', 'approve', 'import']],
             'rfq' => ['label' => 'RFQ', 'group' => 'Procurement', 'actions' => [...$std, 'send']],
             'vendor_quotations' => ['label' => 'Vendor Quotations', 'group' => 'Procurement', 'actions' => $std],
             'bid_comparison' => ['label' => 'Bid Comparison', 'group' => 'Procurement', 'actions' => ['view', 'create', 'approve']],
-            'purchase' => ['label' => 'Purchase Orders', 'group' => 'Procurement', 'actions' => [...$std, 'submit', 'approve', 'amend', 'cancel', 'export']],
-            'grn' => ['label' => 'GRN', 'group' => 'Procurement', 'actions' => [...$std, 'submit', 'approve']],
+            'purchase' => ['label' => 'Purchase Orders', 'group' => 'Procurement', 'actions' => [...$std, 'submit', 'approve', 'amend', 'cancel', 'export', 'import']],
+            'grn' => ['label' => 'GRN', 'group' => 'Procurement', 'actions' => [...$std, 'submit', 'approve', 'import']],
 
-            'inventory' => ['label' => 'Inventory', 'group' => 'Inventory', 'actions' => ['view', 'issue', 'transfer', 'return', 'adjust', 'approve_adjustment', 'view_valuation']],
+            'inventory' => ['label' => 'Inventory', 'group' => 'Inventory', 'actions' => ['view', 'issue', 'transfer', 'return', 'adjust', 'approve_adjustment', 'view_valuation', 'import']],
 
-            'labour' => ['label' => 'Labour', 'group' => 'Resources', 'actions' => [...$std, 'mark_attendance', 'approve_attendance', 'manage_payments']],
-            'subcontract' => ['label' => 'Subcontract', 'group' => 'Resources', 'actions' => [...$std, 'approve_wo', 'certify_bill']],
-            'equipment' => ['label' => 'Equipment', 'group' => 'Resources', 'actions' => [...$std, 'assign', 'log_usage']],
+            'labour' => ['label' => 'Labour', 'group' => 'Resources', 'actions' => [...$std, 'mark_attendance', 'approve_attendance', 'manage_payments', 'import']],
+            'subcontract' => ['label' => 'Subcontract', 'group' => 'Resources', 'actions' => [...$std, 'approve_wo', 'certify_bill', 'import']],
+            'equipment' => ['label' => 'Equipment', 'group' => 'Resources', 'actions' => [...$std, 'assign', 'log_usage', 'import']],
 
-            'expenses' => ['label' => 'Expenses', 'group' => 'Finance', 'actions' => [...$std, 'submit', 'approve']],
+            'expenses' => ['label' => 'Expenses', 'group' => 'Finance', 'actions' => [...$std, 'submit', 'approve', 'import']],
             'petty_cash' => ['label' => 'Petty Cash', 'group' => 'Finance', 'actions' => ['view', 'fund', 'spend']],
             'billing' => ['label' => 'Client Billing', 'group' => 'Finance', 'actions' => [...$std, 'submit', 'certify', 'override_qty', 'export']],
             'vendor_bills' => ['label' => 'Vendor Bills', 'group' => 'Finance', 'actions' => [...$std, 'approve']],
             'payments' => ['label' => 'Payments', 'group' => 'Finance', 'actions' => ['view', 'record', 'approve']],
 
-            'quality' => ['label' => 'Quality', 'group' => 'Quality & Documents', 'actions' => ['view', 'create_inspection', 'perform_inspection', 'raise_ncr', 'close_ncr']],
+            'quality' => ['label' => 'Quality', 'group' => 'Quality & Documents', 'actions' => ['view', 'create_inspection', 'perform_inspection', 'raise_ncr', 'close_ncr', 'import']],
             'drawings' => ['label' => 'Drawings', 'group' => 'Quality & Documents', 'actions' => ['view', 'upload', 'review', 'approve']],
             'documents' => ['label' => 'Documents', 'group' => 'Quality & Documents', 'actions' => ['view', 'upload', 'delete', 'manage_folders']],
 
             'reports' => ['label' => 'Reports', 'group' => 'Reports', 'actions' => ['view', 'view_financial', 'export']],
 
-            'masters.items' => ['label' => 'Items', 'group' => 'Masters', 'actions' => $std],
+            'masters.items' => ['label' => 'Items', 'group' => 'Masters', 'actions' => [...$std, 'import']],
             'masters.units' => ['label' => 'Units', 'group' => 'Masters', 'actions' => $std],
             'masters.categories' => ['label' => 'Categories', 'group' => 'Masters', 'actions' => $std],
             'masters.tax_rates' => ['label' => 'Tax Rates', 'group' => 'Masters', 'actions' => $std],
-            'masters.vendors' => ['label' => 'Vendors', 'group' => 'Masters', 'actions' => $std],
-            'masters.subcontractors' => ['label' => 'Subcontractors', 'group' => 'Masters', 'actions' => $std],
+            'masters.vendors' => ['label' => 'Vendors', 'group' => 'Masters', 'actions' => [...$std, 'import']],
+            'masters.subcontractors' => ['label' => 'Subcontractors', 'group' => 'Masters', 'actions' => [...$std, 'import']],
             'masters.labour_trades' => ['label' => 'Labour Trades', 'group' => 'Masters', 'actions' => $std],
             'masters.equipment_types' => ['label' => 'Equipment Types', 'group' => 'Masters', 'actions' => $std],
             'masters.warehouses' => ['label' => 'Warehouses', 'group' => 'Masters', 'actions' => $std],
@@ -76,6 +76,7 @@ final class PermissionCatalog
             'admin.settings' => ['label' => 'Company Settings', 'group' => 'Administration', 'actions' => ['view', 'manage']],
             'admin.audit_logs' => ['label' => 'Audit Logs', 'group' => 'Administration', 'actions' => ['view']],
             'tally' => ['label' => 'TallyPrime', 'group' => 'Administration', 'actions' => ['view', 'manage', 'sync', 'retry', 'mapping']],
+            'ai' => ['label' => 'AI Assistant', 'group' => 'Administration', 'actions' => ['use', 'manage_settings']],
         ];
     }
 

@@ -4,6 +4,8 @@ import DecimalInput from '@/Components/Form/DecimalInput.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import FormSelect from '@/Components/Form/FormSelect.vue';
 import SearchSelect from '@/Components/Form/SearchSelect.vue';
+import ImportTemplateDownload from '@/Components/Imports/ImportTemplateDownload.vue';
+import UniversalImportModal from '@/Components/Imports/UniversalImportModal.vue';
 import PlanningNav from '@/Components/Planning/PlanningNav.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
@@ -26,6 +28,8 @@ const props = defineProps({
     options: { type: Object, required: true },
     can: { type: Object, required: true },
 });
+
+const showImport = ref(false);
 
 // ---- Tree --------------------------------------------------------------------------------------
 const view = ref('tree');
@@ -226,6 +230,8 @@ function destroy() {
                     <button type="button" class="rounded-md px-2.5 py-1 text-xs font-medium" :class="view === 'tree' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'" @click="view = 'tree'">Tree</button>
                     <button type="button" class="rounded-md px-2.5 py-1 text-xs font-medium" :class="view === 'list' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'" @click="view = 'list'">List</button>
                 </div>
+                <ImportTemplateDownload v-if="can.import" module="planning.tasks" :project-id="project.id" size="sm" />
+                <AppButton v-if="can.import" size="sm" variant="secondary" @click="showImport = true">Import</AppButton>
                 <AppButton v-if="can.create" size="sm" icon="plus" @click="openTask()">Task</AppButton>
             </template>
 
@@ -418,6 +424,14 @@ function destroy() {
             :processing="deleteProcessing"
             @close="deleting = null"
             @confirm="destroy"
+        />
+
+        <UniversalImportModal
+            :show="showImport"
+            module="planning.tasks"
+            :project-id="project.id"
+            @close="showImport = false"
+            @imported="() => ((showImport = false), router.reload())"
         />
     </ProjectLayout>
 </template>

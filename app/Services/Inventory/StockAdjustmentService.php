@@ -238,6 +238,32 @@ class StockAdjustmentService
     }
 
     /**
+     * Append lines to an editable adjustment (used by spreadsheet import).
+     *
+     * @param  list<array<string, mixed>>  $rows  material_id, physical_qty, unit_cost?, remarks?
+     */
+    public function appendLines(StockAdjustment $adjustment, array $rows): void
+    {
+        if ($rows === []) {
+            return;
+        }
+
+        DB::transaction(function () use ($adjustment, $rows) {
+            $locked = StockAdjustment::query()->whereKey($adjustment->id)->lockForUpdate()->firstOrFail();
+            $locked->assertEditable();
+
+            $existing = $locked->items()->get()->map(fn (StockAdjustmentItem $item) => [
+                'material_id' => $item->material_id,
+                'physical_qty' => $item->physical_qty,
+                'unit_cost' => $item->unit_cost,
+                'remarks' => $item->remarks,
+            ])->all();
+
+            $this->replaceLines($locked, array_merge($existing, $rows));
+        });
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $rows  material_id, physical_qty, unit_cost, remarks
      */
     private function replaceLines(StockAdjustment $adjustment, array $rows): void

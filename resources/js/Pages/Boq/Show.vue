@@ -3,10 +3,11 @@ import ApprovedDrawingPicker from '@/Components/Boq/ApprovedDrawingPicker.vue';
 import CellDecimal from '@/Components/Boq/CellDecimal.vue';
 import UniversalFileViewer from '@/Components/Files/UniversalFileViewer.vue';
 import DecimalInput from '@/Components/Form/DecimalInput.vue';
-import FileUpload from '@/Components/Form/FileUpload.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import FormSelect from '@/Components/Form/FormSelect.vue';
 import SearchSelect from '@/Components/Form/SearchSelect.vue';
+import ImportTemplateDownload from '@/Components/Imports/ImportTemplateDownload.vue';
+import UniversalImportModal from '@/Components/Imports/UniversalImportModal.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import AppDrawer from '@/Components/UI/AppDrawer.vue';
@@ -336,22 +337,7 @@ function deleteSection() {
 }
 const parentOptions = computed(() => topSections.value.filter((s) => s.id !== sectionModal.value?.section?.id).map((s) => ({ value: s.id, label: sectionLabel(s) })));
 
-// Import
 const showImport = ref(false);
-const importForm = useForm({ file: null });
-const importErrors = computed(() =>
-    Object.entries(importForm.errors)
-        .filter(([key]) => key.startsWith('file_rows.'))
-        .sort(([a], [b]) => Number(a.split('.')[1]) - Number(b.split('.')[1]))
-        .map(([, message]) => message),
-);
-function runImport() {
-    importForm.post(route('projects.boqs.import', [props.project.id, props.boq.id]), {
-        forceFormData: true,
-        preserveScroll: true,
-        onSuccess: () => ((showImport.value = false), importForm.reset()),
-    });
-}
 
 const lockedReason = computed(() => {
     if (props.can.update) {
@@ -421,7 +407,8 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                             </template>
                             <AppButton v-if="approval?.can_cancel" size="sm" variant="secondary" @click="openApproval('cancel')">Withdraw</AppButton>
                             <AppButton v-if="can.revise" size="sm" variant="secondary" @click="confirming = 'revise'">Create revision</AppButton>
-                            <AppButton v-if="can.import" size="sm" variant="secondary" @click="(importForm.reset(), importForm.clearErrors(), (showImport = true))">Import</AppButton>
+                            <ImportTemplateDownload v-if="can.import" module="boq.items" :project-id="project.id" size="sm" />
+                            <AppButton v-if="can.import && !dirty" size="sm" variant="secondary" @click="showImport = true">Import</AppButton>
                             <a v-if="can.export" :href="route('projects.boqs.export', [project.id, boq.id])" class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">
                                 <Icon name="download" :size="14" /> Export
                             </a>
@@ -762,25 +749,14 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
             </template>
         </AppModal>
 
-        <!-- Import modal -->
-        <AppModal :show="showImport" title="Import lines from Excel" max-width="2xl" @close="showImport = false">
-            <div class="space-y-3">
-                <p class="text-sm text-slate-600">
-                    Lines are appended to this draft. Every row is checked first; if any row has a problem nothing is imported.
-                    <a :href="route('projects.boqs.template', project.id)" class="font-medium text-brand-700 hover:underline">Download the sample template</a>.
-                </p>
-                <p v-if="dirty" class="rounded bg-amber-50 px-3 py-2 text-xs text-amber-800">Save or discard your unsaved changes first: the page reloads after importing.</p>
-                <FileUpload accept=".xlsx,.xls,.csv" :max-mb="10" :error="importForm.errors.file" @select="(f) => (importForm.file = f)" />
-                <p v-if="importForm.file" class="text-xs text-slate-600">Selected: {{ importForm.file.name }}</p>
-                <ul v-if="importErrors.length" class="max-h-56 list-disc overflow-y-auto rounded-lg border border-red-200 bg-red-50 py-2 pr-3 pl-7 text-xs text-red-800">
-                    <li v-for="(message, i) in importErrors" :key="i">{{ message }}</li>
-                </ul>
-            </div>
-            <template #footer>
-                <AppButton variant="secondary" @click="showImport = false">Cancel</AppButton>
-                <AppButton :disabled="!importForm.file || dirty" :loading="importForm.processing" @click="runImport">Import</AppButton>
-            </template>
-        </AppModal>
+        <UniversalImportModal
+            :show="showImport"
+            module="boq.items"
+            :project-id="project.id"
+            :context="{ boq_id: boq.id }"
+            @close="showImport = false"
+            @imported="() => ((showImport = false), router.reload())"
+        />
 
         <AppModal :show="showTitle" title="Edit BOQ title" @close="showTitle = false">
             <form id="title-form" @submit.prevent="saveTitle">

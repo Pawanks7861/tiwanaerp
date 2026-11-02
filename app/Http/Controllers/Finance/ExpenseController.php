@@ -49,7 +49,10 @@ class ExpenseController extends Controller
             'expenses' => $page->through(fn (Expense $e) => $this->header($e)),
             'filters' => $filters,
             'statuses' => ExpenseStatus::options(),
-            'can' => ['create' => $request->user()->can('create', [Expense::class, $project])],
+            'can' => [
+                'create' => $request->user()->can('create', [Expense::class, $project]),
+                'import' => $request->user()->can('expenses.import') && $request->user()->can('create', [Expense::class, $project]),
+            ],
         ]);
     }
 

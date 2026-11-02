@@ -74,7 +74,7 @@ const tabs = computed(() =>
                             <slot name="actions" />
                         </div>
                     </div>
-                    <div class="mt-3">
+                    <div class="mt-3" data-tour="project-tabs">
                         <AppTabs :items="tabs" :active="active" />
                     </div>
                 </div>

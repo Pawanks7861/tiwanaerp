@@ -49,7 +49,10 @@ class QualityChecklistController extends Controller
             ]),
             'filters' => $filters,
             'disciplines' => Discipline::options(),
-            'can' => ['create' => $request->user()->can('create', QualityChecklist::class)],
+            'can' => [
+                'create' => $request->user()->can('create', QualityChecklist::class),
+                'import' => $request->user()->can('quality.import'),
+            ],
         ]);
     }
 
