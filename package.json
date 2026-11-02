@@ -5,8 +5,7 @@
     "scripts": {
         "cad:assets": "node scripts/copy-cad-assets.mjs",
         "build": "npm run cad:assets && vite build",
-        "dev": "npm run cad:assets && vite",
-        "test:cad": "node --test resources/js/lib/cadSession.test.js"
+        "dev": "npm run cad:assets && vite"
     },
     "devDependencies": {
         "@inertiajs/vue3": "^2.0.0",
