@@ -18,7 +18,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'quantity_source', 'takeoff_reference', 'bbs_applicable',
     'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'cost_rate', 'cost_amount',
     'margin_percent', 'selling_rate', 'client_rate', 'client_amount', 'rate_analysis_id',
-    'origin_variation_item_id', 'is_variation_originated', 'sort_order',
+    'origin_variation_item_id', 'is_variation_originated', 'sort_order', 'simple_materials_initialized',
 ])]
 class BoqItem extends Model
 {
@@ -48,6 +48,7 @@ class BoqItem extends Model
             'quantity_source' => QuantitySource::class,
             'bbs_applicable' => 'boolean',
             'is_variation_originated' => 'boolean',
+            'simple_materials_initialized' => 'boolean',
             'material_rate' => 'decimal:4',
             'labour_rate' => 'decimal:4',
             'equipment_rate' => 'decimal:4',
@@ -107,6 +108,11 @@ class BoqItem extends Model
     public function materialNorms(): HasMany
     {
         return $this->hasMany(BoqMaterialNorm::class)->orderBy('sequence')->orderBy('id');
+    }
+
+    public function simpleMaterialCosts(): HasMany
+    {
+        return $this->hasMany(BoqItemMaterialCost::class)->orderBy('sequence')->orderBy('id');
     }
 
     public function bbs(): \Illuminate\Database\Eloquent\Relations\HasOne

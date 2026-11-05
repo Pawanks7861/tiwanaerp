@@ -234,6 +234,16 @@ class BoqService
                 $item->sort_order = (int) ($row['sort_order'] ?? $i);
                 $item->boq()->associate($boq);
                 $item->save();
+
+                if ($canEditCosts && array_key_exists('simple_materials', $row) && is_array($row['simple_materials'])) {
+                    app(SimpleBoqMaterialCostService::class)->syncForItem(
+                        $boq,
+                        $item,
+                        $row['simple_materials'],
+                        auth()->user(),
+                        "rows.{$i}.simple_materials",
+                    );
+                }
             }
 
             return $this->recalculateTotals($boq);

@@ -80,11 +80,21 @@ class BoqRevisionService
      */
     private function cloneItems(Boq $source, Boq $revision, array $sectionMap): void
     {
-        $source->items()->orderBy('id')->get()->each(function (BoqItem $item) use ($revision, $sectionMap) {
+        $source->items()->with('simpleMaterialCosts')->orderBy('id')->get()->each(function (BoqItem $item) use ($revision, $sectionMap) {
             $copy = $item->replicate(['boq_id', 'boq_section_id']);
             $copy->boq()->associate($revision);
             $copy->boq_section_id = $sectionMap[$item->boq_section_id];
             $copy->save();
+
+            foreach ($item->simpleMaterialCosts as $material) {
+                $materialCopy = $material->replicate(['boq_id', 'boq_item_id', 'project_id']);
+                $materialCopy->forceFill([
+                    'company_id' => $revision->company_id,
+                    'project_id' => $revision->project_id,
+                    'boq_id' => $revision->id,
+                    'boq_item_id' => $copy->id,
+                ])->save();
+            }
         });
     }
 

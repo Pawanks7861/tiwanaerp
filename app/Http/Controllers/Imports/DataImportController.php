@@ -119,18 +119,24 @@ class DataImportController extends Controller
             'context.boq_id' => ['nullable', 'integer', 'exists:boqs,id'],
             'context.material_request_id' => ['nullable', 'integer', 'exists:material_requests,id'],
             'context.stock_adjustment_id' => ['nullable', 'integer', 'exists:stock_adjustments,id'],
+            'sheet_index' => ['nullable', 'integer', 'min:0'],
         ]);
 
         $project = isset($data['project_id'])
             ? Project::query()->findOrFail($data['project_id'])
             : null;
 
+        $context = $data['context'] ?? [];
+        if (isset($data['sheet_index'])) {
+            $context['sheet_index'] = $data['sheet_index'];
+        }
+
         $result = $this->imports->upload(
             $request->user(),
             $data['module'],
             $request->file('file'),
             $project,
-            $data['context'] ?? [],
+            $context,
         );
 
         return response()->json([
@@ -140,6 +146,25 @@ class DataImportController extends Controller
             'fields' => $result['fields'],
             'modes' => $result['modes'],
             'instructions' => $result['instructions'],
+            'sheets' => $result['sheets'] ?? [],
+        ]);
+    }
+
+    public function selectSheet(Request $request, DataImport $import): JsonResponse
+    {
+        Gate::authorize('view', $import);
+
+        $data = $request->validate([
+            'sheet_index' => ['required', 'integer', 'min:0'],
+        ]);
+
+        $result = $this->imports->selectSheet($import, (int) $data['sheet_index'], $request->user());
+
+        return response()->json([
+            'import' => $this->payload($result['import']),
+            'headers' => $result['headers'],
+            'mapping' => $result['mapping'],
+            'sheets' => $result['sheets'],
         ]);
     }
 
@@ -201,6 +226,17 @@ class DataImportController extends Controller
         return Storage::disk($import->disk)->download(
             $import->error_report_path,
             'import-errors-'.$import->uuid.'.xlsx',
+        );
+    }
+
+    public function downloadFile(Request $request, DataImport $import): StreamedResponse
+    {
+        Gate::authorize('view', $import);
+        abort_unless($import->path, 404);
+
+        return Storage::disk($import->disk)->download(
+            $import->path,
+            $import->original_filename ?: 'import-'.$import->uuid,
         );
     }
 

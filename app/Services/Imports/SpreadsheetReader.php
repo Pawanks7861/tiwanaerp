@@ -8,19 +8,22 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Maatwebsite\Excel\Facades\Excel;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Throwable;
 
 class SpreadsheetReader
 {
     /**
-     * @return array{headers: list<string>, rows: list<array<string, mixed>>, raw_headers: list<string>}
+     * @return list<string>
      */
-    public function read(string $disk, string $path): array
+    public function sheetNames(string $disk, string $path): array
     {
         $absolute = Storage::disk($disk)->path($path);
 
         try {
-            $sheet = Excel::toArray(new GenericRowsImport, $absolute)[0] ?? [];
+            $reader = IOFactory::createReaderForFile($absolute);
+            $reader->setReadDataOnly(true);
+            $spreadsheet = $reader->load($absolute);
         } catch (Throwable $e) {
             report($e);
             throw ValidationException::withMessages([
@@ -28,8 +31,40 @@ class SpreadsheetReader
             ]);
         }
 
-        if ($sheet === []) {
+        return array_map(
+            fn ($sheet) => (string) $sheet->getTitle(),
+            $spreadsheet->getAllSheets(),
+        );
+    }
+
+    /**
+     * @return array{headers: list<string>, rows: list<array<string, mixed>>, raw_headers: list<string>}
+     */
+    public function read(string $disk, string $path, int $sheetIndex = 0): array
+    {
+        $absolute = Storage::disk($disk)->path($path);
+
+        try {
+            $sheets = Excel::toArray(new GenericRowsImport, $absolute);
+        } catch (Throwable $e) {
+            report($e);
+            throw ValidationException::withMessages([
+                'file' => 'The file could not be read. Upload an .xlsx, .xls or .csv file based on the module template.',
+            ]);
+        }
+
+        if ($sheets === []) {
             throw ValidationException::withMessages(['file' => 'The file is empty.']);
+        }
+
+        if ($sheetIndex < 0 || $sheetIndex >= count($sheets)) {
+            throw ValidationException::withMessages(['sheet_index' => 'Choose a valid worksheet.']);
+        }
+
+        $sheet = $sheets[$sheetIndex] ?? [];
+
+        if ($sheet === []) {
+            throw ValidationException::withMessages(['file' => 'The selected worksheet is empty.']);
         }
 
         // WithHeadingRow already keyed rows. Rebuild display headers from first row keys.

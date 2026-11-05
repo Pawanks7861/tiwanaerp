@@ -24,7 +24,9 @@ use App\Models\Approval\ApprovalWorkflow;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqCostComponent;
 use App\Models\Boq\BoqItem;
+use App\Models\Boq\BoqItemMaterialCost;
 use App\Models\Boq\BoqBbs;
+use App\Models\Boq\BoqBbsAdjustment;
 use App\Models\Boq\BoqBbsLine;
 use App\Models\Boq\BoqBbsSteelMap;
 use App\Models\Boq\BoqVariation;
@@ -33,6 +35,12 @@ use App\Models\Boq\BoqMaterialNorm;
 use App\Models\Boq\BoqMeasurementLine;
 use App\Models\Boq\BoqMeasurementSheet;
 use App\Models\Boq\BoqSection;
+use App\Models\Boq\CostingRateLibraryEntry;
+use App\Models\Boq\MaterialRecipeTemplate;
+use App\Models\Boq\MaterialRecipeTemplateLine;
+use App\Models\Boq\SteelUnitWeightProfile;
+use App\Models\Boq\SteelUnitWeightProfileLine;
+use App\Models\Boq\UnitConversion;
 use App\Models\Boq\ProjectBudget;
 use App\Models\Boq\ProjectBudgetLine;
 use App\Models\Boq\RateAnalysis;
@@ -266,6 +274,7 @@ class AppServiceProvider extends ServiceProvider
             'boq' => Boq::class,
             'boq_section' => BoqSection::class,
             'boq_item' => BoqItem::class,
+            'boq_item_material_cost' => BoqItemMaterialCost::class,
             'boq_measurement_sheet' => BoqMeasurementSheet::class,
             'boq_measurement_line' => BoqMeasurementLine::class,
             'boq_cost_component' => BoqCostComponent::class,
@@ -273,6 +282,13 @@ class AppServiceProvider extends ServiceProvider
             'boq_bbs' => BoqBbs::class,
             'boq_bbs_line' => BoqBbsLine::class,
             'boq_bbs_steel_map' => BoqBbsSteelMap::class,
+            'boq_bbs_adjustment' => BoqBbsAdjustment::class,
+            'material_recipe_template' => MaterialRecipeTemplate::class,
+            'material_recipe_template_line' => MaterialRecipeTemplateLine::class,
+            'unit_conversion' => UnitConversion::class,
+            'steel_unit_weight_profile' => SteelUnitWeightProfile::class,
+            'steel_unit_weight_profile_line' => SteelUnitWeightProfileLine::class,
+            'costing_rate_library_entry' => CostingRateLibraryEntry::class,
             'boq_variation' => BoqVariation::class,
             'boq_variation_item' => BoqVariationItem::class,
             'rate_analysis' => RateAnalysis::class,

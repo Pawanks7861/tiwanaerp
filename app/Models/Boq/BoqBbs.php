@@ -2,7 +2,9 @@
 
 namespace App\Models\Boq;
 
+use App\Enums\Boq\BbsBarCountRounding;
 use App\Enums\Boq\BbsStatus;
+use App\Enums\Boq\SteelUnitWeightMethod;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
@@ -37,10 +39,14 @@ class BoqBbs extends Model
     {
         return [
             'status' => BbsStatus::class,
+            'unit_weight_method' => SteelUnitWeightMethod::class,
+            'bar_count_rounding' => BbsBarCountRounding::class,
             'wastage_percent' => 'decimal:4',
             'total_theoretical_weight' => 'decimal:4',
+            'adjusted_theoretical_weight' => 'decimal:4',
             'wastage_weight' => 'decimal:4',
             'required_weight' => 'decimal:4',
+            'unit_weight_profile_snapshot' => 'array',
             'submitted_at' => 'datetime',
             'approved_at' => 'datetime',
             'rejected_at' => 'datetime',
@@ -80,6 +86,16 @@ class BoqBbs extends Model
     public function steelMaps(): HasMany
     {
         return $this->hasMany(BoqBbsSteelMap::class, 'bbs_id');
+    }
+
+    public function adjustments(): HasMany
+    {
+        return $this->hasMany(BoqBbsAdjustment::class, 'bbs_id');
+    }
+
+    public function steelProfile(): BelongsTo
+    {
+        return $this->belongsTo(SteelUnitWeightProfile::class, 'steel_profile_id');
     }
 
     public function submitter(): BelongsTo

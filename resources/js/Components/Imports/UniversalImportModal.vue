@@ -25,6 +25,8 @@ const mode = ref('create');
 const importJob = ref(null);
 const preview = ref([]);
 const summary = ref({});
+const sheets = ref([]);
+const selectedSheetIndex = ref(0);
 
 const title = computed(() => meta.value?.label ? `Import ${meta.value.label}` : 'Import');
 
@@ -50,6 +52,8 @@ function reset() {
     importJob.value = null;
     preview.value = [];
     summary.value = {};
+    sheets.value = [];
+    selectedSheetIndex.value = 0;
 }
 
 async function loadMeta() {
@@ -101,6 +105,8 @@ async function upload() {
         importJob.value = data.import;
         headers.value = data.headers;
         mapping.value = data.mapping;
+        sheets.value = data.sheets ?? [];
+        selectedSheetIndex.value = Number(data.import?.context?.sheet_index ?? 0);
         mode.value = data.modes?.[0]?.value ?? 'create';
         meta.value = {
             ...(meta.value ?? {}),
@@ -108,9 +114,28 @@ async function upload() {
             modes: data.modes,
             instructions: data.instructions,
         };
-        step.value = 'map';
+        step.value = sheets.value.length > 1 ? 'sheet' : 'map';
     } catch (e) {
         error.value = firstError(e) ?? 'Upload failed.';
+    } finally {
+        busy.value = false;
+    }
+}
+
+async function chooseSheet() {
+    busy.value = true;
+    error.value = '';
+    try {
+        const { data } = await window.axios.post(route('imports.sheet', importJob.value.id), {
+            sheet_index: selectedSheetIndex.value,
+        });
+        importJob.value = data.import;
+        headers.value = data.headers;
+        mapping.value = data.mapping;
+        sheets.value = data.sheets ?? sheets.value;
+        step.value = 'map';
+    } catch (e) {
+        error.value = firstError(e) ?? 'Could not read that worksheet.';
     } finally {
         busy.value = false;
     }
@@ -208,6 +233,15 @@ const headerOptions = computed(() => [
                 </p>
             </div>
 
+            <div v-else-if="step === 'sheet'" class="space-y-4">
+                <p class="text-sm text-slate-600">This workbook has more than one sheet. Choose the tab that contains your data rows.</p>
+                <FormSelect
+                    v-model="selectedSheetIndex"
+                    label="Worksheet"
+                    :options="sheets.map((name, index) => ({ value: index, label: name || `Sheet ${index + 1}` }))"
+                />
+            </div>
+
             <div v-else-if="step === 'map'" class="space-y-4">
                 <FormSelect v-model="mode" label="Import mode" :options="meta?.modes ?? []" />
                 <div class="max-h-80 space-y-3 overflow-y-auto rounded-lg border border-line p-3">
@@ -295,6 +329,7 @@ const headerOptions = computed(() => [
         <template #footer>
             <AppButton variant="secondary" :disabled="busy" @click="close">{{ step === 'done' ? 'Close' : 'Cancel' }}</AppButton>
             <AppButton v-if="step === 'upload'" :disabled="busy || !file" @click="upload">{{ busy ? 'Uploading…' : 'Continue' }}</AppButton>
+            <AppButton v-else-if="step === 'sheet'" :disabled="busy" @click="chooseSheet">{{ busy ? 'Loading…' : 'Continue' }}</AppButton>
             <AppButton v-else-if="step === 'map'" :disabled="busy" @click="validate">{{ busy ? 'Validating…' : 'Validate' }}</AppButton>
             <AppButton v-else-if="step === 'preview'" :disabled="busy || !(summary.valid > 0)" @click="confirm">
                 {{ busy ? 'Importing…' : `Confirm import (${summary.valid ?? 0})` }}

@@ -34,6 +34,7 @@ class BoqMaterialNorm extends Model
         return [
             'consumption_qty' => 'decimal:4',
             'wastage_percent' => 'decimal:4',
+            'recipe_version' => 'integer',
             'sequence' => 'integer',
             'is_active' => 'boolean',
         ];
@@ -57,5 +58,10 @@ class BoqMaterialNorm extends Model
     public function material(): BelongsTo
     {
         return $this->belongsTo(Material::class);
+    }
+
+    public function recipeTemplate(): BelongsTo
+    {
+        return $this->belongsTo(MaterialRecipeTemplate::class, 'recipe_template_id');
     }
 }

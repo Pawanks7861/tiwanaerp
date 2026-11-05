@@ -47,6 +47,7 @@ const unread = computed(() => page.props.unreadNotifications ?? 0);
 const branding = computed(() => page.props.branding ?? { logo_url: null, favicon_url: null });
 const companyName = computed(() => page.props.company?.current?.name ?? '');
 const multiCompany = computed(() => page.props.features?.multi_company === true);
+const advancedBoqCalculations = computed(() => page.props.features?.advanced_boq_calculations === true);
 const chatUnread = ref(page.props.chatUnread ?? 0);
 const showProjectSwitcher = computed(() => can('projects.view'));
 const recommendTwoFactor = computed(() => page.props.auth?.two_factor_recommended === true);
@@ -74,6 +75,7 @@ const navigation = computed(() => {
         can,
         isSuperAdmin: !!user.value?.is_super_admin,
         multiCompany: multiCompany.value,
+        advancedBoqCalculations: advancedBoqCalculations.value,
     });
 });
 

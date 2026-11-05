@@ -18,7 +18,7 @@ export const masters = [
     { slug: 'expense-categories', label: 'Expense Categories', icon: 'banknotes', permission: 'masters.expense_categories.view' },
 ];
 
-export function buildNavigation({ can, isSuperAdmin, multiCompany = false }) {
+export function buildNavigation({ can, isSuperAdmin, multiCompany = false, advancedBoqCalculations = false }) {
     const sections = [
         {
             items: [
@@ -93,6 +93,30 @@ export function buildNavigation({ can, isSuperAdmin, multiCompany = false }) {
                     icon: 'check-circle',
                     href: route('quality.checklists.index'),
                     active: route().current('quality.checklists.*'),
+                },
+                advancedBoqCalculations && can('boq.manage_recipes') && {
+                    label: 'Material Recipes',
+                    icon: 'beaker',
+                    href: route('coefficients.recipes.index'),
+                    active: route().current('coefficients.recipes.*'),
+                },
+                advancedBoqCalculations && can('boq.manage_unit_conversions') && {
+                    label: 'Unit Conversions',
+                    icon: 'scale',
+                    href: route('coefficients.conversions.index'),
+                    active: route().current('coefficients.conversions.*'),
+                },
+                advancedBoqCalculations && can('boq.manage_steel_profiles') && {
+                    label: 'Steel Unit Weight Profiles',
+                    icon: 'wrench',
+                    href: route('coefficients.steel-profiles.index'),
+                    active: route().current('coefficients.steel-profiles.*'),
+                },
+                advancedBoqCalculations && can('boq.manage_rate_library') && {
+                    label: 'Rate Library',
+                    icon: 'banknotes',
+                    href: route('coefficients.rate-library.index'),
+                    active: route().current('coefficients.rate-library.*'),
                 },
             ],
         },

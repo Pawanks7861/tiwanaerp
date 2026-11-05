@@ -4,7 +4,7 @@ import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { usePermissions } from '@/lib/permissions';
 import { buildProjectTabs } from '@/lib/projectNavigation';
-import { Link } from '@inertiajs/vue3';
+import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
 /**
@@ -18,6 +18,8 @@ const props = defineProps({
 });
 
 const { can } = usePermissions();
+const page = usePage();
+const advancedBoq = computed(() => page.props.features?.advanced_boq_calculations === true);
 
 const procurementHome = computed(() => {
     const first = [
@@ -48,6 +50,7 @@ const tabs = computed(() =>
         can,
         procurementHome: procurementHome.value,
         financeHome: financeHome.value,
+        advancedBoq: advancedBoq.value,
     }),
 );
 </script>

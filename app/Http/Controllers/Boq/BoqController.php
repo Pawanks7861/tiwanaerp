@@ -98,10 +98,14 @@ class BoqController extends Controller
 
         $user = $request->user();
         $withCosts = $user->can('boq.view_costs');
-        $boq->load('approver:id,name');
+        $boq->load(['approver:id,name', 'sourceImport.uploader:id,name']);
 
         $sections = $boq->sections()->orderBy('sort_order')->orderBy('id')->get();
-        $items = $boq->items()->orderBy('sort_order')->orderBy('id')->get();
+        $items = $boq->items()
+            ->with($withCosts ? ['simpleMaterialCosts'] : [])
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
 
         $analyses = $withCosts && $boq->isEditable()
             ? $this->boqs->applicableAnalyses($boq)->values()->map(
@@ -141,6 +145,13 @@ class BoqController extends Controller
                 'can_cancel' => (int) $pending->submitted_by === (int) $user->id,
             ] : null,
             'can' => [...BoqPresenter::abilities($user, $boq), 'view_costs' => $withCosts, 'view_drawings' => $canViewDrawings],
+            'source_import' => $boq->sourceImport ? [
+                'id' => $boq->sourceImport->id,
+                'original_filename' => $boq->sourceImport->original_filename,
+                'created_at' => $boq->sourceImport->created_at?->toIso8601String(),
+                'uploaded_by' => $boq->sourceImport->uploader?->only(['id', 'name']),
+                'download_url' => route('imports.file', $boq->sourceImport),
+            ] : null,
         ]);
     }
 

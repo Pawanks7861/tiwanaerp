@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Boq;
 
 use App\Exports\MaterialRequirementExport;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Boq\Concerns\RequiresAdvancedBoqCalculations;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Masters\Material;
 use App\Models\Projects\Project;
@@ -18,12 +19,15 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class MaterialRequirementController extends Controller
 {
+    use RequiresAdvancedBoqCalculations;
+
     public function __construct(private readonly MaterialRequirementService $requirements) {}
 
     public function index(Request $request, Project $project): Response
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_material_requirements'), 403);
+        $this->requireAdvancedBoqCalculations();
 
         $filters = $request->validate([
             'material_id' => ['nullable', 'integer'],
@@ -63,6 +67,7 @@ class MaterialRequirementController extends Controller
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_material_requirements'), 403);
+        $this->requireAdvancedBoqCalculations();
         abort_unless((int) $material->company_id === (int) $project->company_id, 404);
 
         $unit = $request->string('unit')->toString() ?: null;
@@ -87,6 +92,7 @@ class MaterialRequirementController extends Controller
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_material_requirements'), 403);
+        $this->requireAdvancedBoqCalculations();
 
         $rows = $this->requirements->projectSummary($project);
         $name = 'material-requirement-'.$project->code.'-'.now()->format('Ymd-His').'.xlsx';
@@ -98,6 +104,7 @@ class MaterialRequirementController extends Controller
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_material_requirements'), 403);
+        $this->requireAdvancedBoqCalculations();
         abort_unless($request->user()->can('material_requests.create'), 403);
 
         $data = $request->validate([

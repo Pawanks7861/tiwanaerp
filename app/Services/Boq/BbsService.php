@@ -2,11 +2,18 @@
 
 namespace App\Services\Boq;
 
+use App\Enums\Boq\BbsBarCountRounding;
+use App\Enums\Boq\BbsCountMode;
+use App\Enums\Boq\BbsLapMode;
 use App\Enums\Boq\BbsShapeCode;
 use App\Enums\Boq\BbsStatus;
+use App\Enums\Boq\MaterialRecipeStatus;
+use App\Enums\Boq\SteelUnitWeightMethod;
+use App\Models\Boq\SteelUnitWeightProfile;
 use App\Enums\Documents\DrawingRevisionStatus;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqBbs;
+use App\Models\Boq\BoqBbsAdjustment;
 use App\Models\Boq\BoqBbsLine;
 use App\Models\Boq\BoqBbsSteelMap;
 use App\Models\Boq\BoqItem;
@@ -22,6 +29,8 @@ use Illuminate\Validation\ValidationException;
  */
 class BbsService
 {
+    public function __construct(private readonly SteelUnitWeightProfileService $steelProfiles) {}
+
     public function enable(BoqItem $item, User $user): BoqBbs
     {
         $item->loadMissing('boq');
@@ -78,10 +87,35 @@ class BbsService
 
             $wastage = Decimal::of((string) ($header['wastage_percent'] ?? '0'))->round(Decimal::PERCENT_SCALE)->toString();
 
+            $unitWeightMethod = SteelUnitWeightMethod::tryFrom((string) ($header['unit_weight_method'] ?? SteelUnitWeightMethod::FormulaD2162->value))
+                ?? SteelUnitWeightMethod::FormulaD2162;
+            $steelProfileId = isset($header['steel_profile_id']) && $header['steel_profile_id'] !== ''
+                ? (int) $header['steel_profile_id']
+                : null;
+            $barCountRounding = BbsBarCountRounding::tryFrom((string) ($header['bar_count_rounding'] ?? BbsBarCountRounding::Ceil->value))
+                ?? BbsBarCountRounding::Ceil;
+
+            $profileWeights = null;
+            if ($unitWeightMethod === SteelUnitWeightMethod::Profile) {
+                if (! $steelProfileId) {
+                    throw ValidationException::withMessages(['steel_profile_id' => 'Select an active steel unit-weight profile.']);
+                }
+                $profile = SteelUnitWeightProfile::query()
+                    ->whereKey($steelProfileId)
+                    ->where('company_id', $locked->company_id)
+                    ->where('status', MaterialRecipeStatus::Active)
+                    ->firstOrFail();
+                $profileWeights = $this->steelProfiles->diameterWeightMap($profile);
+            }
+
             $built = [];
             $seq = 0;
             foreach ($lines as $row) {
-                $calc = BbsCalculator::line($row);
+                $lineInput = array_merge($row, [
+                    'unit_weight_method' => $unitWeightMethod->value,
+                    'bar_count_rounding' => $row['bar_count_rounding'] ?? $barCountRounding->value,
+                ]);
+                $calc = BbsCalculator::line($lineInput, $profileWeights);
                 $built[] = [
                     'sequence' => $seq++,
                     'structure_location' => $row['structure_location'] ?? null,
@@ -91,6 +125,14 @@ class BbsService
                     'number_of_members' => $calc['number_of_members'],
                     'bars_per_member' => $calc['bars_per_member'],
                     'total_bars' => $calc['total_bars'],
+                    'count_mode' => $calc['count_mode'],
+                    'distribution_length' => $row['distribution_length'] ?? null,
+                    'start_cover' => $row['start_cover'] ?? null,
+                    'end_cover' => $row['end_cover'] ?? null,
+                    'spacing' => $row['spacing'] ?? null,
+                    'include_end_bar' => filter_var($row['include_end_bar'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                    'faces_layers_multiplier' => max(1, (int) ($row['faces_layers_multiplier'] ?? 1)),
+                    'bar_count_rounding' => $row['bar_count_rounding'] ?? $barCountRounding->value,
                     'shape_code' => $row['shape_code'] instanceof BbsShapeCode
                         ? $row['shape_code']->value
                         : (string) $row['shape_code'],
@@ -101,15 +143,31 @@ class BbsService
                     'e_length' => $row['e_length'] ?? null,
                     'hook_length' => (string) ($row['hook_length'] ?? '0'),
                     'bend_deduction' => (string) ($row['bend_deduction'] ?? '0'),
+                    'lap_mode' => $calc['lap_mode'],
+                    'lap_diameter_factor' => $row['lap_diameter_factor'] ?? null,
+                    'lap_length' => $calc['lap_length'],
+                    'lap_count_per_bar' => $calc['lap_count_per_bar'],
                     'cutting_length' => $calc['cutting_length'],
                     'total_length' => $calc['total_length'],
                     'unit_weight' => $calc['unit_weight'],
+                    'unit_weight_override' => $row['unit_weight_override'] ?? null,
+                    'unit_weight_override_reason' => $row['unit_weight_override_reason'] ?? null,
+                    'unit_weight_override_by' => isset($row['unit_weight_override']) && $row['unit_weight_override'] !== '' && $row['unit_weight_override'] !== null
+                        ? $user->id
+                        : null,
+                    'unit_weight_override_at' => isset($row['unit_weight_override']) && $row['unit_weight_override'] !== '' && $row['unit_weight_override'] !== null
+                        ? now()
+                        : null,
                     'theoretical_weight' => $calc['theoretical_weight'],
                     'remarks' => $row['remarks'] ?? null,
                 ];
                 if (trim($built[array_key_last($built)]['bar_mark']) === '') {
                     throw ValidationException::withMessages(['bar_mark' => 'Bar mark is required on every line.']);
                 }
+            }
+
+            if (array_key_exists('adjustments', $header)) {
+                $this->syncAdjustments($locked, $header['adjustments'], $user);
             }
 
             $theoByDia = [];
@@ -119,7 +177,8 @@ class BbsService
                 $theoByDia[$d] = Decimal::of($theoByDia[$d] ?? '0')->plus($b['theoretical_weight'])->toQuantity();
                 $lenByDia[$d] = Decimal::of($lenByDia[$d] ?? '0')->plus($b['total_length'])->toQuantity();
             }
-            $totals = BbsCalculator::headerTotals(array_values($theoByDia), $wastage);
+            $adjByDia = $this->adjustmentsByDiameter($locked);
+            $totals = BbsCalculator::headerTotals(array_values($theoByDia), $wastage, array_values($adjByDia));
 
             if ($locked->status === BbsStatus::Rejected) {
                 $locked->forceFill([
@@ -134,8 +193,12 @@ class BbsService
                 'title' => $header['title'] ?? $locked->title,
                 'description' => $header['description'] ?? $locked->description,
                 'drawing_revision_id' => $drawingId,
+                'unit_weight_method' => $unitWeightMethod,
+                'steel_profile_id' => $steelProfileId,
+                'bar_count_rounding' => $barCountRounding,
                 'wastage_percent' => $totals['wastage_percent'],
                 'total_theoretical_weight' => $totals['total_theoretical_weight'],
+                'adjusted_theoretical_weight' => $totals['adjusted_theoretical_weight'],
                 'wastage_weight' => $totals['wastage_weight'],
                 'required_weight' => $totals['required_weight'],
                 'updated_by' => $user->id,
@@ -191,11 +254,20 @@ class BbsService
             }
             Boq::query()->findOrFail($locked->boq_id)->assertEditable();
 
+            $snapshot = null;
+            if ($locked->steel_profile_id) {
+                $profile = SteelUnitWeightProfile::query()->whereKey($locked->steel_profile_id)->with('lines')->first();
+                if ($profile) {
+                    $snapshot = $this->steelProfiles->profileSnapshot($profile);
+                }
+            }
+
             // Unmapped diameters do not block approval, but will not contribute to Material Requirement.
             $locked->forceFill([
                 'status' => BbsStatus::Approved,
                 'approved_by' => $user->id,
                 'approved_at' => now(),
+                'unit_weight_profile_snapshot' => $snapshot,
                 'updated_by' => $user->id,
             ])->save();
 
@@ -249,34 +321,49 @@ class BbsService
     public function workspacePayload(BoqItem $item): array
     {
         $item->loadMissing('boq');
+        $options = [
+            'shape_codes' => BbsShapeCode::options(),
+            'count_modes' => BbsCountMode::options(),
+            'lap_modes' => BbsLapMode::options(),
+            'bar_count_rounding' => BbsBarCountRounding::options(),
+            'unit_weight_methods' => SteelUnitWeightMethod::options(),
+            'steel_profiles' => SteelUnitWeightProfile::query()
+                ->where('status', MaterialRecipeStatus::Active)
+                ->orderBy('name')
+                ->orderByDesc('version')
+                ->get(['id', 'name', 'version'])
+                ->map(fn (SteelUnitWeightProfile $p) => [
+                    'value' => $p->id,
+                    'label' => trim("{$p->name} v{$p->version}"),
+                ])->all(),
+            'formula_note' => $this->formulaNote(),
+        ];
+
         if (! $item->bbs_applicable) {
             return [
                 'enabled' => false,
                 'bbs' => null,
-                'shape_codes' => BbsShapeCode::options(),
-                'formula_note' => $this->formulaNote(),
+                ...$options,
             ];
         }
 
         $bbs = BoqBbs::query()
             ->where('boq_item_id', $item->id)
-            ->with(['lines', 'steelMaps.material:id,code,name', 'drawingRevision.drawing:id,drawing_number,title', 'approver:id,name', 'submitter:id,name'])
+            ->with(['lines', 'adjustments', 'steelMaps.material:id,code,name', 'drawingRevision.drawing:id,drawing_number,title', 'approver:id,name', 'submitter:id,name'])
             ->first();
 
         if (! $bbs) {
             return [
                 'enabled' => true,
                 'bbs' => null,
-                'shape_codes' => BbsShapeCode::options(),
-                'formula_note' => $this->formulaNote(),
+                ...$options,
             ];
         }
 
         return [
             'enabled' => true,
             'bbs' => $this->bbsPayload($bbs),
-            'shape_codes' => BbsShapeCode::options(),
-            'formula_note' => $this->formulaNote(),
+            ...$options,
         ];
     }
 
@@ -296,7 +383,8 @@ class BbsService
             $totalBars += (int) $line->total_bars;
             $totalLength = $totalLength->plus((string) $line->total_length);
         }
-        $summary = BbsCalculator::diameterSummary($theoByDia, $lenByDia, (string) $bbs->wastage_percent);
+        $adjByDia = $this->adjustmentsByDiameter($bbs);
+        $summary = BbsCalculator::diameterSummary($theoByDia, $lenByDia, (string) $bbs->wastage_percent, $adjByDia);
         $mapByDia = $bbs->steelMaps->keyBy(fn ($m) => (int) $m->diameter_mm);
 
         foreach ($summary as &$row) {
@@ -319,10 +407,15 @@ class BbsService
             'description' => $bbs->description,
             'status' => $bbs->status->value,
             'status_label' => $bbs->status->label(),
+            'unit_weight_method' => $bbs->unit_weight_method?->value ?? SteelUnitWeightMethod::FormulaD2162->value,
+            'steel_profile_id' => $bbs->steel_profile_id,
+            'bar_count_rounding' => $bbs->bar_count_rounding?->value ?? BbsBarCountRounding::Ceil->value,
             'wastage_percent' => (string) $bbs->wastage_percent,
             'total_theoretical_weight' => (string) $bbs->total_theoretical_weight,
+            'adjusted_theoretical_weight' => (string) $bbs->adjusted_theoretical_weight,
             'wastage_weight' => (string) $bbs->wastage_weight,
             'required_weight' => (string) $bbs->required_weight,
+            'unit_weight_profile_snapshot' => $bbs->unit_weight_profile_snapshot,
             'total_theoretical_weight_mt' => Decimal::of((string) $bbs->total_theoretical_weight)->dividedBy(1000, Decimal::QTY_SCALE)->toQuantity(),
             'required_weight_mt' => Decimal::of((string) $bbs->required_weight)->dividedBy(1000, Decimal::QTY_SCALE)->toQuantity(),
             'total_bars' => $totalBars,
@@ -344,6 +437,14 @@ class BbsService
             'submitter' => $bbs->submitter?->only(['id', 'name']),
             'rejection_reason' => $bbs->rejection_reason,
             'diameter_summary' => $summary,
+            'adjustments' => $bbs->adjustments->map(fn (BoqBbsAdjustment $adj) => [
+                'id' => $adj->id,
+                'diameter_mm' => $adj->diameter_mm,
+                'material_id' => $adj->material_id,
+                'adjustment_qty_kg' => (string) $adj->adjustment_qty_kg,
+                'reason' => $adj->reason,
+                'reference' => $adj->reference,
+            ])->all(),
             'lines' => $bbs->lines->map(fn (BoqBbsLine $line) => [
                 'id' => $line->id,
                 'structure_location' => $line->structure_location,
@@ -359,8 +460,22 @@ class BbsService
                 'c_length' => $line->c_length !== null ? (string) $line->c_length : null,
                 'd_length' => $line->d_length !== null ? (string) $line->d_length : null,
                 'e_length' => $line->e_length !== null ? (string) $line->e_length : null,
+                'count_mode' => $line->count_mode?->value,
+                'distribution_length' => $line->distribution_length !== null ? (string) $line->distribution_length : null,
+                'start_cover' => $line->start_cover !== null ? (string) $line->start_cover : null,
+                'end_cover' => $line->end_cover !== null ? (string) $line->end_cover : null,
+                'spacing' => $line->spacing !== null ? (string) $line->spacing : null,
+                'include_end_bar' => $line->include_end_bar,
+                'faces_layers_multiplier' => $line->faces_layers_multiplier,
+                'bar_count_rounding' => $line->bar_count_rounding?->value,
                 'hook_length' => (string) $line->hook_length,
                 'bend_deduction' => (string) $line->bend_deduction,
+                'lap_mode' => $line->lap_mode?->value,
+                'lap_diameter_factor' => $line->lap_diameter_factor !== null ? (string) $line->lap_diameter_factor : null,
+                'lap_length' => (string) $line->lap_length,
+                'lap_count_per_bar' => (string) $line->lap_count_per_bar,
+                'unit_weight_override' => $line->unit_weight_override !== null ? (string) $line->unit_weight_override : null,
+                'unit_weight_override_reason' => $line->unit_weight_override_reason,
                 'cutting_length' => (string) $line->cutting_length,
                 'total_length' => (string) $line->total_length,
                 'unit_weight' => (string) $line->unit_weight,
@@ -396,6 +511,59 @@ class BbsService
      * @param  list<array{diameter_mm: int, material_id: int|null}>  $maps
      * @param  list<int>  $diameters
      */
+    /**
+     * @return array<int, string>
+     */
+    private function adjustmentsByDiameter(BoqBbs $bbs): array
+    {
+        $bbs->loadMissing('adjustments');
+        $byDia = [];
+        foreach ($bbs->adjustments as $adj) {
+            $key = $adj->diameter_mm ?? 0;
+            $byDia[$key] = Decimal::of($byDia[$key] ?? '0')->plus((string) $adj->adjustment_qty_kg)->toQuantity();
+        }
+
+        return $byDia;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function syncAdjustments(BoqBbs $bbs, array $rows, User $user): void
+    {
+        $bbs->adjustments()->delete();
+        foreach (array_values($rows) as $i => $row) {
+            $qty = trim((string) ($row['adjustment_qty_kg'] ?? ''));
+            if ($qty === '' || Decimal::of($qty)->isZero()) {
+                continue;
+            }
+            $reason = trim((string) ($row['reason'] ?? ''));
+            if ($reason === '') {
+                throw ValidationException::withMessages(["adjustments.{$i}.reason" => 'Adjustment reason is required.']);
+            }
+            $materialId = isset($row['material_id']) && $row['material_id'] !== '' && $row['material_id'] !== null
+                ? (int) $row['material_id']
+                : null;
+            if ($materialId) {
+                Material::query()
+                    ->whereKey($materialId)
+                    ->where('company_id', $bbs->company_id)
+                    ->firstOr(fn () => throw ValidationException::withMessages(["adjustments.{$i}.material_id" => 'Material not found in this company.']));
+            }
+
+            $adj = new BoqBbsAdjustment;
+            $adj->forceFill([
+                'bbs_id' => $bbs->id,
+                'diameter_mm' => isset($row['diameter_mm']) && $row['diameter_mm'] !== '' ? (int) $row['diameter_mm'] : null,
+                'material_id' => $materialId,
+                'adjustment_qty_kg' => $qty,
+                'reason' => $reason,
+                'reference' => isset($row['reference']) ? (trim((string) $row['reference']) ?: null) : null,
+                'created_by' => $user->id,
+            ])->save();
+        }
+    }
+
     private function syncMaps(BoqBbs $bbs, array $maps, User $user, array $diameters): void
     {
         $byDia = [];

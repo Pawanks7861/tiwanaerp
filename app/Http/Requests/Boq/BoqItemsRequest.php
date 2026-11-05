@@ -25,6 +25,7 @@ class BoqItemsRequest extends FormRequest
         return [
             'rows.*.quantity', 'rows.*.material_rate', 'rows.*.labour_rate', 'rows.*.equipment_rate',
             'rows.*.subcontract_rate', 'rows.*.margin_percent', 'rows.*.client_rate',
+            'rows.*.simple_materials.*.quantity', 'rows.*.simple_materials.*.rate',
         ];
     }
 
@@ -50,6 +51,12 @@ class BoqItemsRequest extends FormRequest
             'rows.*.client_rate' => $rate,
             'rows.*.rate_analysis_id' => ['nullable', 'integer'],
             'rows.*.sort_order' => ['nullable', 'integer', 'min:0'],
+            'rows.*.simple_materials' => ['sometimes', 'array', 'max:200'],
+            'rows.*.simple_materials.*.material_id' => ['nullable', 'integer'],
+            'rows.*.simple_materials.*.material_name' => ['required_with:rows.*.simple_materials', 'string', 'max:160'],
+            'rows.*.simple_materials.*.quantity' => ['required_with:rows.*.simple_materials', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
+            'rows.*.simple_materials.*.unit' => ['required_with:rows.*.simple_materials', 'string', 'max:40'],
+            'rows.*.simple_materials.*.rate' => ['required_with:rows.*.simple_materials', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
             'deleted_ids' => ['present', 'array'],
             'deleted_ids.*' => ['integer'],
         ];
@@ -62,6 +69,10 @@ class BoqItemsRequest extends FormRequest
             'rows.*.unit_id' => 'unit',
             'rows.*.quantity' => 'quantity',
             'rows.*.boq_section_id' => 'section',
+            'rows.*.simple_materials.*.material_name' => 'material name',
+            'rows.*.simple_materials.*.quantity' => 'material quantity',
+            'rows.*.simple_materials.*.unit' => 'material unit',
+            'rows.*.simple_materials.*.rate' => 'material rate',
         ];
     }
 }

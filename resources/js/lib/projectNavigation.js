@@ -3,7 +3,7 @@
  * Dashboard → Drawings → BOQ → Planning & Budget → Procurement → Inventory → Site Execution.
  * Permission checks stay on each item; keys are unchanged so existing `active` props keep working.
  */
-export function buildProjectTabs({ projectId, can, procurementHome = null, financeHome = null }) {
+export function buildProjectTabs({ projectId, can, procurementHome = null, financeHome = null, advancedBoq = false }) {
     return [
         { key: 'overview', label: 'Dashboard', icon: 'home', href: route('projects.show', projectId) },
         can('sites.view') && { key: 'sites', label: 'Sites', icon: 'map-pin', href: route('projects.sites.index', projectId) },
@@ -12,20 +12,20 @@ export function buildProjectTabs({ projectId, can, procurementHome = null, finan
         can('drawings.view') && { key: 'drawings', label: 'Drawing Management', icon: 'grid', href: route('projects.drawings.index', projectId) },
 
         can('boq.view') && { key: 'boq-dashboard', label: 'BOQ Dashboard', icon: 'document', href: route('projects.boq-dashboard', projectId) },
-        can('boq.view') && { key: 'boq', label: 'BOQ Management', icon: 'document', href: route('projects.boqs.index', projectId) },
-        can('boq.view_material_requirements') && {
+        can('boq.view') && { key: 'boq', label: 'BOQ', icon: 'document', href: route('projects.boqs.index', projectId) },
+        advancedBoq && can('boq.view_material_requirements') && {
             key: 'material-requirement',
             label: 'Material Requirement',
             icon: 'archive',
             href: route('projects.material-requirement.index', projectId),
         },
-        can('boq.view_reconciliation') && {
+        advancedBoq && can('boq.view_reconciliation') && {
             key: 'material-reconciliation',
             label: 'Material Reconciliation',
             icon: 'scale',
             href: route('projects.material-reconciliation.index', projectId),
         },
-        can('boq.view_reconciliation') && {
+        advancedBoq && can('boq.view_reconciliation') && {
             key: 'steel-reconciliation',
             label: 'Steel Reconciliation',
             icon: 'scale',
@@ -37,7 +37,7 @@ export function buildProjectTabs({ projectId, can, procurementHome = null, finan
             icon: 'document',
             href: route('projects.variations.index', projectId),
         },
-        can('rate_analysis.view') &&
+        advancedBoq && can('rate_analysis.view') &&
             can('boq.view_costs') && { key: 'rate-analysis', label: 'Rate Analysis', icon: 'scale', href: route('projects.rate-analyses.index', projectId) },
 
         can('budget.view') && can('boq.view_costs') && { key: 'budget', label: 'Budget', icon: 'banknotes', href: route('projects.budget.index', projectId) },

@@ -2,6 +2,7 @@
 
 namespace App\Models\Boq;
 
+use App\Enums\Boq\CostCalculationBasis;
 use App\Enums\Boq\CostComponentType;
 use App\Enums\Boq\CostRateSource;
 use App\Models\Concerns\Auditable;
@@ -35,8 +36,14 @@ class BoqCostComponent extends Model
         return [
             'component_type' => CostComponentType::class,
             'rate_source' => CostRateSource::class,
+            'calculation_basis' => CostCalculationBasis::class,
             'consumption_qty' => 'decimal:4',
             'rate' => 'decimal:4',
+            'base_rate' => 'decimal:4',
+            'factor' => 'decimal:4',
+            'percent_value' => 'decimal:4',
+            'calculated_rate' => 'decimal:4',
+            'conversion_snapshot' => 'array',
             'wastage_percent' => 'decimal:4',
             'amount_per_boq_unit' => 'decimal:4',
             'sequence' => 'integer',
@@ -57,5 +64,10 @@ class BoqCostComponent extends Model
     public function item(): BelongsTo
     {
         return $this->belongsTo(BoqItem::class, 'boq_item_id');
+    }
+
+    public function rateLibraryEntry(): BelongsTo
+    {
+        return $this->belongsTo(CostingRateLibraryEntry::class, 'rate_library_id');
     }
 }

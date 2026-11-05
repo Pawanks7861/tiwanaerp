@@ -2,8 +2,10 @@
 
 namespace App\Services\Boq;
 
+use App\Enums\Boq\CostCalculationBasis;
 use App\Enums\Boq\CostComponentType;
 use App\Enums\Boq\CostRateSource;
+use App\Models\Boq\CostingRateLibraryEntry;
 use App\Enums\Procurement\PurchaseOrderStatus;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqCostComponent;
@@ -23,12 +25,16 @@ use Illuminate\Validation\ValidationException;
  */
 class CostBuildUpService
 {
-    public function __construct(private readonly BoqService $boqs) {}
+    public function __construct(
+        private readonly BoqService $boqs,
+        private readonly UnitConversionService $conversions,
+    ) {}
 
     /**
      * @return array{
      *   components: list<array<string, mixed>>,
      *   subtotals: array<string, string>,
+     *   category_totals: array{material: string, labour: string, equipment: string, subcontract: string, other: string, total: string},
      *   summary: array<string, mixed>,
      *   locked: bool
      * }
@@ -44,8 +50,15 @@ class CostBuildUpService
             ->get();
 
         $rows = $components->map(fn (BoqCostComponent $c) => $this->componentPayload($c))->all();
-        $subtotals = $this->subtotals($components);
-        $costRate = CostBuildUpCalculator::costRate(array_values($subtotals));
+        $categoryTotals = $this->categoryTotals($components);
+        $subtotals = [
+            CostComponentType::Material->value => $categoryTotals['material'],
+            CostComponentType::Labour->value => $categoryTotals['labour'],
+            CostComponentType::Equipment->value => $categoryTotals['equipment'],
+            CostComponentType::Subcontract->value => $categoryTotals['subcontract'],
+            CostComponentType::Other->value => $categoryTotals['other'],
+        ];
+        $costRate = $categoryTotals['total'];
         $selling = (string) $item->client_rate;
         $effectiveQty = app(\App\Services\Boq\EffectiveBoqQuantityService::class)->forItem($item);
         $summary = CostBuildUpCalculator::summary($effectiveQty, $costRate, $selling);
@@ -53,6 +66,7 @@ class CostBuildUpService
         return [
             'components' => $rows,
             'subtotals' => $subtotals,
+            'category_totals' => $categoryTotals,
             'summary' => $summary,
             'locked' => ! $item->boq->isEditable(),
         ];
@@ -87,24 +101,74 @@ class CostBuildUpService
                 CostComponentType::Other->value => Decimal::zero(),
             ];
 
+            $sheetInput = [];
+            $meta = [];
             foreach (array_values($rows) as $i => $row) {
                 $type = CostComponentType::tryFrom((string) ($row['component_type'] ?? ''))
                     ?? throw ValidationException::withMessages(["components.{$i}.component_type" => 'Invalid component type.']);
 
-                $resolved = $this->resolveSource($lockedBoq, $type, $row, $i);
-                $calc = CostBuildUpCalculator::component([
-                    'consumption_qty' => $row['consumption_qty'] ?? '0',
-                    'rate' => $row['rate'] ?? '0',
-                    'wastage_percent' => $row['wastage_percent'] ?? '0',
-                ]);
+                $rateSource = CostRateSource::tryFrom((string) ($row['rate_source'] ?? CostRateSource::Manual->value))
+                    ?? CostRateSource::Manual;
+
+                $resolved = $this->resolveSource($lockedBoq, $type, $row, $i, $rateSource);
 
                 $description = trim((string) ($row['description'] ?? $resolved['description'] ?? ''));
                 if ($description === '') {
                     throw ValidationException::withMessages(["components.{$i}.description" => 'Description is required.']);
                 }
 
-                $rateSource = CostRateSource::tryFrom((string) ($row['rate_source'] ?? CostRateSource::Manual->value))
-                    ?? CostRateSource::Manual;
+                $basis = CostCalculationBasis::tryFrom((string) ($row['calculation_basis'] ?? CostCalculationBasis::QuantityRate->value))
+                    ?? CostCalculationBasis::QuantityRate;
+
+                $consumptionQty = (string) ($row['consumption_qty'] ?? '0');
+                $rate = (string) ($row['rate'] ?? $resolved['rate'] ?? '0');
+                $conversionSnapshot = null;
+
+                if (! empty($row['convert_from_unit']) && ! empty($row['convert_to_unit']) && $row['convert_to_unit'] === ($row['consumption_unit'] ?? $resolved['unit'])) {
+                    $converted = $this->conversions->convert(
+                        (int) $lockedBoq->company_id,
+                        (int) $lockedBoq->project_id,
+                        $resolved['source_id'],
+                        (string) $row['convert_from_unit'],
+                        (string) $row['convert_to_unit'],
+                        $consumptionQty,
+                    );
+                    $consumptionQty = $converted['result'];
+                    $conversionSnapshot = $converted['conversion'] + ['derivation_trace' => $converted['derivation_trace']];
+                }
+
+                $sheetInput[$i] = [
+                    'component_type' => $type->value,
+                    'calculation_basis' => $basis->value,
+                    'consumption_qty' => $consumptionQty,
+                    'rate' => $rate,
+                    'base_rate' => $row['base_rate'] ?? null,
+                    'factor' => $row['factor'] ?? null,
+                    'factor_reference' => $row['factor_reference'] ?? null,
+                    'percent_value' => $row['percent_value'] ?? null,
+                    'wastage_percent' => $row['wastage_percent'] ?? '0',
+                    'amount_per_boq_unit' => $row['amount_per_boq_unit'] ?? null,
+                ];
+                $meta[$i] = [
+                    'type' => $type,
+                    'rate_source' => $rateSource,
+                    'resolved' => $resolved,
+                    'description' => $description,
+                    'consumption_unit' => $row['consumption_unit'] ?? $resolved['unit'] ?? null,
+                    'row' => $row,
+                    'conversion_snapshot' => $conversionSnapshot,
+                ];
+            }
+
+            $calculated = CostBuildUpCalculator::calculateSheet($sheetInput);
+
+            foreach ($calculated as $i => $calc) {
+                $m = $meta[$i];
+                $type = $m['type'];
+                $resolved = $m['resolved'];
+                $description = $m['description'];
+                $rateSource = $m['rate_source'];
+                $row = $m['row'];
 
                 $id = isset($row['id']) ? (int) $row['id'] : null;
                 $component = $id
@@ -127,9 +191,18 @@ class CostBuildUpService
                     'source_type' => $resolved['source_type'],
                     'source_id' => $resolved['source_id'],
                     'description' => $description,
+                    'calculation_basis' => $calc['calculation_basis'],
                     'consumption_qty' => $calc['consumption_qty'],
-                    'consumption_unit' => $row['consumption_unit'] ?? $resolved['unit'] ?? null,
+                    'consumption_unit' => $m['consumption_unit'],
                     'rate' => $calc['rate'],
+                    'base_rate' => $calc['base_rate'],
+                    'factor' => $calc['factor'],
+                    'factor_reference' => $row['factor_reference'] ?? null,
+                    'percent_value' => $calc['percent_value'],
+                    'calculated_rate' => $calc['calculated_rate'],
+                    'derivation_trace' => $calc['derivation_trace'],
+                    'rate_library_id' => $resolved['rate_library_id'] ?? null,
+                    'conversion_snapshot' => $m['conversion_snapshot'],
                     'wastage_percent' => $calc['wastage_percent'],
                     'amount_per_boq_unit' => $calc['amount_per_boq_unit'],
                     'rate_source' => $rateSource,
@@ -210,6 +283,11 @@ class CostBuildUpService
             [CostComponentType::Material, CostRateSource::LatestPo] => $this->latestPoRate($boq, $sourceId),
             [CostComponentType::Labour, CostRateSource::LabourMaster] => $this->labourMasterRate($boq, $sourceId),
             [CostComponentType::Equipment, CostRateSource::EquipmentMaster] => $this->equipmentMasterMeta($boq, $sourceId),
+            [CostComponentType::Material, CostRateSource::RateLibrary],
+            [CostComponentType::Labour, CostRateSource::RateLibrary],
+            [CostComponentType::Equipment, CostRateSource::RateLibrary],
+            [CostComponentType::Subcontract, CostRateSource::RateLibrary],
+            [CostComponentType::Other, CostRateSource::RateLibrary] => $this->rateLibraryMeta($boq, $sourceId),
             default => [
                 'rate' => '0.0000',
                 'rate_source' => CostRateSource::Manual->value,
@@ -220,26 +298,31 @@ class CostBuildUpService
     }
 
     /**
+     * Authoritative per-category totals (+ total cost rate) from active component amounts.
+     *
+     * @param  iterable<BoqCostComponent|array<string, mixed>>  $components
+     * @return array{material: string, labour: string, equipment: string, subcontract: string, other: string, total: string}
+     */
+    public function categoryTotals(iterable $components): array
+    {
+        return CostBuildUpCalculator::categoryTotals($components);
+    }
+
+    /**
      * @param  iterable<BoqCostComponent>  $components
      * @return array<string, string>
      */
     public function subtotals(iterable $components): array
     {
-        $sums = [];
-        foreach (CostComponentType::cases() as $type) {
-            $sums[$type->value] = Decimal::zero();
-        }
-        foreach ($components as $c) {
-            if (! $c->is_active) {
-                continue;
-            }
-            $key = $c->component_type instanceof CostComponentType
-                ? $c->component_type->value
-                : (string) $c->component_type;
-            $sums[$key] = ($sums[$key] ?? Decimal::zero())->plus((string) $c->amount_per_boq_unit);
-        }
+        $totals = $this->categoryTotals($components);
 
-        return array_map(fn (Decimal $d) => $d->round(Decimal::RATE_SCALE)->toRate(), $sums);
+        return [
+            CostComponentType::Material->value => $totals['material'],
+            CostComponentType::Labour->value => $totals['labour'],
+            CostComponentType::Equipment->value => $totals['equipment'],
+            CostComponentType::Subcontract->value => $totals['subcontract'],
+            CostComponentType::Other->value => $totals['other'],
+        ];
     }
 
     /**
@@ -259,16 +342,42 @@ class CostBuildUpService
             'wastage_percent' => $c->wastage_percent !== null ? (string) $c->wastage_percent : '0.0000',
             'amount_per_boq_unit' => (string) $c->amount_per_boq_unit,
             'rate_source' => $c->rate_source?->value ?? CostRateSource::Manual->value,
+            'calculation_basis' => $c->calculation_basis?->value ?? CostCalculationBasis::QuantityRate->value,
+            'base_rate' => $c->base_rate !== null ? (string) $c->base_rate : null,
+            'factor' => $c->factor !== null ? (string) $c->factor : null,
+            'factor_reference' => $c->factor_reference,
+            'percent_value' => $c->percent_value !== null ? (string) $c->percent_value : null,
+            'calculated_rate' => $c->calculated_rate !== null ? (string) $c->calculated_rate : null,
+            'derivation_trace' => $c->derivation_trace,
+            'rate_library_id' => $c->rate_library_id,
+            'conversion_snapshot' => $c->conversion_snapshot,
             'sequence' => $c->sequence,
         ];
     }
 
     /**
      * @param  array<string, mixed>  $row
-     * @return array{source_type: ?string, source_id: ?int, description: ?string, unit: ?string}
+     * @return array{source_type: ?string, source_id: ?int, description: ?string, unit: ?string, rate: ?string, rate_library_id: ?int}
      */
-    private function resolveSource(Boq $boq, CostComponentType $type, array $row, int $index): array
+    private function resolveSource(Boq $boq, CostComponentType $type, array $row, int $index, CostRateSource $rateSource): array
     {
+        if ($rateSource === CostRateSource::RateLibrary) {
+            $libraryId = isset($row['rate_library_id']) ? (int) $row['rate_library_id'] : (isset($row['source_id']) ? (int) $row['source_id'] : null);
+            if (! $libraryId) {
+                throw ValidationException::withMessages(["components.{$index}.rate_library_id" => 'Select a rate library entry.']);
+            }
+            $meta = $this->rateLibraryMeta($boq, $libraryId);
+
+            return [
+                'source_type' => CostingRateLibraryEntry::class,
+                'source_id' => $libraryId,
+                'description' => $meta['description'],
+                'unit' => $meta['unit'],
+                'rate' => $meta['rate'],
+                'rate_library_id' => $libraryId,
+            ];
+        }
+
         $sourceId = isset($row['source_id']) && $row['source_id'] !== null && $row['source_id'] !== ''
             ? (int) $row['source_id']
             : null;
@@ -279,10 +388,12 @@ class CostBuildUpService
                 'source_id' => null,
                 'description' => $row['description'] ?? null,
                 'unit' => $row['consumption_unit'] ?? null,
+                'rate' => $row['rate'] ?? null,
+                'rate_library_id' => null,
             ];
         }
 
-        return match ($type) {
+        $resolved = match ($type) {
             CostComponentType::Material => $this->assertMaterial($boq, $sourceId, $index),
             CostComponentType::Labour => $this->assertLabour($boq, $sourceId, $index),
             CostComponentType::Equipment => $this->assertEquipment($boq, $sourceId, $index),
@@ -293,6 +404,8 @@ class CostBuildUpService
                 'unit' => $row['consumption_unit'] ?? null,
             ],
         };
+
+        return $resolved + ['rate' => $row['rate'] ?? null, 'rate_library_id' => null];
     }
 
     /**
@@ -463,6 +576,29 @@ class CostBuildUpService
             'rate_source' => CostRateSource::EquipmentMaster->value,
             'unit' => 'hour',
             'description' => $type->name,
+        ];
+    }
+
+    /**
+     * @return array{rate: string, rate_source: string, unit: ?string, description: ?string}
+     */
+    private function rateLibraryMeta(Boq $boq, ?int $entryId): array
+    {
+        if (! $entryId) {
+            throw ValidationException::withMessages(['rate_library_id' => 'Select a rate library entry.']);
+        }
+
+        $entry = CostingRateLibraryEntry::query()
+            ->whereKey($entryId)
+            ->where('company_id', $boq->company_id)
+            ->where('is_active', true)
+            ->firstOrFail();
+
+        return [
+            'rate' => Decimal::of((string) $entry->rate)->toRate(),
+            'rate_source' => CostRateSource::RateLibrary->value,
+            'unit' => $entry->unit,
+            'description' => $entry->description,
         ];
     }
 }

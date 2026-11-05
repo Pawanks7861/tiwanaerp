@@ -13,6 +13,7 @@ enum CostRateSource: string
     case LatestPo = 'latest_po';
     case LabourMaster = 'labour_master';
     case EquipmentMaster = 'equipment_master';
+    case RateLibrary = 'rate_library';
 
     public function label(): string
     {
@@ -22,6 +23,7 @@ enum CostRateSource: string
             self::LatestPo => 'Latest approved PO',
             self::LabourMaster => 'Labour master',
             self::EquipmentMaster => 'Equipment master',
+            self::RateLibrary => 'Rate library',
         };
     }
 }

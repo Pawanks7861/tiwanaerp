@@ -51,14 +51,20 @@ class DataImportService
 
         $uuid = (string) Str::uuid();
         $stored = $this->reader->storeUpload($file, (int) $this->company->id(), $uuid);
-        $sheet = $this->reader->read($stored['disk'], $stored['path']);
+        $sheetIndex = max(0, (int) ($context['sheet_index'] ?? 0));
+        $sheetNames = $this->reader->sheetNames($stored['disk'], $stored['path']);
+        if ($sheetIndex >= count($sheetNames)) {
+            $sheetIndex = 0;
+        }
+        $context['sheet_index'] = $sheetIndex;
+        $sheet = $this->reader->read($stored['disk'], $stored['path'], $sheetIndex);
         $mapping = $this->mapper->suggest($definition, $sheet['headers']);
 
         $import = new DataImport;
         $import->fill([
             'uuid' => $uuid,
             'project_id' => $project?->id,
-            'context' => $context !== [] ? $context : null,
+            'context' => $context,
             'module' => $module,
             'mode' => $definition->modes()[0]->value,
             'status' => ImportStatus::Uploaded,
@@ -79,6 +85,53 @@ class DataImportService
             'fields' => $definition->fieldsPayload(),
             'modes' => $definition->modeOptions(),
             'instructions' => $definition->instructions(),
+            'sheets' => $sheetNames,
+        ];
+    }
+
+    /**
+     * @return array{import: DataImport, headers: list<string>, mapping: array<string, string|null>, sheets: list<string>}
+     */
+    public function selectSheet(DataImport $import, int $sheetIndex, User $user): array
+    {
+        $definition = $this->definition($import->module);
+        if (! $definition->authorize($user, $import->project)) {
+            abort(403);
+        }
+
+        $sheetNames = $this->reader->sheetNames($import->disk, $import->path);
+        if ($sheetIndex < 0 || $sheetIndex >= count($sheetNames)) {
+            throw ValidationException::withMessages(['sheet_index' => 'Choose a valid worksheet.']);
+        }
+
+        $context = $import->context ?? [];
+        $context['sheet_index'] = $sheetIndex;
+        $sheet = $this->reader->read($import->disk, $import->path, $sheetIndex);
+        $mapping = $this->mapper->suggest($definition, $sheet['headers']);
+
+        $import->forceFill([
+            'context' => $context,
+            'mapping' => $mapping,
+            'status' => ImportStatus::Uploaded,
+            'validation_path' => null,
+            'error_report_path' => null,
+            'summary' => null,
+            'total_rows' => count($sheet['rows']),
+            'valid_rows' => null,
+            'invalid_rows' => null,
+            'duplicate_rows' => null,
+            'create_count' => null,
+            'update_count' => null,
+            'skip_count' => null,
+            'fail_count' => null,
+            'failure_message' => null,
+        ])->save();
+
+        return [
+            'import' => $import->fresh(),
+            'headers' => $sheet['headers'],
+            'mapping' => $mapping,
+            'sheets' => $sheetNames,
         ];
     }
 
@@ -123,8 +176,8 @@ class DataImportService
     public function runValidation(DataImport $import): DataImport
     {
         $definition = $this->definition($import->module);
-        $sheet = $this->reader->read($import->disk, $import->path);
-        $context = new ImportContext($import->company, $import->uploader, $import->project, $import->context ?? []);
+        $sheet = $this->reader->read($import->disk, $import->path, $this->sheetIndex($import));
+        $context = $this->importContext($import);
         $mode = $import->mode instanceof ImportMode ? $import->mode : ImportMode::from($import->mode);
 
         $rows = [];
@@ -279,7 +332,7 @@ class DataImportService
     {
         $definition = $this->definition($import->module);
         $payload = $this->readJson($import, $import->validation_path);
-        $context = new ImportContext($import->company, $import->uploader, $import->project, $import->context ?? []);
+        $context = $this->importContext($import);
         $mode = $import->mode instanceof ImportMode ? $import->mode : ImportMode::from($import->mode);
 
         $created = 0;
@@ -436,5 +489,17 @@ class DataImportService
     private function directory(DataImport $import): string
     {
         return trim((string) config('imports.path', 'imports'), '/')."/{$import->company_id}/{$import->uuid}";
+    }
+
+    private function sheetIndex(DataImport $import): int
+    {
+        return max(0, (int) (($import->context ?? [])['sheet_index'] ?? 0));
+    }
+
+    private function importContext(DataImport $import): ImportContext
+    {
+        $meta = array_merge($import->context ?? [], ['import_id' => $import->id]);
+
+        return new ImportContext($import->company, $import->uploader, $import->project, $meta);
     }
 }

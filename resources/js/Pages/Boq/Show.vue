@@ -19,7 +19,7 @@ import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { boqLine, sum } from '@/lib/boqCalc';
 import { formatDate, formatDateTime, formatMoney, formatPercent, formatQty, formatRate } from '@/lib/format';
-import { Link, router, useForm } from '@inertiajs/vue3';
+import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const props = defineProps({
@@ -35,9 +35,17 @@ const props = defineProps({
     drawings: { type: Array, default: () => [] },
     approved_drawings: { type: Array, default: () => [] },
     has_newer_approved_revision: { type: Boolean, default: false },
+    source_import: { type: Object, default: null },
 });
 
 const COST_FIELDS = ['material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent'];
+const DEFAULT_SIMPLE_MATERIALS = [
+    { material_name: 'Cement', quantity: '', unit: 'Bag', rate: '' },
+    { material_name: 'Sand', quantity: '', unit: 'Cum', rate: '' },
+    { material_name: 'Aggregate', quantity: '', unit: 'Cum', rate: '' },
+];
+const page = usePage();
+const advanced = computed(() => page.props.features?.advanced_boq_calculations === true);
 const editable = computed(() => props.can.update);
 const viewingDrawing = ref(null);
 const showDrawings = ref(false);
@@ -61,9 +69,68 @@ function saveDrawings() {
     });
 }
 const costs = computed(() => props.can.view_costs);
+/** Full cost-build columns/editor — only when Advanced BOQ Calculations is enabled. */
+const detailedCosts = computed(() => costs.value && advanced.value);
+const showSimpleMaterials = computed(() => costs.value && !advanced.value);
+
+let tempId = 0;
+
+function blankSimpleMaterial(overrides = {}) {
+    return {
+        _key: `m${++tempId}`,
+        material_id: null,
+        material_name: '',
+        quantity: '',
+        unit: '',
+        rate: '',
+        ...overrides,
+    };
+}
+
+function mapSimpleMaterials(item) {
+    if (item.simple_materials_initialized) {
+        return (item.simple_materials || []).map((m) => blankSimpleMaterial({
+            material_id: m.material_id ?? null,
+            material_name: m.material_name ?? '',
+            quantity: m.quantity ?? '',
+            unit: m.unit ?? '',
+            rate: m.rate ?? '',
+        }));
+    }
+
+    return DEFAULT_SIMPLE_MATERIALS.map((m) => blankSimpleMaterial({ ...m }));
+}
+
+function materialAmount(row) {
+    const qty = Number(row.quantity);
+    const rate = Number(row.rate);
+    if (!Number.isFinite(qty) || !Number.isFinite(rate)) return 0;
+    return qty * rate;
+}
+
+function materialTotals(row) {
+    const lines = row.simple_materials || [];
+    const perUnit = lines.reduce((sum, line) => sum + materialAmount(line), 0);
+    const qty = Number(row.quantity);
+    const estimated = Number.isFinite(qty) ? perUnit * qty : 0;
+    return { perUnit, estimated };
+}
+
+function markMaterialsDirty(row) {
+    row.simple_materials_dirty = true;
+}
+
+function addSimpleMaterial(row) {
+    row.simple_materials.push(blankSimpleMaterial());
+    markMaterialsDirty(row);
+}
+
+function removeSimpleMaterial(row, index) {
+    row.simple_materials.splice(index, 1);
+    markMaterialsDirty(row);
+}
 
 // ---- Rows (local editable copy; the server recalculates everything on save) -------------------
-let tempId = 0;
 function toRow(item) {
     const row = {
         _key: item.id ? `i${item.id}` : `n${++tempId}`,
@@ -77,8 +144,11 @@ function toRow(item) {
         quantity: item.quantity ?? null,
         client_rate: item.client_rate ?? null,
         rate_analysis_id: item.rate_analysis_id ?? null,
+        simple_materials_initialized: !!item.simple_materials_initialized,
+        simple_materials_dirty: false,
+        simple_materials: costs.value ? mapSimpleMaterials(item) : [],
     };
-    if (costs.value) {
+    if (detailedCosts.value) {
         COST_FIELDS.forEach((f) => (row[f] = item[f] ?? null));
         // Client rate equal to the margin-based selling rate is shown as "auto".
         if (item.id && item.client_rate === item.selling_rate) {
@@ -196,9 +266,25 @@ function save() {
     payloadKeys.value = ordered.map((r) => r._key);
     const payload = {
         rows: ordered.map((r, index) => {
-            const { _key, ...data } = r;
-            if (!costs.value) {
+            const {
+                _key,
+                simple_materials,
+                simple_materials_dirty,
+                simple_materials_initialized,
+                ...data
+            } = r;
+            if (!detailedCosts.value) {
                 delete data.rate_analysis_id;
+                COST_FIELDS.forEach((f) => delete data[f]);
+            }
+            if (showSimpleMaterials.value && (simple_materials_dirty || simple_materials_initialized)) {
+                data.simple_materials = (simple_materials || []).map((m) => ({
+                    material_id: m.material_id || null,
+                    material_name: m.material_name,
+                    quantity: m.quantity === '' || m.quantity == null ? '0' : String(m.quantity),
+                    unit: m.unit,
+                    rate: m.rate === '' || m.rate == null ? '0' : String(m.rate),
+                }));
             }
 
             return { ...data, sort_order: index + 1 };
@@ -349,7 +435,7 @@ const lockedReason = computed(() => {
         revised: 'Superseded by a later revision. This version is kept for history.',
     }[props.boq.status] ?? null;
 });
-const colCount = computed(() => 8 + (costs.value ? 7 : 0));
+const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
 </script>
 
 <template>
@@ -385,12 +471,12 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
 
                     <div class="flex flex-col gap-3 lg:items-end">
                         <div class="flex gap-6 text-right">
-                            <div v-if="costs">
+                            <div v-if="detailedCosts">
                                 <p class="text-xs text-slate-500 uppercase">Cost</p>
                                 <p class="text-base font-semibold text-slate-900 tabular">{{ formatMoney(totals.cost) }}</p>
                             </div>
                             <div>
-                                <p class="text-xs text-slate-500 uppercase">Client value</p>
+                                <p class="text-xs text-slate-500 uppercase">BOQ value</p>
                                 <p class="text-base font-semibold text-slate-900 tabular">{{ formatMoney(totals.client) }}</p>
                             </div>
                         </div>
@@ -407,8 +493,8 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                             </template>
                             <AppButton v-if="approval?.can_cancel" size="sm" variant="secondary" @click="openApproval('cancel')">Withdraw</AppButton>
                             <AppButton v-if="can.revise" size="sm" variant="secondary" @click="confirming = 'revise'">Create revision</AppButton>
-                            <ImportTemplateDownload v-if="can.import" module="boq.items" :project-id="project.id" size="sm" />
-                            <AppButton v-if="can.import && !dirty" size="sm" variant="secondary" @click="showImport = true">Import</AppButton>
+                            <AppButton v-if="can.import && !dirty" size="sm" icon="folder" @click="showImport = true">Import Excel/CSV</AppButton>
+                            <ImportTemplateDownload v-if="can.import" module="boq.items" :project-id="project.id" size="sm" label="Download template" />
                             <a v-if="can.export" :href="route('projects.boqs.export', [project.id, boq.id])" class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">
                                 <Icon name="download" :size="14" /> Export
                             </a>
@@ -427,6 +513,32 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
             <div v-if="has_newer_approved_revision" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 A newer approved drawing revision is available. Review whether this BOQ requires an update.
             </div>
+
+            <AppCard v-if="source_import" title="Source files" subtitle="Spreadsheet used to populate or update this BOQ.">
+                <dl class="grid gap-3 text-sm sm:grid-cols-2">
+                    <div>
+                        <dt class="text-xs font-medium text-slate-500 uppercase">File</dt>
+                        <dd class="mt-0.5 text-slate-900">{{ source_import.original_filename }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium text-slate-500 uppercase">Uploaded</dt>
+                        <dd class="mt-0.5 text-slate-800">{{ formatDateTime(source_import.created_at) }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium text-slate-500 uppercase">By</dt>
+                        <dd class="mt-0.5 text-slate-800">{{ source_import.uploaded_by?.name ?? '—' }}</dd>
+                    </div>
+                    <div class="flex items-end">
+                        <a
+                            v-if="source_import.download_url"
+                            :href="source_import.download_url"
+                            class="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline"
+                        >
+                            <Icon name="download" :size="16" /> Download file
+                        </a>
+                    </div>
+                </dl>
+            </AppCard>
 
             <AppCard title="Approved Drawings" subtitle="Source drawings used to prepare this BOQ. Later approvals do not change these links or quantities." :padded="false">
                 <template v-if="editable" #actions>
@@ -507,7 +619,7 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                     v-if="!topSections.length"
                     icon="document"
                     title="No sections yet"
-                    :description="editable ? 'Add a section (e.g. Civil Works), then add items to it, or import an Excel file.' : 'This BOQ has no lines.'"
+                    :description="editable ? 'Import Excel/CSV to add many lines at once, or add a section and items manually.' : 'This BOQ has no lines yet.'"
                 />
 
                 <!-- Desktop grid -->
@@ -520,7 +632,7 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                                 <th class="min-w-[16rem] px-2 py-2 text-left">Item</th>
                                 <th class="px-2 py-2 text-left">Unit</th>
                                 <th class="px-2 py-2 text-right">Qty</th>
-                                <template v-if="costs">
+                                <template v-if="detailedCosts">
                                     <th class="px-2 py-2 text-right">Material</th>
                                     <th class="px-2 py-2 text-right">Labour</th>
                                     <th class="px-2 py-2 text-right">Equipment</th>
@@ -529,7 +641,7 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                                     <th class="px-2 py-2 text-right">Cost amt</th>
                                     <th class="px-2 py-2 text-right">Margin %</th>
                                 </template>
-                                <th class="px-2 py-2 text-right">Client rate</th>
+                                <th class="px-2 py-2 text-right">Rate</th>
                                 <th class="px-2 py-2 text-right">Amount</th>
                                 <th class="px-2 py-2"><span class="sr-only">Actions</span></th>
                             </tr>
@@ -567,7 +679,7 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                                                 </select>
                                             </td>
                                             <td class="px-1 py-1"><CellDecimal v-model="row.quantity" :error="!!cellError(row, 'quantity')" /></td>
-                                            <template v-if="costs">
+                                            <template v-if="detailedCosts">
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.material_rate" :error="!!cellError(row, 'material_rate')" /></td>
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.labour_rate" :error="!!cellError(row, 'labour_rate')" /></td>
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.equipment_rate" :error="!!cellError(row, 'equipment_rate')" /></td>
@@ -577,7 +689,7 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.margin_percent" allow-negative :error="!!cellError(row, 'margin_percent')" /></td>
                                             </template>
                                             <td class="px-1 py-1">
-                                                <CellDecimal v-model="row.client_rate" :placeholder="costs ? calc[row._key].selling_rate : null" :error="!!cellError(row, 'client_rate')" />
+                                                <CellDecimal v-model="row.client_rate" :placeholder="detailedCosts ? calc[row._key].selling_rate : null" :error="!!cellError(row, 'client_rate')" />
                                             </td>
                                         </template>
                                         <template v-else>
@@ -588,7 +700,7 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                                             </td>
                                             <td class="px-2 py-1.5">{{ unitLabel(row.unit_id) }}</td>
                                             <td class="px-2 py-1.5 text-right tabular">{{ formatQty(row.quantity) }}</td>
-                                            <template v-if="costs">
+                                            <template v-if="detailedCosts">
                                                 <td class="px-2 py-1.5 text-right tabular">{{ formatRate(row.material_rate) }}</td>
                                                 <td class="px-2 py-1.5 text-right tabular">{{ formatRate(row.labour_rate) }}</td>
                                                 <td class="px-2 py-1.5 text-right tabular">{{ formatRate(row.equipment_rate) }}</td>
@@ -601,15 +713,6 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                                         </template>
                                         <td class="px-2 py-1.5 text-right font-medium text-slate-900 tabular">{{ formatMoney(calc[row._key].client_amount) }}</td>
                                         <td class="px-1 py-1 text-right whitespace-nowrap">
-                                            <Link
-                                                v-if="row.id"
-                                                :href="route('projects.boqs.items.workspace', [project.id, boq.id, row.id])"
-                                                class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-700"
-                                                aria-label="Open item workspace"
-                                                title="Measurements & details"
-                                            >
-                                                <Icon name="document" :size="14" />
-                                            </Link>
                                             <button type="button" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" :aria-label="editable ? 'Edit details' : 'View details'" @click="editingRow = row">
                                                 <Icon :name="editable ? 'pencil' : 'info'" :size="14" />
                                             </button>
@@ -625,8 +728,8 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                         </tbody>
                         <tfoot class="sticky bottom-0 bg-white shadow-[0_-1px_0_0_rgb(226_232_240)]">
                             <tr class="font-semibold text-slate-900">
-                                <td :colspan="costs ? 10 : 6" class="px-2 py-2 text-right text-[11px] uppercase">Total</td>
-                                <template v-if="costs">
+                                <td :colspan="detailedCosts ? 10 : 6" class="px-2 py-2 text-right text-[11px] uppercase">Total</td>
+                                <template v-if="detailedCosts">
                                     <td class="px-2 py-2 text-right tabular">{{ formatMoney(totals.cost) }}</td>
                                     <td colspan="2"></td>
                                 </template>
@@ -694,7 +797,7 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                         <SearchSelect v-model="editingRow.unit_id" label="Unit" required :options="unitOptions" :error="cellError(editingRow, 'unit_id')" />
                         <DecimalInput v-model="editingRow.quantity" label="Quantity" required :decimals="4" :error="cellError(editingRow, 'quantity')" />
                     </div>
-                    <template v-if="costs">
+                    <template v-if="detailedCosts">
                         <SearchSelect
                             v-if="analyses.length"
                             :model-value="editingRow.rate_analysis_id"
@@ -711,7 +814,7 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                             <FormInput v-model="editingRow.margin_percent" label="Margin %" inputmode="decimal" :error="cellError(editingRow, 'margin_percent')" />
                             <DecimalInput
                                 v-model="editingRow.client_rate"
-                                label="Client rate"
+                                label="Rate"
                                 :decimals="4"
                                 prefix="₹"
                                 :help="`Leave empty to use cost + margin (${formatRate(calc[editingRow._key].selling_rate)})`"
@@ -719,7 +822,7 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                             />
                         </div>
                     </template>
-                    <DecimalInput v-else v-model="editingRow.client_rate" label="Client rate" :decimals="4" prefix="₹" :error="cellError(editingRow, 'client_rate')" />
+                    <DecimalInput v-else v-model="editingRow.client_rate" label="Rate" :decimals="4" prefix="₹" :error="cellError(editingRow, 'client_rate')" />
                 </template>
 
                 <dl class="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-slate-50 p-3 text-sm">
@@ -728,14 +831,161 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                         <dt class="text-slate-500">HSN/SAC</dt><dd class="text-right">{{ editingRow.hsn_sac || '—' }}</dd>
                         <dt class="text-slate-500">Quantity</dt><dd class="text-right tabular">{{ formatQty(editingRow.quantity) }} {{ unitLabel(editingRow.unit_id) }}</dd>
                     </template>
-                    <template v-if="costs">
+                    <template v-if="detailedCosts">
                         <dt class="text-slate-500">Cost rate</dt><dd class="text-right tabular">{{ formatRate(calc[editingRow._key].cost_rate) }}</dd>
                         <dt class="text-slate-500">Cost amount</dt><dd class="text-right tabular">{{ formatMoney(calc[editingRow._key].cost_amount) }}</dd>
                         <dt class="text-slate-500">Selling rate</dt><dd class="text-right tabular">{{ formatRate(calc[editingRow._key].selling_rate) }}</dd>
                     </template>
-                    <dt class="text-slate-500">Client rate</dt><dd class="text-right tabular">{{ formatRate(calc[editingRow._key].client_rate) }}</dd>
-                    <dt class="font-medium text-slate-700">Client amount</dt><dd class="text-right font-semibold tabular">{{ formatMoney(calc[editingRow._key].client_amount) }}</dd>
+                    <dt class="text-slate-500">Rate</dt><dd class="text-right tabular">{{ formatRate(calc[editingRow._key].client_rate) }}</dd>
+                    <dt class="font-medium text-slate-700">Amount</dt><dd class="text-right font-semibold tabular">{{ formatMoney(calc[editingRow._key].client_amount) }}</dd>
+                    <template v-if="showSimpleMaterials && editingRow.simple_materials_initialized && editingRow.simple_materials?.length">
+                        <dt class="text-slate-500">Material Cost / {{ unitLabel(editingRow.unit_id) || 'unit' }}</dt>
+                        <dd class="text-right tabular">{{ formatMoney(materialTotals(editingRow).perUnit) }}</dd>
+                        <dt class="text-slate-500">Est. Material Cost</dt>
+                        <dd class="text-right tabular">{{ formatMoney(materialTotals(editingRow).estimated) }}</dd>
+                    </template>
                 </dl>
+
+                <div v-if="showSimpleMaterials" class="space-y-3 rounded-xl border border-line p-3">
+                    <div>
+                        <h3 class="text-sm font-semibold text-slate-900">Material</h3>
+                        <p class="mt-0.5 text-xs text-slate-500">
+                            Enter material required for 1 {{ unitLabel(editingRow.unit_id) || 'BOQ unit' }} of this BOQ item.
+                            Internal estimate only — does not change the BOQ Rate.
+                        </p>
+                    </div>
+
+                    <div class="hidden space-y-2 sm:block">
+                        <div class="grid grid-cols-[minmax(0,1.4fr)_4.5rem_4.5rem_5.5rem_5.5rem_1.75rem] gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            <span>Material</span>
+                            <span class="text-right">Qty</span>
+                            <span>Unit</span>
+                            <span class="text-right">Rate</span>
+                            <span class="text-right">Amount</span>
+                            <span></span>
+                        </div>
+                        <div
+                            v-for="(mat, mi) in editingRow.simple_materials"
+                            :key="mat._key"
+                            class="grid grid-cols-[minmax(0,1.4fr)_4.5rem_4.5rem_5.5rem_5.5rem_1.75rem] items-center gap-2"
+                        >
+                            <input
+                                v-model="mat.material_name"
+                                class="w-full rounded border-slate-200 px-2 py-1.5 text-sm"
+                                :disabled="!editable"
+                                placeholder="Material name"
+                                @input="markMaterialsDirty(editingRow)"
+                            />
+                            <input
+                                v-model="mat.quantity"
+                                class="w-full rounded border-slate-200 px-2 py-1.5 text-right text-sm tabular"
+                                :disabled="!editable"
+                                inputmode="decimal"
+                                @input="markMaterialsDirty(editingRow)"
+                            />
+                            <input
+                                v-model="mat.unit"
+                                class="w-full rounded border-slate-200 px-2 py-1.5 text-sm"
+                                :disabled="!editable"
+                                placeholder="Bag"
+                                @input="markMaterialsDirty(editingRow)"
+                            />
+                            <input
+                                v-model="mat.rate"
+                                class="w-full rounded border-slate-200 px-2 py-1.5 text-right text-sm tabular"
+                                :disabled="!editable"
+                                inputmode="decimal"
+                                @input="markMaterialsDirty(editingRow)"
+                            />
+                            <div class="text-right text-sm font-medium tabular text-slate-800">{{ formatMoney(materialAmount(mat)) }}</div>
+                            <button
+                                v-if="editable"
+                                type="button"
+                                class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                                aria-label="Remove material"
+                                @click="removeSimpleMaterial(editingRow, mi)"
+                            >
+                                <Icon name="trash" :size="14" />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2 sm:hidden">
+                        <div
+                            v-for="(mat, mi) in editingRow.simple_materials"
+                            :key="mat._key"
+                            class="rounded-lg border border-line p-3"
+                        >
+                            <input
+                                v-model="mat.material_name"
+                                class="mb-2 w-full rounded border-slate-200 px-2 py-1.5 text-sm font-medium"
+                                :disabled="!editable"
+                                placeholder="Material name"
+                                @input="markMaterialsDirty(editingRow)"
+                            />
+                            <div class="grid grid-cols-2 gap-2">
+                                <input
+                                    v-model="mat.quantity"
+                                    class="rounded border-slate-200 px-2 py-1.5 text-sm tabular"
+                                    :disabled="!editable"
+                                    placeholder="Qty"
+                                    inputmode="decimal"
+                                    @input="markMaterialsDirty(editingRow)"
+                                />
+                                <input
+                                    v-model="mat.unit"
+                                    class="rounded border-slate-200 px-2 py-1.5 text-sm"
+                                    :disabled="!editable"
+                                    placeholder="Unit"
+                                    @input="markMaterialsDirty(editingRow)"
+                                />
+                                <input
+                                    v-model="mat.rate"
+                                    class="rounded border-slate-200 px-2 py-1.5 text-sm tabular"
+                                    :disabled="!editable"
+                                    placeholder="Rate"
+                                    inputmode="decimal"
+                                    @input="markMaterialsDirty(editingRow)"
+                                />
+                                <div class="flex items-center justify-between rounded bg-slate-50 px-2 text-sm">
+                                    <span class="text-slate-500">Amt</span>
+                                    <span class="font-medium tabular">{{ formatMoney(materialAmount(mat)) }}</span>
+                                </div>
+                            </div>
+                            <button
+                                v-if="editable"
+                                type="button"
+                                class="mt-2 text-xs font-medium text-red-600"
+                                @click="removeSimpleMaterial(editingRow, mi)"
+                            >
+                                Remove
+                            </button>
+                        </div>
+                    </div>
+
+                    <AppButton
+                        v-if="editable"
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        icon="plus"
+                        @click="addSimpleMaterial(editingRow)"
+                    >
+                        Add Material
+                    </AppButton>
+
+                    <div class="rounded-lg bg-slate-50 p-3 text-sm">
+                        <div class="flex items-center justify-between gap-3">
+                            <span class="text-slate-600">Material Cost / {{ unitLabel(editingRow.unit_id) || 'unit' }}</span>
+                            <span class="font-semibold tabular text-slate-900">{{ formatMoney(materialTotals(editingRow).perUnit) }}</span>
+                        </div>
+                        <div class="mt-1 flex items-center justify-between gap-3 text-slate-600">
+                            <span>Estimated Material Cost for {{ formatQty(editingRow.quantity) }} {{ unitLabel(editingRow.unit_id) || 'units' }}</span>
+                            <span class="font-semibold tabular text-slate-900">{{ formatMoney(materialTotals(editingRow).estimated) }}</span>
+                        </div>
+                    </div>
+                </div>
+
                 <p v-if="!editable && editingRow.description" class="text-sm whitespace-pre-line text-slate-600">{{ editingRow.description }}</p>
             </div>
             <template #footer>

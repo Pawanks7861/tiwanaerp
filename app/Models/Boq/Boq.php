@@ -10,6 +10,7 @@ use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\HasApprovals;
 use App\Models\Documents\DrawingRevision;
+use App\Models\Imports\DataImport;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Boq\BoqService;
@@ -131,6 +132,14 @@ class Boq extends Model implements Approvable
     public function drawingRevisions(): BelongsToMany
     {
         return $this->belongsToMany(DrawingRevision::class, 'boq_drawing_revisions')->withTimestamps();
+    }
+
+    /**
+     * @return BelongsTo<DataImport, $this>
+     */
+    public function sourceImport(): BelongsTo
+    {
+        return $this->belongsTo(DataImport::class, 'source_import_id');
     }
 
     public function isEditable(): bool

@@ -2,6 +2,7 @@
 
 namespace App\Services\Boq;
 
+use App\Enums\Boq\CircleConstantMode;
 use App\Enums\Boq\MeasurementFormulaType;
 use App\Enums\Boq\MeasurementSheetStatus;
 use App\Enums\Boq\QuantitySource;
@@ -73,9 +74,16 @@ class MeasurementSheetService
     /**
      * @param  list<array<string, mixed>>  $lines
      */
-    public function saveLines(BoqMeasurementSheet $sheet, array $lines, User $user, ?int $drawingRevisionId = null, ?string $title = null): BoqMeasurementSheet
-    {
-        return DB::transaction(function () use ($sheet, $lines, $user, $drawingRevisionId, $title) {
+    public function saveLines(
+        BoqMeasurementSheet $sheet,
+        array $lines,
+        User $user,
+        ?int $drawingRevisionId = null,
+        ?string $title = null,
+        ?string $circleConstantMode = null,
+        ?string $circleConstantValue = null,
+    ): BoqMeasurementSheet {
+        return DB::transaction(function () use ($sheet, $lines, $user, $drawingRevisionId, $title, $circleConstantMode, $circleConstantValue) {
             $locked = BoqMeasurementSheet::query()->whereKey($sheet->id)->lockForUpdate()->firstOrFail();
             if (! $locked->isEditable()) {
                 throw ValidationException::withMessages(['sheet' => 'Only draft or rejected measurement sheets can be edited.']);
@@ -84,9 +92,25 @@ class MeasurementSheetService
             $boq = Boq::query()->whereKey($locked->boq_id)->lockForUpdate()->firstOrFail();
             $boq->assertEditable();
 
+            $mode = CircleConstantMode::tryFrom((string) ($circleConstantMode ?? $locked->circle_constant_mode?->value ?? CircleConstantMode::MathematicalPi->value))
+                ?? CircleConstantMode::MathematicalPi;
+            $resolved = MeasurementCalculator::resolveCircleConstant([
+                'circle_constant_mode' => $mode->value,
+                'circle_constant_value' => $circleConstantValue ?? $locked->circle_constant_value,
+            ]);
+            $resolvedMode = $resolved['mode'];
+            $resolvedConstant = $resolved['coefficient'];
+
             $locked->forceFill([
                 'title' => $title !== null && trim($title) !== '' ? trim($title) : $locked->title,
                 'drawing_revision_id' => $this->validatedRevisionId($boq, $drawingRevisionId),
+                'circle_constant_mode' => $resolvedMode,
+                'circle_constant_value' => $mode === CircleConstantMode::Custom ? $circleConstantValue : null,
+                'calculation_profile_snapshot' => [
+                    'circle_constant_mode' => $resolvedMode,
+                    'circle_constant_value' => $resolvedConstant,
+                    'formula_version' => $resolved['formula_version'],
+                ],
                 'updated_by' => $user->id,
                 'status' => MeasurementSheetStatus::Draft,
                 'rejected_by' => null,
@@ -98,7 +122,10 @@ class MeasurementSheetService
 
             $qtyValues = [];
             foreach (array_values($lines) as $i => $row) {
-                $calc = MeasurementCalculator::line($row);
+                $calc = MeasurementCalculator::line(array_merge($row, [
+                    'circle_constant_mode' => $resolvedMode,
+                    'circle_constant_value' => $mode === CircleConstantMode::Custom ? $circleConstantValue : null,
+                ]));
                 $line = new BoqMeasurementLine;
                 $line->forceFill([
                     'boq_measurement_sheet_id' => $locked->id,
@@ -298,6 +325,9 @@ class MeasurementSheetService
                 'description' => $approved->description,
                 'status' => MeasurementSheetStatus::Draft,
                 'total_quantity' => $approved->total_quantity,
+                'circle_constant_mode' => $approved->circle_constant_mode,
+                'circle_constant_value' => $approved->circle_constant_value,
+                'calculation_profile_snapshot' => $approved->calculation_profile_snapshot,
                 'created_by' => $user->id,
                 'updated_by' => $user->id,
             ])->save();

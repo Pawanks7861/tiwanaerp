@@ -4,6 +4,8 @@ namespace App\Services\Boq;
 
 use App\Enums\Boq\BoqStatus;
 use App\Enums\Boq\CostComponentType;
+use App\Enums\Boq\MaterialRecipeStatus;
+use App\Models\Boq\MaterialRecipeTemplate;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqCostComponent;
 use App\Models\Boq\BoqItem;
@@ -33,7 +35,8 @@ class MaterialNormService
      *   locked: bool,
      *   boq_qty: string,
      *   boq_unit: ?string,
-     *   cost_materials: list<array<string, mixed>>
+     *   cost_materials: list<array<string, mixed>>,
+     *   recipes: list<array<string, mixed>>
      * }
      */
     public function workspacePayload(BoqItem $item): array
@@ -66,12 +69,28 @@ class MaterialNormService
                 'wastage_percent' => $c->wastage_percent !== null ? (string) $c->wastage_percent : '0.0000',
             ])->all();
 
+        $recipes = MaterialRecipeTemplate::query()
+            ->where('status', MaterialRecipeStatus::Active)
+            ->with(['lines' => fn ($q) => $q->orderBy('sequence')])
+            ->orderBy('code')
+            ->orderByDesc('version')
+            ->get()
+            ->map(fn (MaterialRecipeTemplate $r) => [
+                'id' => $r->id,
+                'code' => $r->code,
+                'name' => $r->name,
+                'version' => $r->version,
+                'project_id' => $r->project_id,
+                'line_count' => $r->lines->count(),
+            ])->all();
+
         return [
             'norms' => $rows,
             'locked' => ! $item->boq->isEditable(),
             'boq_qty' => $effectiveQty,
             'boq_unit' => $item->unit?->symbol,
             'cost_materials' => $costMaterials,
+            'recipes' => $recipes,
         ];
     }
 
@@ -273,6 +292,9 @@ class MaterialNormService
             'wastage_qty' => $calc['wastage_qty'],
             'required_qty' => $calc['required_qty'],
             'notes' => $n->notes,
+            'recipe_template_id' => $n->recipe_template_id,
+            'recipe_version' => $n->recipe_version,
+            'recipe_code' => $n->recipe_code,
             'sequence' => $n->sequence,
         ];
     }

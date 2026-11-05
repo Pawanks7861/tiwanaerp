@@ -68,7 +68,20 @@ function confirmAction() {
 
 <template>
     <ProjectLayout :project="project" active="boq" title="BOQ">
-        <AppCard title="Bills of quantities" subtitle="Each BOQ is versioned. Approved versions are locked; changes go through a revision." :padded="false">
+        <AppCard
+            v-if="!boqs.length"
+            title="BOQ"
+            subtitle="Prepare quantities in Excel, then import the final sheet into Tiwana ERP for review, approval, and project control."
+        >
+            <div class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+                <AppButton v-if="can.create" icon="plus" @click="openCreate">Create BOQ</AppButton>
+                <p class="text-sm text-slate-600">
+                    After creating a draft BOQ, use <span class="font-medium text-slate-800">Import Excel/CSV</span> on the BOQ page. Approved drawings are still required when your company enforces them.
+                </p>
+            </div>
+        </AppCard>
+
+        <AppCard v-else title="BOQ" subtitle="Each BOQ is versioned. Approved versions are locked; later changes use Variations." :padded="false">
             <template #actions>
                 <AppButton v-if="can.create" size="sm" icon="plus" @click="openCreate">New BOQ</AppButton>
             </template>
@@ -85,7 +98,7 @@ function confirmAction() {
                 :row-href="(row) => route('projects.boqs.show', [project.id, row.id])"
                 empty-icon="document"
                 empty-title="No BOQs yet"
-                empty-description="Create a BOQ and add its sections and items, or import them from Excel."
+                empty-description="Create a BOQ, then import Excel/CSV."
             >
                 <template #cell-boq_number="{ row }">
                     <div class="font-medium text-slate-900">

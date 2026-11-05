@@ -18,6 +18,7 @@ const props = defineProps({
     measurement: { type: Object, required: true },
     location_breakdown: { type: Array, default: () => [] },
     formula_types: { type: Array, required: true },
+    circle_constant_modes: { type: Array, default: () => [] },
     quantity_sources: { type: Array, required: true },
     statuses: { type: Array, required: true },
     drawing_revisions: { type: Array, default: () => [] },
@@ -25,33 +26,28 @@ const props = defineProps({
     cost_variance: { type: Object, default: null },
     cost_component_types: { type: Array, default: () => [] },
     cost_rate_sources: { type: Array, default: () => [] },
+    cost_calculation_bases: { type: Array, default: () => [] },
     cost_masters: { type: Object, default: null },
     material_norms: { type: Object, default: null },
     material_options: { type: Array, default: () => [] },
     item_procurement: { type: Array, default: null },
     bbs_workspace: { type: Object, default: null },
     can: { type: Object, required: true },
+    advanced_boq_calculations: { type: Boolean, default: false },
 });
 
-const tab = ref(
-    props.bbs_workspace ? 'bbs'
-        : (props.material_norms ? 'materials'
-            : (props.cost_build_up ? 'cost'
-                : (props.item_procurement ? 'procurement' : 'measurements'))),
-);
+const advanced = computed(() => props.advanced_boq_calculations === true);
+
+const tab = ref('details');
+
 const tabs = computed(() => [
     { key: 'details', label: 'Details' },
-    { key: 'measurements', label: 'Measurements' },
-    { key: 'cost', label: 'Cost Build-Up', disabled: !props.can.view_costs },
-    { key: 'materials', label: 'Materials', disabled: !props.can.view_material_requirements },
-    { key: 'bbs', label: 'BBS', disabled: !props.can.view_bbs },
-    { key: 'planning', label: 'Planning', disabled: true },
-    { key: 'procurement', label: 'Procurement', disabled: !props.can.view_material_requirements },
-    { key: 'progress', label: 'Progress', disabled: true },
-    { key: 'billing', label: 'Billing', disabled: true },
-    { key: 'reconciliation', label: 'Reconciliation', disabled: true },
-    { key: 'history', label: 'History', disabled: true },
-].map((t) => ({ ...t, href: undefined })));
+    advanced.value && { key: 'measurements', label: 'Measurements' },
+    advanced.value && props.can.view_costs && { key: 'cost', label: 'Cost Build-Up' },
+    advanced.value && props.can.view_material_requirements && { key: 'materials', label: 'Materials' },
+    advanced.value && props.can.view_bbs && { key: 'bbs', label: 'BBS' },
+    props.can.view_material_requirements && { key: 'procurement', label: 'Procurement' },
+].filter(Boolean).map((t) => ({ ...t, href: undefined })));
 
 const showDrawingViewer = ref(false);
 const rejectBbsReason = ref('');
@@ -87,6 +83,8 @@ function blankLine() {
 const measureForm = useForm({
     title: props.measurement.title,
     drawing_revision_id: props.measurement.drawing_revision_id,
+    circle_constant_mode: props.measurement.circle_constant_mode || 'mathematical_pi',
+    circle_constant_value: props.measurement.circle_constant_value || '',
     lines: props.measurement.lines.length
         ? props.measurement.lines.map((l) => ({ ...l }))
         : [blankLine()],
@@ -95,6 +93,8 @@ const measureForm = useForm({
 watch(() => props.measurement, (m) => {
     measureForm.title = m.title;
     measureForm.drawing_revision_id = m.drawing_revision_id;
+    measureForm.circle_constant_mode = m.circle_constant_mode || 'mathematical_pi';
+    measureForm.circle_constant_value = m.circle_constant_value || '';
     measureForm.lines = m.lines.length ? m.lines.map((l) => ({ ...l })) : [blankLine()];
     measureForm.clearErrors();
 }, { deep: true });
@@ -107,12 +107,27 @@ function blankComponent() {
         component_type: 'material',
         source_id: null,
         description: '',
+        calculation_basis: 'quantity_rate',
         consumption_qty: '1',
         consumption_unit: '',
         rate: '0',
+        base_rate: '',
+        factor: '',
+        factor_reference: '',
+        percent_value: '',
+        amount_per_boq_unit: '',
+        rate_library_id: null,
         wastage_percent: '0',
         rate_source: 'manual',
+        derivation_trace: '',
     };
+}
+
+function basisKind(basis) {
+    if (['percent_of_material_subtotal', 'percent_of_labour_subtotal', 'percent_of_subtotal'].includes(basis)) return 'percent';
+    if (['base_rate_multiply_factor', 'base_rate_divide_factor'].includes(basis)) return 'derived';
+    if (basis === 'fixed_per_boq_unit') return 'fixed';
+    return 'quantity';
 }
 
 const costForm = useForm({
@@ -130,7 +145,28 @@ watch(() => props.cost_build_up, (buildUp) => {
 }, { deep: true });
 
 const costSummary = computed(() => props.cost_build_up?.summary || null);
-const costSubtotals = computed(() => props.cost_build_up?.subtotals || {});
+const costCategoryTotals = computed(() => {
+    const t = props.cost_build_up?.category_totals;
+    if (t) {
+        return t;
+    }
+    const s = props.cost_build_up?.subtotals || {};
+    return {
+        material: s.material || '0',
+        labour: s.labour || '0',
+        equipment: s.equipment || '0',
+        subcontract: s.subcontract || '0',
+        other: s.other || '0',
+        total: props.cost_build_up?.summary?.cost_rate || '0',
+    };
+});
+const costCategoryCards = computed(() => ([
+    { key: 'material', label: 'Material', value: costCategoryTotals.value.material },
+    { key: 'labour', label: 'Labour', value: costCategoryTotals.value.labour },
+    { key: 'equipment', label: 'Equipment', value: costCategoryTotals.value.equipment },
+    { key: 'subcontract', label: 'Subcontract', value: costCategoryTotals.value.subcontract },
+    { key: 'other', label: 'Other', value: costCategoryTotals.value.other },
+]));
 const costLocked = computed(() => !!props.cost_build_up?.locked || !props.can.manage_cost);
 
 function blankNorm() {
@@ -181,14 +217,14 @@ watch(() => props.material_norms, (payload) => {
 const normsLocked = computed(() => !!props.material_norms?.locked || !props.can.manage_material_norms);
 
 watch(tab, (next) => {
-    if (next === 'cost' && props.can.view_costs && !props.cost_build_up) {
+    if (next === 'cost' && advanced.value && props.can.view_costs && !props.cost_build_up) {
         router.get(
             route('projects.boqs.items.workspace', [props.project.id, props.boq.id, props.item.id]),
             { cost: 1 },
-            { preserveState: true, preserveScroll: true, only: ['cost_build_up', 'cost_variance', 'cost_masters', 'cost_component_types', 'cost_rate_sources', 'can', 'item'] },
+            { preserveState: true, preserveScroll: true, only: ['cost_build_up', 'cost_variance', 'cost_masters', 'cost_component_types', 'cost_rate_sources', 'cost_calculation_bases', 'can', 'item'] },
         );
     }
-    if (next === 'materials' && props.can.view_material_requirements && !props.material_norms) {
+    if (next === 'materials' && advanced.value && props.can.view_material_requirements && !props.material_norms) {
         router.get(
             route('projects.boqs.items.workspace', [props.project.id, props.boq.id, props.item.id]),
             { materials: 1 },
@@ -202,7 +238,7 @@ watch(tab, (next) => {
             { preserveState: true, preserveScroll: true, only: ['item_procurement', 'can'] },
         );
     }
-    if (next === 'bbs' && props.can.view_bbs && !props.bbs_workspace) {
+    if (next === 'bbs' && advanced.value && props.can.view_bbs && !props.bbs_workspace) {
         router.get(
             route('projects.boqs.items.workspace', [props.project.id, props.boq.id, props.item.id]),
             { bbs: 1 },
@@ -219,6 +255,14 @@ function blankBbsLine() {
         diameter_mm: 16,
         number_of_members: 1,
         bars_per_member: 1,
+        count_mode: 'manual',
+        distribution_length: '',
+        start_cover: '',
+        end_cover: '',
+        spacing: '',
+        include_end_bar: true,
+        faces_layers_multiplier: 1,
+        bar_count_rounding: '',
         shape_code: 'straight',
         a_length: '',
         b_length: '',
@@ -227,8 +271,16 @@ function blankBbsLine() {
         e_length: '',
         hook_length: '0',
         bend_deduction: '0',
+        lap_mode: 'manual',
+        lap_diameter_factor: '',
+        lap_length: '',
+        lap_count_per_bar: '',
         remarks: '',
     };
+}
+
+function blankAdjustment() {
+    return { diameter_mm: null, material_id: null, adjustment_qty_kg: '', reason: '', reference: '' };
 }
 
 const bbsForm = useForm({
@@ -236,9 +288,15 @@ const bbsForm = useForm({
     description: '',
     drawing_revision_id: null,
     wastage_percent: '0',
+    unit_weight_method: 'formula_d2_162',
+    steel_profile_id: null,
+    bar_count_rounding: 'ceil',
     lines: [blankBbsLine()],
     maps: [],
+    adjustments: [],
 });
+
+const selectedRecipeId = ref(null);
 
 const bbsLocked = computed(() => {
     const st = props.bbs_workspace?.bbs?.status;
@@ -252,6 +310,9 @@ watch(() => props.bbs_workspace, (ws) => {
     bbsForm.description = b.description || '';
     bbsForm.drawing_revision_id = b.drawing_revision_id;
     bbsForm.wastage_percent = b.wastage_percent || '0';
+    bbsForm.unit_weight_method = b.unit_weight_method || 'formula_d2_162';
+    bbsForm.steel_profile_id = b.steel_profile_id ?? null;
+    bbsForm.bar_count_rounding = b.bar_count_rounding || 'ceil';
     bbsForm.lines = (b.lines || []).length
         ? b.lines.map((l) => ({
             structure_location: l.structure_location || '',
@@ -260,6 +321,14 @@ watch(() => props.bbs_workspace, (ws) => {
             diameter_mm: l.diameter_mm,
             number_of_members: l.number_of_members,
             bars_per_member: l.bars_per_member,
+            count_mode: l.count_mode || 'manual',
+            distribution_length: l.distribution_length ?? '',
+            start_cover: l.start_cover ?? '',
+            end_cover: l.end_cover ?? '',
+            spacing: l.spacing ?? '',
+            include_end_bar: l.include_end_bar ?? true,
+            faces_layers_multiplier: l.faces_layers_multiplier ?? 1,
+            bar_count_rounding: l.bar_count_rounding ?? '',
             shape_code: l.shape_code,
             a_length: l.a_length ?? '',
             b_length: l.b_length ?? '',
@@ -268,6 +337,10 @@ watch(() => props.bbs_workspace, (ws) => {
             e_length: l.e_length ?? '',
             hook_length: l.hook_length ?? '0',
             bend_deduction: l.bend_deduction ?? '0',
+            lap_mode: l.lap_mode || 'manual',
+            lap_diameter_factor: l.lap_diameter_factor ?? '',
+            lap_length: l.lap_length ?? '',
+            lap_count_per_bar: l.lap_count_per_bar ?? '',
             remarks: l.remarks || '',
             // display-only from server
             total_bars: l.total_bars,
@@ -277,6 +350,15 @@ watch(() => props.bbs_workspace, (ws) => {
             theoretical_weight: l.theoretical_weight,
         }))
         : [blankBbsLine()];
+    bbsForm.adjustments = (b.adjustments || []).length
+        ? b.adjustments.map((a) => ({
+            diameter_mm: a.diameter_mm,
+            material_id: a.material_id,
+            adjustment_qty_kg: a.adjustment_qty_kg,
+            reason: a.reason,
+            reference: a.reference || '',
+        }))
+        : [];
     bbsForm.maps = (b.diameter_summary || []).map((d) => ({
         diameter_mm: d.diameter_mm,
         material_id: d.material_id ?? null,
@@ -427,6 +509,12 @@ function masterOptions(type) {
     return [];
 }
 
+function rateLibraryOptions(row) {
+    const all = props.cost_masters?.rate_library || [];
+    if (!row?.component_type) return all;
+    return all.filter((e) => e.entry_type === row.component_type || e.entry_type === 'other');
+}
+
 function onTypeChange(row) {
     row.source_id = null;
     row.description = '';
@@ -449,10 +537,19 @@ async function onSourceChange(row) {
 }
 
 async function applyRateSource(row) {
-    if (!row.source_id || row.rate_source === 'manual') return;
+    const sourceId = row.rate_source === 'rate_library' ? (row.rate_library_id || row.source_id) : row.source_id;
+    if (!sourceId || row.rate_source === 'manual') return;
     try {
         const url = route('projects.boqs.items.cost-build-up.suggest-rate', [props.project.id, props.boq.id, props.item.id]);
-        const res = await fetch(`${url}?component_type=${encodeURIComponent(row.component_type)}&rate_source=${encodeURIComponent(row.rate_source)}&source_id=${encodeURIComponent(row.source_id)}`, {
+        const params = new URLSearchParams({
+            component_type: row.component_type,
+            rate_source: row.rate_source,
+            source_id: String(sourceId),
+        });
+        if (row.rate_source === 'rate_library' && row.rate_library_id) {
+            params.set('rate_library_id', String(row.rate_library_id));
+        }
+        const res = await fetch(`${url}?${params.toString()}`, {
             headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin',
         });
@@ -515,6 +612,21 @@ function importNormsFromCost() {
     }, { preserveScroll: true });
 }
 
+function applyRecipe() {
+    if (!selectedRecipeId.value) return;
+    router.post(route('projects.boqs.items.material-norms.apply-recipe', [props.project.id, props.boq.id, props.item.id]), {
+        recipe_id: selectedRecipeId.value,
+    }, { preserveScroll: true });
+}
+
+function addAdjustment() {
+    bbsForm.adjustments.push(blankAdjustment());
+}
+
+function removeAdjustment(index) {
+    bbsForm.adjustments.splice(index, 1);
+}
+
 function submitSheet() {
     router.post(route('projects.boqs.items.measurements.submit', [props.project.id, props.boq.id, props.item.id, props.measurement.id]), {}, { preserveScroll: true });
 }
@@ -566,28 +678,28 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                 <p class="mt-1 text-lg font-semibold tabular">{{ formatQty(item.quantity) }} {{ unitLabel }}</p>
             </AppCard>
             <AppCard>
-                <p class="text-xs text-slate-500">Selling Rate</p>
+                <p class="text-xs text-slate-500">Rate</p>
                 <p class="mt-1 text-lg font-semibold tabular">{{ formatRate(item.client_rate) }}</p>
             </AppCard>
-            <AppCard v-if="can.view_costs">
+            <AppCard>
+                <p class="text-xs text-slate-500">Amount</p>
+                <p class="mt-1 text-lg font-semibold tabular">{{ formatMoney(item.client_amount) }}</p>
+            </AppCard>
+            <AppCard v-if="advanced && can.view_costs">
                 <p class="text-xs text-slate-500">Cost Rate</p>
                 <p class="mt-1 text-lg font-semibold tabular">{{ formatRate(item.cost_rate) }}</p>
             </AppCard>
-            <AppCard v-if="can.view_costs">
+            <AppCard v-if="advanced && can.view_costs">
                 <p class="text-xs text-slate-500">Estimated Cost</p>
                 <p class="mt-1 text-lg font-semibold tabular">{{ formatMoney(item.cost_amount) }}</p>
             </AppCard>
-            <AppCard v-if="can.view_costs && costSummary">
+            <AppCard v-if="advanced && can.view_costs && costSummary">
                 <p class="text-xs text-slate-500">Margin</p>
                 <p class="mt-1 text-lg font-semibold tabular">{{ formatMoney(costSummary.estimated_margin) }}</p>
             </AppCard>
-            <AppCard v-if="can.view_costs && costSummary">
+            <AppCard v-if="advanced && can.view_costs && costSummary">
                 <p class="text-xs text-slate-500">Margin %</p>
                 <p class="mt-1 text-lg font-semibold tabular">{{ costSummary.margin_percent != null ? `${formatQty(costSummary.margin_percent)}%` : '—' }}</p>
-            </AppCard>
-            <AppCard v-if="!can.view_costs">
-                <p class="text-xs text-slate-500">Amount</p>
-                <p class="mt-1 text-lg font-semibold tabular">{{ formatMoney(item.client_amount) }}</p>
             </AppCard>
         </div>
 
@@ -622,7 +734,7 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
         <div v-else-if="tab === 'measurements'" class="space-y-4">
             <AppCard title="Measurement sheet">
                 <form class="space-y-4" @submit.prevent="saveMeasurements">
-                    <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                         <FormInput v-model="measureForm.title" label="Sheet title" :disabled="!can.edit" />
                         <FormSelect
                             v-model="measureForm.drawing_revision_id"
@@ -630,7 +742,26 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                             :options="[{ value: null, label: '— None —' }, ...drawing_revisions.map((d) => ({ value: d.id, label: d.label }))]"
                             :disabled="!can.edit"
                         />
+                        <FormSelect
+                            v-model="measureForm.circle_constant_mode"
+                            label="Circle constant"
+                            :options="circle_constant_modes"
+                            :disabled="!can.edit"
+                        />
+                        <FormInput
+                            v-if="measureForm.circle_constant_mode === 'custom'"
+                            v-model="measureForm.circle_constant_value"
+                            label="Custom constant"
+                            :disabled="!can.edit"
+                        />
                     </div>
+                    <p v-if="measurement.calculation_profile_snapshot?.circle_constant_value" class="text-xs text-slate-500">
+                        Snapshot: {{ measurement.calculation_profile_snapshot.circle_constant_mode }}
+                        · coefficient {{ measurement.calculation_profile_snapshot.circle_constant_value }}
+                        <span v-if="measurement.calculation_profile_snapshot.formula_version">
+                            · {{ measurement.calculation_profile_snapshot.formula_version }}
+                        </span>
+                    </p>
 
                     <div class="overflow-x-auto rounded-xl border border-line">
                         <table class="min-w-[1100px] w-full text-left text-xs">
@@ -723,10 +854,11 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
 
                 <form v-else class="space-y-4" @submit.prevent="saveCost">
                     <div class="overflow-x-auto rounded-xl border border-line">
-                        <table class="min-w-[1080px] w-full text-left text-xs">
+                        <table class="min-w-[1280px] w-full text-left text-xs">
                             <thead class="bg-slate-50 text-[11px] uppercase text-slate-500">
                                 <tr>
                                     <th class="px-2 py-2">Type</th>
+                                    <th class="px-2 py-2">Basis</th>
                                     <th class="px-2 py-2">Component</th>
                                     <th class="px-2 py-2">Consumption</th>
                                     <th class="px-2 py-2">Unit</th>
@@ -745,8 +877,23 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                                         </select>
                                     </td>
                                     <td class="px-1 py-1">
+                                        <select v-model="row.calculation_basis" class="w-36 rounded border-slate-200 py-1 text-xs" :disabled="costLocked">
+                                            <option v-for="b in cost_calculation_bases" :key="b.value" :value="b.value">{{ b.label }}</option>
+                                        </select>
+                                    </td>
+                                    <td class="px-1 py-1">
                                         <select
-                                            v-if="['material', 'labour', 'equipment'].includes(row.component_type)"
+                                            v-if="row.rate_source === 'rate_library'"
+                                            v-model="row.rate_library_id"
+                                            class="mb-1 w-44 rounded border-slate-200 py-1 text-xs"
+                                            :disabled="costLocked"
+                                            @change="applyRateSource(row)"
+                                        >
+                                            <option :value="null">— Rate library —</option>
+                                            <option v-for="opt in rateLibraryOptions(row)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                                        </select>
+                                        <select
+                                            v-else-if="['material', 'labour', 'equipment'].includes(row.component_type)"
                                             v-model="row.source_id"
                                             class="mb-1 w-44 rounded border-slate-200 py-1 text-xs"
                                             :disabled="costLocked"
@@ -756,10 +903,22 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                                             <option v-for="opt in masterOptions(row.component_type)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                                         </select>
                                         <input v-model="row.description" class="w-44 rounded border-slate-200 px-1.5 py-1" :disabled="costLocked" placeholder="Description" />
+                                        <div v-if="basisKind(row.calculation_basis) === 'derived'" class="mt-1 flex gap-1">
+                                            <input v-model="row.base_rate" placeholder="Base" class="w-16 rounded border-slate-200 px-1 py-0.5 tabular" :disabled="costLocked" />
+                                            <input v-model="row.factor" placeholder="Factor" class="w-16 rounded border-slate-200 px-1 py-0.5 tabular" :disabled="costLocked" />
+                                            <input v-model="row.factor_reference" placeholder="Ref" class="w-16 rounded border-slate-200 px-1 py-0.5" :disabled="costLocked" />
+                                        </div>
+                                        <div v-else-if="basisKind(row.calculation_basis) === 'percent'" class="mt-1">
+                                            <input v-model="row.percent_value" placeholder="%" class="w-20 rounded border-slate-200 px-1 py-0.5 tabular" :disabled="costLocked" />
+                                        </div>
+                                        <div v-else-if="basisKind(row.calculation_basis) === 'fixed'" class="mt-1">
+                                            <input v-model="row.amount_per_boq_unit" placeholder="Fixed amt" class="w-24 rounded border-slate-200 px-1 py-0.5 tabular" :disabled="costLocked" />
+                                        </div>
+                                        <p v-if="row.derivation_trace" class="mt-1 text-[10px] text-slate-500">{{ row.derivation_trace }}</p>
                                     </td>
-                                    <td class="px-1 py-1"><input v-model="row.consumption_qty" class="w-20 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="costLocked" /></td>
+                                    <td class="px-1 py-1"><input v-model="row.consumption_qty" class="w-20 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="costLocked || basisKind(row.calculation_basis) === 'percent'" /></td>
                                     <td class="px-1 py-1"><input v-model="row.consumption_unit" class="w-16 rounded border-slate-200 px-1.5 py-1" :disabled="costLocked" /></td>
-                                    <td class="px-1 py-1"><input v-model="row.rate" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="costLocked" /></td>
+                                    <td class="px-1 py-1"><input v-model="row.rate" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="costLocked || basisKind(row.calculation_basis) !== 'quantity'" /></td>
                                     <td class="px-1 py-1"><input v-model="row.wastage_percent" class="w-16 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="costLocked" /></td>
                                     <td class="px-2 py-2 text-right tabular font-medium">{{ row.amount_per_boq_unit ? formatRate(row.amount_per_boq_unit) : '—' }}</td>
                                     <td class="px-1 py-1">
@@ -775,7 +934,7 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                                     </td>
                                 </tr>
                                 <tr v-if="!costForm.components.length">
-                                    <td colspan="9" class="px-3 py-6 text-center text-slate-500">No cost components yet.</td>
+                                    <td colspan="10" class="px-3 py-6 text-center text-slate-500">No cost components yet.</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -854,35 +1013,37 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                 </p>
             </AppCard>
 
-            <div v-if="cost_build_up" class="grid gap-3 lg:grid-cols-2">
-                <AppCard title="Subtotals by type">
-                    <dl class="grid grid-cols-2 gap-2 text-sm">
-                        <template v-for="t in cost_component_types" :key="t.value">
-                            <dt class="text-slate-500">{{ t.label }}</dt>
-                            <dd class="text-right font-medium tabular">{{ formatRate(costSubtotals[t.value] || '0') }}</dd>
-                        </template>
-                    </dl>
-                </AppCard>
-                <AppCard title="Cost summary">
-                    <dl class="grid grid-cols-2 gap-2 text-sm" v-if="costSummary">
-                        <dt class="text-slate-500">Total Cost Rate</dt>
-                        <dd class="text-right font-semibold tabular">{{ formatRate(costSummary.cost_rate) }}</dd>
+            <div v-if="cost_build_up" class="space-y-3" data-testid="cost-category-summary">
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    <div
+                        v-for="card in costCategoryCards"
+                        :key="card.key"
+                        class="rounded-xl border border-line bg-slate-50/80 px-3 py-3"
+                        :data-testid="`cost-category-${card.key}`"
+                    >
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{{ card.label }}</p>
+                        <p class="mt-1 text-lg font-semibold tabular text-slate-900">{{ formatMoney(card.value || '0') }}</p>
+                    </div>
+                </div>
+                <div class="rounded-xl border border-line bg-white px-3 py-3 sm:flex sm:items-end sm:justify-between" data-testid="cost-category-total">
+                    <div>
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Total Cost Rate</p>
+                        <p class="mt-1 text-xl font-semibold tabular text-slate-900">
+                            {{ formatMoney(costCategoryTotals.total || '0') }}
+                            <span class="text-sm font-medium text-slate-500">/ {{ unitLabel || 'unit' }}</span>
+                        </p>
+                    </div>
+                    <dl v-if="costSummary" class="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:mt-0 sm:text-right">
                         <dt class="text-slate-500">Selling Rate</dt>
-                        <dd class="text-right font-medium tabular">{{ formatRate(costSummary.selling_rate) }}</dd>
+                        <dd class="font-medium tabular">{{ formatMoney(costSummary.selling_rate) }}</dd>
                         <dt class="text-slate-500">Margin / Unit</dt>
-                        <dd class="text-right font-medium tabular">{{ formatRate(costSummary.margin_per_unit) }}</dd>
+                        <dd class="font-medium tabular">{{ formatMoney(costSummary.margin_per_unit) }}</dd>
                         <dt class="text-slate-500">Margin %</dt>
-                        <dd class="text-right font-medium tabular">{{ costSummary.margin_percent != null ? `${formatQty(costSummary.margin_percent)}%` : '—' }}</dd>
-                        <dt class="text-slate-500">BOQ Qty</dt>
-                        <dd class="text-right font-medium tabular">{{ formatQty(item.quantity) }}</dd>
+                        <dd class="font-medium tabular">{{ costSummary.margin_percent != null ? `${formatQty(costSummary.margin_percent)}%` : '—' }}</dd>
                         <dt class="text-slate-500">Estimated Cost</dt>
-                        <dd class="text-right font-semibold tabular">{{ formatMoney(costSummary.estimated_cost) }}</dd>
-                        <dt class="text-slate-500">Estimated Revenue</dt>
-                        <dd class="text-right font-medium tabular">{{ formatMoney(costSummary.estimated_revenue) }}</dd>
-                        <dt class="text-slate-500">Estimated Margin</dt>
-                        <dd class="text-right font-semibold tabular">{{ formatMoney(costSummary.estimated_margin) }}</dd>
+                        <dd class="font-semibold tabular">{{ formatMoney(costSummary.estimated_cost) }}</dd>
                     </dl>
-                </AppCard>
+                </div>
             </div>
         </div>
 
@@ -899,6 +1060,16 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                 <div v-if="!material_norms" class="py-8 text-center text-sm text-slate-500">Loading material norms…</div>
 
                 <form v-else class="space-y-4" @submit.prevent="saveNorms">
+                    <div v-if="!normsLocked && material_norms?.recipes?.length" class="flex flex-wrap items-end gap-2 rounded-lg border border-line bg-slate-50 p-3">
+                        <div class="min-w-[14rem] flex-1">
+                            <label class="text-[11px] font-medium uppercase text-slate-500">Apply active recipe</label>
+                            <select v-model="selectedRecipeId" class="mt-1 w-full rounded-lg border-slate-200 text-sm">
+                                <option :value="null">— Select recipe —</option>
+                                <option v-for="r in material_norms.recipes" :key="r.id" :value="r.id">{{ r.code }} v{{ r.version }} — {{ r.name }}</option>
+                            </select>
+                        </div>
+                        <AppButton type="button" variant="secondary" :disabled="!selectedRecipeId" @click="applyRecipe">Apply recipe</AppButton>
+                    </div>
                     <div class="overflow-x-auto rounded-xl border border-line">
                         <table class="min-w-[980px] w-full text-left text-xs">
                             <thead class="bg-slate-50 text-[11px] uppercase text-slate-500">
@@ -1017,7 +1188,65 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                             />
                             <FormInput v-model="bbsForm.wastage_percent" label="Wastage %" :disabled="bbsLocked" />
                             <FormInput v-model="bbsForm.description" label="Description" :disabled="bbsLocked" />
+                            <FormSelect
+                                v-if="bbs_workspace.unit_weight_methods?.length"
+                                v-model="bbsForm.unit_weight_method"
+                                label="Unit weight method"
+                                :disabled="bbsLocked"
+                                :options="bbs_workspace.unit_weight_methods"
+                            />
+                            <FormSelect
+                                v-if="bbsForm.unit_weight_method === 'profile' && bbs_workspace.steel_profiles?.length"
+                                v-model="bbsForm.steel_profile_id"
+                                label="Steel profile"
+                                :disabled="bbsLocked"
+                                :options="[{ value: null, label: '— Select —' }, ...bbs_workspace.steel_profiles]"
+                            />
+                            <FormSelect
+                                v-if="bbs_workspace.bar_count_rounding?.length"
+                                v-model="bbsForm.bar_count_rounding"
+                                label="Bar count rounding"
+                                :disabled="bbsLocked"
+                                :options="bbs_workspace.bar_count_rounding"
+                            />
                         </div>
+                    </AppCard>
+
+                    <AppCard v-if="can.manage_bbs_adjustments || bbsForm.adjustments.length" title="Weight adjustments (kg)">
+                        <p class="mb-2 text-xs text-slate-500">Applied to theoretical weight before wastage. Requires reason.</p>
+                        <div class="overflow-x-auto rounded-xl border border-line">
+                            <table class="min-w-[720px] w-full text-left text-xs">
+                                <thead class="bg-slate-50 text-[11px] uppercase text-slate-500">
+                                    <tr>
+                                        <th class="px-2 py-2">Dia mm</th>
+                                        <th class="px-2 py-2">Material</th>
+                                        <th class="px-2 py-2">Qty kg</th>
+                                        <th class="px-2 py-2">Reason</th>
+                                        <th class="px-2 py-2">Reference</th>
+                                        <th v-if="!bbsLocked && can.manage_bbs_adjustments" class="px-2 py-2" />
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="(adj, ai) in bbsForm.adjustments" :key="ai" class="border-t border-line">
+                                        <td class="px-1 py-1"><input v-model.number="adj.diameter_mm" type="number" class="w-16 rounded border-line" :disabled="bbsLocked || !can.manage_bbs_adjustments" /></td>
+                                        <td class="px-1 py-1">
+                                            <select v-model="adj.material_id" class="w-40 rounded border-line text-xs" :disabled="bbsLocked || !can.manage_bbs_adjustments">
+                                                <option :value="null">—</option>
+                                                <option v-for="opt in material_options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                                            </select>
+                                        </td>
+                                        <td class="px-1 py-1"><input v-model="adj.adjustment_qty_kg" class="w-20 rounded border-line tabular" :disabled="bbsLocked || !can.manage_bbs_adjustments" /></td>
+                                        <td class="px-1 py-1"><input v-model="adj.reason" class="w-40 rounded border-line" :disabled="bbsLocked || !can.manage_bbs_adjustments" /></td>
+                                        <td class="px-1 py-1"><input v-model="adj.reference" class="w-28 rounded border-line" :disabled="bbsLocked || !can.manage_bbs_adjustments" /></td>
+                                        <td v-if="!bbsLocked && can.manage_bbs_adjustments" class="px-1 py-1"><button type="button" class="text-rose-600" @click="removeAdjustment(ai)">Del</button></td>
+                                    </tr>
+                                    <tr v-if="!bbsForm.adjustments.length">
+                                        <td colspan="6" class="px-3 py-4 text-center text-slate-500">No adjustments.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <AppButton v-if="!bbsLocked && can.manage_bbs_adjustments" type="button" variant="secondary" class="mt-2" @click="addAdjustment">Add adjustment</AppButton>
                     </AppCard>
 
                     <AppCard title="BBS lines (dimensions in meters)">
@@ -1047,7 +1276,8 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr v-for="(line, idx) in bbsForm.lines" :key="idx" class="border-t border-line align-top">
+                                    <template v-for="(line, idx) in bbsForm.lines" :key="idx">
+                                    <tr class="border-t border-line align-top">
                                         <td class="px-1 py-1"><input v-model="line.structure_location" class="w-24 rounded border-line text-xs" :disabled="bbsLocked" /></td>
                                         <td class="px-1 py-1"><input v-model="line.bar_mark" class="w-16 rounded border-line text-xs" :disabled="bbsLocked" required /></td>
                                         <td class="px-1 py-1">
@@ -1057,7 +1287,7 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                                         </td>
                                         <td class="px-1 py-1"><input v-model.number="line.diameter_mm" type="number" min="1" class="w-12 rounded border-line text-xs" :disabled="bbsLocked" /></td>
                                         <td class="px-1 py-1"><input v-model.number="line.number_of_members" type="number" min="0" class="w-14 rounded border-line text-xs" :disabled="bbsLocked" /></td>
-                                        <td class="px-1 py-1"><input v-model.number="line.bars_per_member" type="number" min="0" class="w-14 rounded border-line text-xs" :disabled="bbsLocked" /></td>
+                                        <td class="px-1 py-1"><input v-model.number="line.bars_per_member" type="number" min="0" class="w-14 rounded border-line text-xs" :disabled="bbsLocked || line.count_mode === 'spacing_based'" /></td>
                                         <td class="px-1 py-1 text-right tabular text-slate-500">{{ line.total_bars ?? '—' }}</td>
                                         <td class="px-1 py-1"><input v-if="shapeDims(line.shape_code).a" v-model="line.a_length" class="w-14 rounded border-line text-xs" :disabled="bbsLocked" /></td>
                                         <td class="px-1 py-1"><input v-if="shapeDims(line.shape_code).b" v-model="line.b_length" class="w-14 rounded border-line text-xs" :disabled="bbsLocked" /></td>
@@ -1077,6 +1307,35 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                                             <button type="button" class="ml-1 text-rose-600" @click="removeBbsLine(idx)">Del</button>
                                         </td>
                                     </tr>
+                                    <tr class="border-t border-dashed border-line bg-slate-50/60">
+                                        <td :colspan="bbsLocked ? 18 : 19" class="px-2 py-2">
+                                            <div class="flex flex-wrap items-end gap-2 text-[10px]">
+                                                <label class="flex flex-col gap-0.5">
+                                                    <span class="uppercase text-slate-500">Count</span>
+                                                    <select v-model="line.count_mode" class="rounded border-line py-0.5" :disabled="bbsLocked">
+                                                        <option v-for="m in (bbs_workspace.count_modes || [])" :key="m.value" :value="m.value">{{ m.label }}</option>
+                                                    </select>
+                                                </label>
+                                                <template v-if="line.count_mode === 'spacing_based'">
+                                                    <input v-model="line.distribution_length" placeholder="Dist L (m)" class="w-20 rounded border-line px-1 py-0.5" :disabled="bbsLocked" />
+                                                    <input v-model="line.start_cover" placeholder="Start cov" class="w-16 rounded border-line px-1 py-0.5" :disabled="bbsLocked" />
+                                                    <input v-model="line.end_cover" placeholder="End cov" class="w-16 rounded border-line px-1 py-0.5" :disabled="bbsLocked" />
+                                                    <input v-model="line.spacing" placeholder="Spacing" class="w-16 rounded border-line px-1 py-0.5" :disabled="bbsLocked" />
+                                                    <input v-model.number="line.faces_layers_multiplier" type="number" min="1" placeholder="Faces" class="w-14 rounded border-line px-1 py-0.5" :disabled="bbsLocked" />
+                                                </template>
+                                                <label class="flex flex-col gap-0.5">
+                                                    <span class="uppercase text-slate-500">Lap</span>
+                                                    <select v-model="line.lap_mode" class="rounded border-line py-0.5" :disabled="bbsLocked">
+                                                        <option v-for="m in (bbs_workspace.lap_modes || [])" :key="m.value" :value="m.value">{{ m.label }}</option>
+                                                    </select>
+                                                </label>
+                                                <input v-if="line.lap_mode === 'diameter_factor'" v-model="line.lap_diameter_factor" placeholder="Lap factor" class="w-16 rounded border-line px-1 py-0.5" :disabled="bbsLocked" />
+                                                <input v-else v-model="line.lap_length" placeholder="Lap L (m)" class="w-16 rounded border-line px-1 py-0.5" :disabled="bbsLocked" />
+                                                <input v-model="line.lap_count_per_bar" placeholder="Laps/bar" class="w-16 rounded border-line px-1 py-0.5" :disabled="bbsLocked" />
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    </template>
                                 </tbody>
                             </table>
                         </div>
@@ -1161,8 +1420,10 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
         </div>
 
         <div v-else-if="tab === 'procurement' && can.view_material_requirements" class="space-y-4">
-            <AppCard title="Item procurement (planned vs pipeline)">
-                <p class="mb-3 text-sm text-slate-600">Queried from MR / PO / GRN / issues — not copied into BOQ. Steel from Approved BBS shows BBS Required.</p>
+            <AppCard title="Procurement">
+                <p v-if="advanced" class="mb-3 text-sm text-slate-600">
+                    Planned requirement vs MR / PO / GRN / Issue for this item.
+                </p>
                 <div v-if="!item_procurement" class="py-8 text-center text-sm text-slate-500">Loading…</div>
                 <div v-else class="overflow-x-auto rounded-xl border border-line">
                     <table class="min-w-[820px] w-full text-left text-xs">
@@ -1193,7 +1454,7 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                                 <td class="px-2 py-2 text-right font-medium tabular">{{ formatQty(row.remaining_requirement) }}</td>
                             </tr>
                             <tr v-if="!item_procurement.length">
-                                <td colspan="8" class="px-3 py-6 text-center text-slate-500">No BBS steel or material norms on this item.</td>
+                                <td colspan="8" class="px-3 py-6 text-center text-slate-500">{{ advanced ? 'No BBS steel or material norms on this item.' : 'No procurement activity linked to this item yet.' }}</td>
                             </tr>
                         </tbody>
                     </table>

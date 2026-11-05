@@ -6,6 +6,7 @@ use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Chat\ChatPresenter;
 use App\Services\Notifications\FcmClient;
+use App\Support\Boq\BoqCompanySettings;
 use App\Support\Permissions\DefaultRoles;
 use App\Support\Permissions\PermissionCatalog;
 use App\Support\Tenancy\CurrentCompany;
@@ -43,6 +44,7 @@ class HandleInertiaRequests extends Middleware
             'app' => ['name' => config('app.name')],
             'features' => [
                 'multi_company' => (bool) config('features.multi_company'),
+                'advanced_boq_calculations' => fn () => BoqCompanySettings::enabled(),
             ],
             'uploads' => [
                 'max_bytes' => (int) config('uploads.max_file_size_bytes'),

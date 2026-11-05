@@ -2,6 +2,7 @@
 
 namespace App\Models\Boq;
 
+use App\Enums\Boq\CircleConstantMode;
 use App\Enums\Boq\MeasurementSheetStatus;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
@@ -22,6 +23,9 @@ class BoqMeasurementSheet extends Model
     {
         return [
             'status' => MeasurementSheetStatus::class,
+            'circle_constant_mode' => CircleConstantMode::class,
+            'circle_constant_value' => 'decimal:4',
+            'calculation_profile_snapshot' => 'array',
             'total_quantity' => 'decimal:4',
             'approved_at' => 'datetime',
             'rejected_at' => 'datetime',

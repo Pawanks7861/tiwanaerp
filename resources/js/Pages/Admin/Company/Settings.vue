@@ -2,6 +2,7 @@
 import DecimalInput from '@/Components/Form/DecimalInput.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import FormSelect from '@/Components/Form/FormSelect.vue';
+import FormSwitch from '@/Components/Form/FormSwitch.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import PageHeader from '@/Components/UI/PageHeader.vue';
@@ -13,6 +14,7 @@ const props = defineProps({
     company: { type: Object, required: true },
     states: { type: Array, required: true },
     procurement: { type: Object, default: null },
+    boq: { type: Object, default: null },
     can: { type: Object, required: true },
     branding: { type: Object, default: () => ({ logo_url: null, favicon_url: null, max_kb: 2048 }) },
     cadPreview: { type: Object, default: () => ({ available: false, driver: 'none', configured: 'auto', version: null, last_success_at: null, error: null }) },
@@ -41,6 +43,11 @@ function submit() {
 const procurementForm = useForm({ grn_tolerance_percent: props.procurement?.grn_tolerance_percent ?? '0' });
 function saveProcurement() {
     procurementForm.put(route('admin.company.procurement'), { preserveScroll: true });
+}
+
+const boqForm = useForm({ advanced_calculations_enabled: props.boq?.advanced_calculations_enabled === true });
+function saveBoq() {
+    boqForm.post(route('admin.company.boq'), { preserveScroll: true });
 }
 
 const logoInput = ref(null);
@@ -146,6 +153,24 @@ function removeBrand(kind) {
                 </div>
             </div>
         </AppCard>
+
+        <form class="mt-4" @submit.prevent="saveBoq">
+            <AppCard title="BOQ" subtitle="Simplified mode focuses on Excel import and line editing. Advanced mode unlocks measurements, cost build-up, material norms, BBS, and coefficient masters.">
+                <fieldset :disabled="!can.update" class="max-w-xl">
+                    <FormSwitch
+                        v-model="boqForm.advanced_calculations_enabled"
+                        label="Advanced BOQ Calculations"
+                        help="Off by default. Turn on only when you need workbook-style quantity, cost, and steel workflows."
+                        :error="boqForm.errors.advanced_calculations_enabled"
+                    />
+                </fieldset>
+                <template v-if="can.update" #footer>
+                    <div class="flex justify-end">
+                        <AppButton type="submit" size="sm" :loading="boqForm.processing">Save BOQ settings</AppButton>
+                    </div>
+                </template>
+            </AppCard>
+        </form>
 
         <form class="mt-4" @submit.prevent="saveProcurement">
             <AppCard title="Procurement" subtitle="Applies to every project unless a project overrides it.">

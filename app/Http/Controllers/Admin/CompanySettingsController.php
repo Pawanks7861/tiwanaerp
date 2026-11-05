@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\CompanyRequest;
 use App\Services\Files\Cad\CadPreviewManager;
 use App\Support\Math\Decimal;
+use App\Support\Boq\BoqCompanySettings;
 use App\Support\Procurement\ProcurementSettings;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\RedirectResponse;
@@ -39,6 +40,9 @@ class CompanySettingsController extends Controller
             'procurement' => [
                 'grn_tolerance_percent' => (string) ($company->setting(ProcurementSettings::GRN_TOLERANCE_KEY) ?? config('procurement.grn_tolerance_percent', '0')),
             ],
+            'boq' => [
+                'advanced_calculations_enabled' => BoqCompanySettings::enabled($company),
+            ],
             'can' => ['update' => $request->user()->can('manageSettings', $company)],
             'cadPreview' => $this->cad->health(),
             'branding' => [
@@ -66,6 +70,20 @@ class CompanySettingsController extends Controller
         );
 
         return back()->with('success', 'Procurement settings updated.');
+    }
+
+    public function updateBoq(Request $request): RedirectResponse
+    {
+        $company = $this->tenancy->require();
+        Gate::authorize('manageSettings', $company);
+
+        $data = $request->validate([
+            'advanced_calculations_enabled' => ['required', 'boolean'],
+        ]);
+
+        BoqCompanySettings::set($company, (bool) $data['advanced_calculations_enabled']);
+
+        return back()->with('success', 'BOQ settings updated.');
     }
 
     public function update(CompanyRequest $request): RedirectResponse

@@ -59,7 +59,7 @@ class BoqItemsImportDefinition extends ImportDefinition
 
     public function instructions(): string
     {
-        return 'Appends lines to an editable draft or rejected BOQ. Totals use the existing BOQ calculator. Approved or locked BOQs cannot be imported into. Example rows labelled EXAMPLE are ignored.';
+        return 'Upload your Excel or CSV with final quantities and rates. Rows append to an editable draft or rejected BOQ; the server recalculates totals. Approved or locked BOQs cannot be imported. Example rows labelled EXAMPLE are ignored.';
     }
 
     public function templateFilename(): string
@@ -87,12 +87,12 @@ class BoqItemsImportDefinition extends ImportDefinition
     {
         return [
             new ImportField('section_code', 'Section Code', false, ['sec_code']),
-            new ImportField('section_name', 'Section Name', true, ['section', 'sec_name']),
+            new ImportField('section_name', 'Section Name', true, ['section', 'sec_name', 'head']),
             new ImportField('subsection_code', 'Subsection Code', false),
             new ImportField('subsection_name', 'Subsection Name', false, ['subsection']),
             new ImportField('item_code', 'Item Code', false, ['code']),
-            new ImportField('name', 'Name', true, ['item_name', 'item_description']),
-            new ImportField('description', 'Description', false, ['long_description', 'details']),
+            new ImportField('name', 'Name', true, ['item_name', 'item_description', 'description of work', 'description of item', 'boq description']),
+            new ImportField('description', 'Description', false, ['long_description', 'details', 'remarks', 'specification']),
             new ImportField('hsn_sac', 'HSN SAC', false, ['hsn', 'sac']),
             new ImportField('unit', 'Unit', true, ['uom', 'uom_name']),
             new ImportField('quantity', 'Quantity', true, ['qty'], 'number'),
@@ -110,20 +110,12 @@ class BoqItemsImportDefinition extends ImportDefinition
         return [[
             'section_code' => 'A',
             'section_name' => 'Civil Works',
-            'subsection_code' => '',
-            'subsection_name' => '',
             'item_code' => 'EXAMPLE-001',
             'name' => 'PCC 1:4:8',
             'description' => 'EXAMPLE ROW — ignored',
-            'hsn_sac' => '',
             'unit' => 'Cum',
             'quantity' => '10',
-            'material_rate' => '3500',
-            'labour_rate' => '500',
-            'equipment_rate' => '0',
-            'subcontract_rate' => '0',
-            'margin_percent' => '10',
-            'client_rate' => '',
+            'client_rate' => '4500',
         ]];
     }
 
@@ -171,6 +163,11 @@ class BoqItemsImportDefinition extends ImportDefinition
         }
 
         $this->boqImport->appendRows($bag->boq, $bag->rows, (bool) $bag->canEditCosts);
+
+        $importId = (int) $context->meta('import_id');
+        if ($importId > 0) {
+            $bag->boq->forceFill(['source_import_id' => $importId])->save();
+        }
     }
 
     private function boq(ImportContext $context): Boq

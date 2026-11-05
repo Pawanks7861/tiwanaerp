@@ -3,6 +3,10 @@
 use App\Http\Controllers\Admin\ApprovalWorkflowController;
 use App\Http\Controllers\Ai\AiAssistantController;
 use App\Http\Controllers\Boq\BoqItemWorkspaceController;
+use App\Http\Controllers\Boq\Coefficient\CostingRateLibraryController;
+use App\Http\Controllers\Boq\Coefficient\MaterialRecipeController;
+use App\Http\Controllers\Boq\Coefficient\SteelUnitWeightProfileController;
+use App\Http\Controllers\Boq\Coefficient\UnitConversionController;
 use App\Http\Controllers\Boq\MaterialRequirementController;
 use App\Http\Controllers\Boq\MaterialReconciliationController;
 use App\Http\Controllers\Boq\BoqVariationController;
@@ -137,9 +141,11 @@ Route::middleware(['auth', 'company'])->group(function () {
     Route::get('/imports/{module}/meta', [DataImportController::class, 'meta'])->where('module', '[a-z0-9_.-]+')->name('imports.meta');
     Route::post('/imports', [DataImportController::class, 'store'])->middleware('throttle:20,1')->name('imports.store');
     Route::get('/imports/{import}', [DataImportController::class, 'show'])->whereNumber('import')->name('imports.show');
+    Route::post('/imports/{import}/sheet', [DataImportController::class, 'selectSheet'])->whereNumber('import')->middleware('throttle:30,1')->name('imports.sheet');
     Route::post('/imports/{import}/validate', [DataImportController::class, 'validateMapping'])->whereNumber('import')->middleware('throttle:30,1')->name('imports.validate');
     Route::post('/imports/{import}/confirm', [DataImportController::class, 'confirm'])->whereNumber('import')->middleware('throttle:10,1')->name('imports.confirm');
     Route::get('/imports/{import}/errors', [DataImportController::class, 'errorReport'])->whereNumber('import')->name('imports.errors');
+    Route::get('/imports/{import}/file', [DataImportController::class, 'downloadFile'])->whereNumber('import')->name('imports.file');
 
     // Projects
     Route::get('/projects', [ProjectController::class, 'index'])->name('projects.index');
@@ -192,6 +198,7 @@ Route::middleware(['auth', 'company'])->group(function () {
                 Route::put('/cost-build-up', [BoqItemWorkspaceController::class, 'saveCostBuildUp'])->name('cost-build-up.save');
                 Route::get('/cost-build-up/suggest-rate', [BoqItemWorkspaceController::class, 'suggestCostRate'])->name('cost-build-up.suggest-rate');
                 Route::put('/material-norms', [BoqItemWorkspaceController::class, 'saveMaterialNorms'])->name('material-norms.save');
+                Route::post('/material-norms/apply-recipe', [BoqItemWorkspaceController::class, 'applyRecipe'])->name('material-norms.apply-recipe');
                 Route::post('/material-norms/from-cost', [BoqItemWorkspaceController::class, 'importNormsFromCost'])->name('material-norms.from-cost');
                 Route::get('/material-norms/template', [BoqItemWorkspaceController::class, 'materialNormsTemplate'])->name('material-norms.template');
                 Route::post('/bbs/enable', [BoqItemWorkspaceController::class, 'enableBbs'])->name('bbs.enable');
@@ -210,13 +217,23 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/material-requirement', [MaterialRequirementController::class, 'index'])->name('projects.material-requirement.index');
         Route::get('/material-requirement/export', [MaterialRequirementController::class, 'export'])->name('projects.material-requirement.export');
         Route::post('/material-requirement/create-mr', [MaterialRequirementController::class, 'createMr'])->name('projects.material-requirement.create-mr');
-        Route::get('/material-requirement/materials/{material}', [MaterialRequirementController::class, 'show'])->whereNumber('material')->name('projects.material-requirement.show');
+        // Material is a company master (not project-owned); skip parent scope binding.
+        Route::get('/material-requirement/materials/{material}', [MaterialRequirementController::class, 'show'])
+            ->whereNumber('material')
+            ->withoutScopedBindings()
+            ->name('projects.material-requirement.show');
 
         // Advanced BOQ Stage 7 — material & steel reconciliation (read / analysis only)
         Route::get('/material-reconciliation', [MaterialReconciliationController::class, 'index'])->name('projects.material-reconciliation.index');
         Route::get('/material-reconciliation/export', [MaterialReconciliationController::class, 'export'])->name('projects.material-reconciliation.export');
-        Route::get('/material-reconciliation/materials/{material}', [MaterialReconciliationController::class, 'show'])->whereNumber('material')->name('projects.material-reconciliation.show');
-        Route::get('/material-reconciliation/materials/{material}/sources', [MaterialReconciliationController::class, 'sources'])->whereNumber('material')->name('projects.material-reconciliation.sources');
+        Route::get('/material-reconciliation/materials/{material}', [MaterialReconciliationController::class, 'show'])
+            ->whereNumber('material')
+            ->withoutScopedBindings()
+            ->name('projects.material-reconciliation.show');
+        Route::get('/material-reconciliation/materials/{material}/sources', [MaterialReconciliationController::class, 'sources'])
+            ->whereNumber('material')
+            ->withoutScopedBindings()
+            ->name('projects.material-reconciliation.sources');
         Route::get('/steel-reconciliation', [MaterialReconciliationController::class, 'steelIndex'])->name('projects.steel-reconciliation.index');
         Route::get('/steel-reconciliation/export', [MaterialReconciliationController::class, 'steelExport'])->name('projects.steel-reconciliation.export');
         Route::get('/steel-reconciliation/diameter', [MaterialReconciliationController::class, 'steelShow'])->name('projects.steel-reconciliation.show');
@@ -700,6 +717,37 @@ Route::middleware(['auth', 'company'])->group(function () {
         });
     });
 
+    Route::prefix('/coefficients')->name('coefficients.')->group(function () {
+        Route::prefix('/recipes')->name('recipes.')->group(function () {
+            Route::get('/', [MaterialRecipeController::class, 'index'])->name('index');
+            Route::get('/create', [MaterialRecipeController::class, 'create'])->name('create');
+            Route::post('/', [MaterialRecipeController::class, 'store'])->name('store');
+            Route::get('/{recipe}', [MaterialRecipeController::class, 'show'])->whereNumber('recipe')->name('show');
+            Route::put('/{recipe}', [MaterialRecipeController::class, 'update'])->whereNumber('recipe')->name('update');
+            Route::post('/{recipe}/activate', [MaterialRecipeController::class, 'activate'])->whereNumber('recipe')->name('activate');
+            Route::post('/{recipe}/new-version', [MaterialRecipeController::class, 'newVersion'])->whereNumber('recipe')->name('new-version');
+        });
+        Route::prefix('/conversions')->name('conversions.')->group(function () {
+            Route::get('/', [UnitConversionController::class, 'index'])->name('index');
+            Route::post('/', [UnitConversionController::class, 'store'])->name('store');
+            Route::put('/{conversion}', [UnitConversionController::class, 'update'])->whereNumber('conversion')->name('update');
+            Route::delete('/{conversion}', [UnitConversionController::class, 'destroy'])->whereNumber('conversion')->name('destroy');
+        });
+        Route::prefix('/steel-profiles')->name('steel-profiles.')->group(function () {
+            Route::get('/', [SteelUnitWeightProfileController::class, 'index'])->name('index');
+            Route::get('/create', [SteelUnitWeightProfileController::class, 'create'])->name('create');
+            Route::post('/', [SteelUnitWeightProfileController::class, 'store'])->name('store');
+            Route::get('/{steelProfile}', [SteelUnitWeightProfileController::class, 'show'])->whereNumber('steelProfile')->name('show');
+            Route::put('/{steelProfile}', [SteelUnitWeightProfileController::class, 'update'])->whereNumber('steelProfile')->name('update');
+            Route::post('/{steelProfile}/activate', [SteelUnitWeightProfileController::class, 'activate'])->whereNumber('steelProfile')->name('activate');
+        });
+        Route::prefix('/rate-library')->name('rate-library.')->group(function () {
+            Route::get('/', [CostingRateLibraryController::class, 'index'])->name('index');
+            Route::post('/', [CostingRateLibraryController::class, 'store'])->name('store');
+            Route::put('/{entry}', [CostingRateLibraryController::class, 'update'])->whereNumber('entry')->name('update');
+        });
+    });
+
     // Masters (items, units, vendors, clients, ...) share one controller driven by MasterRegistry.
     Route::prefix('/masters/{master}')->name('masters.')
         ->whereIn('master', MasterRegistry::slugs())
@@ -789,6 +837,7 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/company', [CompanySettingsController::class, 'edit'])->name('company.edit');
         Route::put('/company', [CompanySettingsController::class, 'update'])->name('company.update');
         Route::put('/company/procurement', [CompanySettingsController::class, 'updateProcurement'])->name('company.procurement');
+        Route::post('/company/boq', [CompanySettingsController::class, 'updateBoq'])->name('company.boq');
         Route::post('/company/logo', [BrandingController::class, 'storeLogo'])->name('company.logo.store');
         Route::delete('/company/logo', [BrandingController::class, 'destroyLogo'])->name('company.logo.destroy');
         Route::post('/company/favicon', [BrandingController::class, 'storeFavicon'])->name('company.favicon.store');

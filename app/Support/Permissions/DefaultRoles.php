@@ -55,7 +55,8 @@ final class DefaultRoles
                 'permissions' => [
                     'dashboard.view', 'approvals.view', 'projects.view', 'projects.update', 'projects.manage_team', 'projects.import', 'sites.*',
                     'boq.view', 'boq.create', 'boq.update', 'boq.submit', 'boq.import', 'boq.view_costs', 'boq.manage_cost',
-                    'boq.view_material_requirements', 'boq.manage_material_norms', 'boq.view_bbs', 'boq.manage_bbs', 'boq.approve_bbs', 'boq.view_reconciliation',
+                    'boq.view_material_requirements', 'boq.manage_material_norms', 'boq.manage_recipes', 'boq.manage_unit_conversions', 'boq.manage_steel_profiles', 'boq.manage_rate_library',
+                    'boq.view_bbs', 'boq.manage_bbs', 'boq.manage_bbs_adjustments', 'boq.approve_bbs', 'boq.view_reconciliation',
                     'boq.view_variations', 'boq.manage_variations', 'boq.approve_variations', 'rate_analysis.view',
                     'budget.view', 'planning.*', 'site_diary.*', 'dpr.*', 'material_requests.*', 'purchase.view',
                     'grn.view', 'grn.approve', 'inventory.view', 'labour.*', 'subcontract.view', 'subcontract.create',
@@ -116,7 +117,8 @@ final class DefaultRoles
                 'permissions' => [
                     'dashboard.view', 'approvals.view', 'projects.view', 'boq.view', 'boq.create', 'boq.update',
                     'boq.submit', 'boq.import', 'boq.export', 'boq.view_costs', 'boq.manage_cost',
-                    'boq.view_material_requirements', 'boq.manage_material_norms', 'boq.view_bbs', 'boq.manage_bbs', 'boq.view_reconciliation',
+                    'boq.view_material_requirements', 'boq.manage_material_norms', 'boq.manage_recipes', 'boq.manage_unit_conversions', 'boq.manage_steel_profiles', 'boq.manage_rate_library',
+                    'boq.view_bbs', 'boq.manage_bbs', 'boq.manage_bbs_adjustments', 'boq.view_reconciliation',
                     'boq.view_variations', 'boq.manage_variations', 'rate_analysis.*', 'budget.view',
                     'billing.view', 'billing.create', 'billing.update', 'billing.submit', 'billing.export',
                     'subcontract.view', 'subcontract.create', 'subcontract.update', 'dpr.view', 'planning.view',

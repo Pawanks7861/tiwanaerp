@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Boq;
 use App\Exports\MaterialReconciliationExport;
 use App\Exports\SteelReconciliationExport;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Boq\Concerns\RequiresAdvancedBoqCalculations;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Masters\Material;
 use App\Models\Masters\MaterialCategory;
@@ -19,12 +20,15 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class MaterialReconciliationController extends Controller
 {
+    use RequiresAdvancedBoqCalculations;
+
     public function __construct(private readonly MaterialReconciliationService $reconciliation) {}
 
     public function index(Request $request, Project $project): Response
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_reconciliation'), 403);
+        $this->requireAdvancedBoqCalculations();
 
         $filters = $request->validate([
             'material_id' => ['nullable', 'integer'],
@@ -78,6 +82,7 @@ class MaterialReconciliationController extends Controller
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_reconciliation'), 403);
+        $this->requireAdvancedBoqCalculations();
         abort_unless((int) $material->company_id === (int) $project->company_id, 404);
 
         $unit = $request->string('unit')->toString() ?: null;
@@ -108,6 +113,7 @@ class MaterialReconciliationController extends Controller
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_reconciliation'), 403);
+        $this->requireAdvancedBoqCalculations();
         abort_unless((int) $material->company_id === (int) $project->company_id, 404);
 
         $data = $request->validate([
@@ -132,6 +138,7 @@ class MaterialReconciliationController extends Controller
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_reconciliation'), 403);
+        $this->requireAdvancedBoqCalculations();
 
         $filters = $request->validate([
             'material_id' => ['nullable', 'integer'],
@@ -155,6 +162,7 @@ class MaterialReconciliationController extends Controller
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_reconciliation'), 403);
+        $this->requireAdvancedBoqCalculations();
 
         $filters = $request->validate([
             'diameter_mm' => ['nullable', 'integer'],
@@ -189,6 +197,7 @@ class MaterialReconciliationController extends Controller
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_reconciliation'), 403);
+        $this->requireAdvancedBoqCalculations();
 
         $data = $request->validate([
             'diameter_mm' => ['required', 'integer', 'min:1'],
@@ -213,6 +222,7 @@ class MaterialReconciliationController extends Controller
     {
         Gate::authorize('view', $project);
         abort_unless($request->user()->can('boq.view_reconciliation'), 403);
+        $this->requireAdvancedBoqCalculations();
 
         $filters = $request->validate([
             'diameter_mm' => ['nullable', 'integer'],

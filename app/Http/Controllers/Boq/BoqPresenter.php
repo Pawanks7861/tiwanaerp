@@ -51,6 +51,24 @@ final class BoqPresenter
 
         if ($withCosts) {
             $data += $item->only(BoqItem::COST_FIELDS);
+            $data['simple_materials_initialized'] = (bool) $item->simple_materials_initialized;
+            $materials = $item->relationLoaded('simpleMaterialCosts')
+                ? $item->simpleMaterialCosts
+                : $item->simpleMaterialCosts()->get();
+            $data['simple_materials'] = $materials->map(fn ($row) => [
+                'id' => $row->id,
+                'material_id' => $row->material_id,
+                'material_name' => $row->material_name,
+                'quantity' => (string) $row->quantity,
+                'unit' => $row->unit,
+                'rate' => (string) $row->rate,
+                'amount' => (string) $row->amount,
+                'sequence' => $row->sequence,
+            ])->values()->all();
+            $totals = app(\App\Services\Boq\SimpleBoqMaterialCostService::class)
+                ->totals($materials, (string) $item->quantity);
+            $data['simple_material_cost_per_unit'] = $totals['per_unit'];
+            $data['simple_material_cost_total'] = $totals['estimated_total'];
         }
 
         return $data;
