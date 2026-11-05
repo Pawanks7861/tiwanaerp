@@ -2,6 +2,10 @@
 
 use App\Http\Controllers\Admin\ApprovalWorkflowController;
 use App\Http\Controllers\Ai\AiAssistantController;
+use App\Http\Controllers\Boq\BoqItemWorkspaceController;
+use App\Http\Controllers\Boq\MaterialRequirementController;
+use App\Http\Controllers\Boq\MaterialReconciliationController;
+use App\Http\Controllers\Boq\BoqVariationController;
 use App\Http\Controllers\Tutorial\TutorialController;
 use App\Http\Controllers\Imports\DataImportController;
 use App\Http\Controllers\Admin\AuditLogController;
@@ -10,6 +14,7 @@ use App\Http\Controllers\Admin\CompanySettingsController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Boq\BoqController;
+use App\Http\Controllers\Boq\BoqDashboardController;
 use App\Http\Controllers\Boq\BoqExcelController;
 use App\Http\Controllers\Boq\BoqSectionController;
 use App\Http\Controllers\Boq\ProjectBudgetController;
@@ -158,6 +163,7 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::delete('/team/{member}', [ProjectTeamController::class, 'destroy'])->name('projects.team.destroy');
 
         // BOQ
+        Route::get('/boq-dashboard', BoqDashboardController::class)->name('projects.boq-dashboard');
         Route::get('/boqs', [BoqController::class, 'index'])->name('projects.boqs.index');
         Route::post('/boqs', [BoqController::class, 'store'])->name('projects.boqs.store');
         Route::get('/boqs/import-template', [BoqExcelController::class, 'template'])->name('projects.boqs.template');
@@ -174,6 +180,60 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::post('/sections', [BoqSectionController::class, 'store'])->name('sections.store');
             Route::put('/sections/{section}', [BoqSectionController::class, 'update'])->whereNumber('section')->name('sections.update');
             Route::delete('/sections/{section}', [BoqSectionController::class, 'destroy'])->whereNumber('section')->name('sections.destroy');
+
+            // Advanced BOQ — item workspace (measurements Stage 1–2, cost build-up Stage 3)
+            Route::prefix('/items/{item}')->whereNumber('item')->name('items.')->group(function () {
+                Route::get('/', [BoqItemWorkspaceController::class, 'show'])->name('workspace');
+                Route::put('/quantity-source', [BoqItemWorkspaceController::class, 'setQuantitySource'])->name('quantity-source');
+                Route::put('/measurements', [BoqItemWorkspaceController::class, 'saveMeasurements'])->name('measurements.save');
+                Route::post('/measurements/{sheet}/submit', [BoqItemWorkspaceController::class, 'submit'])->whereNumber('sheet')->name('measurements.submit');
+                Route::post('/measurements/{sheet}/approve', [BoqItemWorkspaceController::class, 'approve'])->whereNumber('sheet')->name('measurements.approve');
+                Route::post('/measurements/{sheet}/reject', [BoqItemWorkspaceController::class, 'reject'])->whereNumber('sheet')->name('measurements.reject');
+                Route::put('/cost-build-up', [BoqItemWorkspaceController::class, 'saveCostBuildUp'])->name('cost-build-up.save');
+                Route::get('/cost-build-up/suggest-rate', [BoqItemWorkspaceController::class, 'suggestCostRate'])->name('cost-build-up.suggest-rate');
+                Route::put('/material-norms', [BoqItemWorkspaceController::class, 'saveMaterialNorms'])->name('material-norms.save');
+                Route::post('/material-norms/from-cost', [BoqItemWorkspaceController::class, 'importNormsFromCost'])->name('material-norms.from-cost');
+                Route::get('/material-norms/template', [BoqItemWorkspaceController::class, 'materialNormsTemplate'])->name('material-norms.template');
+                Route::post('/bbs/enable', [BoqItemWorkspaceController::class, 'enableBbs'])->name('bbs.enable');
+                Route::get('/bbs/template', [BoqItemWorkspaceController::class, 'bbsTemplate'])->name('bbs.template');
+                Route::put('/bbs/{bbs}', [BoqItemWorkspaceController::class, 'saveBbs'])->whereNumber('bbs')->name('bbs.save');
+                Route::put('/bbs/{bbs}/maps', [BoqItemWorkspaceController::class, 'saveBbsMaps'])->whereNumber('bbs')->name('bbs.maps');
+                Route::post('/bbs/{bbs}/submit', [BoqItemWorkspaceController::class, 'submitBbs'])->whereNumber('bbs')->name('bbs.submit');
+                Route::post('/bbs/{bbs}/approve', [BoqItemWorkspaceController::class, 'approveBbs'])->whereNumber('bbs')->name('bbs.approve');
+                Route::post('/bbs/{bbs}/reject', [BoqItemWorkspaceController::class, 'rejectBbs'])->whereNumber('bbs')->name('bbs.reject');
+                Route::get('/bbs/{bbs}/export', [BoqItemWorkspaceController::class, 'exportBbs'])->whereNumber('bbs')->name('bbs.export');
+                Route::post('/bbs/{bbs}/import', [BoqItemWorkspaceController::class, 'importBbs'])->whereNumber('bbs')->name('bbs.import');
+            });
+        });
+
+        // Advanced BOQ Stage 4 — project material requirement (planning only)
+        Route::get('/material-requirement', [MaterialRequirementController::class, 'index'])->name('projects.material-requirement.index');
+        Route::get('/material-requirement/export', [MaterialRequirementController::class, 'export'])->name('projects.material-requirement.export');
+        Route::post('/material-requirement/create-mr', [MaterialRequirementController::class, 'createMr'])->name('projects.material-requirement.create-mr');
+        Route::get('/material-requirement/materials/{material}', [MaterialRequirementController::class, 'show'])->whereNumber('material')->name('projects.material-requirement.show');
+
+        // Advanced BOQ Stage 7 — material & steel reconciliation (read / analysis only)
+        Route::get('/material-reconciliation', [MaterialReconciliationController::class, 'index'])->name('projects.material-reconciliation.index');
+        Route::get('/material-reconciliation/export', [MaterialReconciliationController::class, 'export'])->name('projects.material-reconciliation.export');
+        Route::get('/material-reconciliation/materials/{material}', [MaterialReconciliationController::class, 'show'])->whereNumber('material')->name('projects.material-reconciliation.show');
+        Route::get('/material-reconciliation/materials/{material}/sources', [MaterialReconciliationController::class, 'sources'])->whereNumber('material')->name('projects.material-reconciliation.sources');
+        Route::get('/steel-reconciliation', [MaterialReconciliationController::class, 'steelIndex'])->name('projects.steel-reconciliation.index');
+        Route::get('/steel-reconciliation/export', [MaterialReconciliationController::class, 'steelExport'])->name('projects.steel-reconciliation.export');
+        Route::get('/steel-reconciliation/diameter', [MaterialReconciliationController::class, 'steelShow'])->name('projects.steel-reconciliation.show');
+
+        // Advanced BOQ Stage 8 — Variation / Extra Items
+        Route::get('/variations', [BoqVariationController::class, 'index'])->name('projects.variations.index');
+        Route::get('/variations/export', [BoqVariationController::class, 'export'])->name('projects.variations.export');
+        Route::get('/variations/create', [BoqVariationController::class, 'create'])->name('projects.variations.create');
+        Route::post('/variations', [BoqVariationController::class, 'store'])->name('projects.variations.store');
+        Route::prefix('/variations/{variation}')->whereNumber('variation')->name('projects.variations.')->group(function () {
+            Route::get('/', [BoqVariationController::class, 'show'])->name('show');
+            Route::get('/edit', [BoqVariationController::class, 'edit'])->name('edit');
+            Route::put('/', [BoqVariationController::class, 'update'])->name('update');
+            Route::delete('/', [BoqVariationController::class, 'destroy'])->name('destroy');
+            Route::post('/submit', [BoqVariationController::class, 'submit'])->name('submit');
+            Route::post('/approve', [BoqVariationController::class, 'approve'])->name('approve');
+            Route::post('/reject', [BoqVariationController::class, 'reject'])->name('reject');
         });
 
         // Rate analysis

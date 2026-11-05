@@ -92,7 +92,40 @@ const details = computed(() => {
             <StatCard label="Open NCRs" :value="ops.open_ncrs" icon="clipboard" tone="amber" />
             <StatCard label="Inspections pending" :value="ops.pending_inspections" icon="check-circle" />
             <StatCard label="Low stock items" :value="ops.low_stock" icon="archive" />
+            <StatCard
+                v-if="ops.variations"
+                label="Variations"
+                :value="ops.variations.count"
+                icon="document"
+                tone="slate"
+                :hint="ops.variations.pending_count ? `${ops.variations.pending_count} pending` : null"
+                :href="route('projects.variations.index', project.id)"
+            />
         </div>
+
+        <AppCard v-if="ops?.variations && (ops.variations.approved_value != null || ops.variations.pending_value != null)" title="Variations" class="mt-4">
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div>
+                    <p class="text-xs text-slate-500">Approved value</p>
+                    <p class="mt-1 text-lg font-semibold tabular">{{ formatMoney(ops.variations.approved_value) }}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-500">Pending value</p>
+                    <p class="mt-1 text-lg font-semibold tabular text-amber-800">{{ formatMoney(ops.variations.pending_value) }}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-500">Approved count</p>
+                    <p class="mt-1 text-lg font-semibold tabular">{{ ops.variations.approved_count }}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-500">Pending count</p>
+                    <p class="mt-1 text-lg font-semibold tabular">{{ ops.variations.pending_count }}</p>
+                </div>
+            </div>
+            <Link :href="route('projects.boq-dashboard', project.id)" class="mt-3 inline-block text-sm font-medium text-brand-700 hover:underline">
+                Open BOQ Dashboard →
+            </Link>
+        </AppCard>
 
         <div v-if="fin" class="mt-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             <StatCard label="Budget" :value="formatMoney(fin.budget)" icon="banknotes" tone="brand" />
@@ -104,6 +137,35 @@ const details = computed(() => {
             <StatCard label="Outstanding" :value="formatMoney(fin.outstanding)" icon="receipt" tone="amber" />
             <StatCard v-if="fin.stock_value !== undefined" label="Stock value" :value="formatMoney(fin.stock_value)" icon="archive" />
         </div>
+
+        <AppCard v-if="fin?.estimated_vs_actual" title="Estimated vs Actual Cost" class="mt-4">
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div>
+                    <p class="text-xs text-slate-500">Estimated</p>
+                    <p class="mt-1 text-lg font-semibold tabular">{{ formatMoney(fin.estimated_vs_actual.estimated_cost) }}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-500">Actual</p>
+                    <p class="mt-1 text-lg font-semibold tabular">{{ formatMoney(fin.estimated_vs_actual.actual_cost) }}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-500">Variance</p>
+                    <p class="mt-1 text-lg font-semibold tabular">{{ formatMoney(fin.estimated_vs_actual.variance) }}</p>
+                    <p v-if="fin.estimated_vs_actual.variance_percent != null" class="text-xs text-slate-500">{{ fin.estimated_vs_actual.variance_percent }}%</p>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-500">Utilization</p>
+                    <p class="mt-1 text-lg font-semibold tabular">{{ fin.estimated_vs_actual.utilization_percent != null ? `${fin.estimated_vs_actual.utilization_percent}%` : '—' }}</p>
+                </div>
+            </div>
+            <p v-if="fin.estimated_vs_actual.has_unallocated" class="mt-3 text-xs text-amber-700">Some project costs are not linked to BOQ items.</p>
+            <Link
+                :href="fin.estimated_vs_actual.report_url"
+                class="mt-3 inline-block text-sm font-medium text-brand-700 hover:underline"
+            >
+                Open Estimated vs Actual report →
+            </Link>
+        </AppCard>
 
         <AppCard v-if="fin?.cost_by_head" title="Cost by head" class="mt-4">
             <Chart type="bar" :categories="fin.cost_by_head.categories" :series="[{ name: 'Actual', data: fin.cost_by_head.series }]" money />

@@ -601,6 +601,15 @@ const colCount = computed(() => 8 + (costs.value ? 7 : 0));
                                         </template>
                                         <td class="px-2 py-1.5 text-right font-medium text-slate-900 tabular">{{ formatMoney(calc[row._key].client_amount) }}</td>
                                         <td class="px-1 py-1 text-right whitespace-nowrap">
+                                            <Link
+                                                v-if="row.id"
+                                                :href="route('projects.boqs.items.workspace', [project.id, boq.id, row.id])"
+                                                class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-700"
+                                                aria-label="Open item workspace"
+                                                title="Measurements & details"
+                                            >
+                                                <Icon name="document" :size="14" />
+                                            </Link>
                                             <button type="button" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" :aria-label="editable ? 'Edit details' : 'View details'" @click="editingRow = row">
                                                 <Icon :name="editable ? 'pencil' : 'info'" :size="14" />
                                             </button>

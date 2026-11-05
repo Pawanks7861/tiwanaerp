@@ -11,7 +11,32 @@ export function buildProjectTabs({ projectId, can, procurementHome = null, finan
 
         can('drawings.view') && { key: 'drawings', label: 'Drawing Management', icon: 'grid', href: route('projects.drawings.index', projectId) },
 
+        can('boq.view') && { key: 'boq-dashboard', label: 'BOQ Dashboard', icon: 'document', href: route('projects.boq-dashboard', projectId) },
         can('boq.view') && { key: 'boq', label: 'BOQ Management', icon: 'document', href: route('projects.boqs.index', projectId) },
+        can('boq.view_material_requirements') && {
+            key: 'material-requirement',
+            label: 'Material Requirement',
+            icon: 'archive',
+            href: route('projects.material-requirement.index', projectId),
+        },
+        can('boq.view_reconciliation') && {
+            key: 'material-reconciliation',
+            label: 'Material Reconciliation',
+            icon: 'scale',
+            href: route('projects.material-reconciliation.index', projectId),
+        },
+        can('boq.view_reconciliation') && {
+            key: 'steel-reconciliation',
+            label: 'Steel Reconciliation',
+            icon: 'scale',
+            href: route('projects.steel-reconciliation.index', projectId),
+        },
+        can('boq.view_variations') && {
+            key: 'variations',
+            label: 'Variations',
+            icon: 'document',
+            href: route('projects.variations.index', projectId),
+        },
         can('rate_analysis.view') &&
             can('boq.view_costs') && { key: 'rate-analysis', label: 'Rate Analysis', icon: 'scale', href: route('projects.rate-analyses.index', projectId) },
 

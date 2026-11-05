@@ -11,6 +11,7 @@ use App\Models\Boq\BoqItem;
 use App\Models\Planning\ProjectMilestone;
 use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
+use App\Services\Boq\EffectiveBoqQuantityService;
 use App\Services\Planning\ProgressLedgerService;
 use App\Support\Math\Decimal;
 use App\Support\Planning\TaskDelay;
@@ -32,7 +33,10 @@ class ProgressController extends Controller
 {
     private const PER_PAGE = 50;
 
-    public function __construct(private readonly ProgressLedgerService $ledger) {}
+    public function __construct(
+        private readonly ProgressLedgerService $ledger,
+        private readonly EffectiveBoqQuantityService $effectiveQty,
+    ) {}
 
     public function __invoke(Request $request, Project $project): Response
     {
@@ -94,7 +98,7 @@ class ProgressController extends Controller
                     ->get(['id', 'item_code', 'name', 'unit_id', 'quantity', 'line_uid'])
                     ->map(function (BoqItem $i) use ($executed) {
                         $done = Decimal::of($executed[$i->line_uid] ?? '0');
-                        $qty = Decimal::of($i->quantity);
+                        $qty = Decimal::of($this->effectiveQty->forItem($i));
 
                         return [
                             'id' => $i->id,

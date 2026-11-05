@@ -4,6 +4,7 @@ namespace App\Models\Projects;
 
 use App\Enums\ProjectStatus;
 use App\Models\Boq\Boq;
+use App\Models\Boq\BoqVariation;
 use App\Models\Boq\ProjectBudget;
 use App\Models\Boq\ProjectBudgetLine;
 use App\Models\Boq\RateAnalysis;
@@ -160,6 +161,14 @@ class Project extends Model
     public function boqs(): HasMany
     {
         return $this->hasMany(Boq::class);
+    }
+
+    /**
+     * @return HasMany<BoqVariation, $this>
+     */
+    public function variations(): HasMany
+    {
+        return $this->hasMany(BoqVariation::class);
     }
 
     /**

@@ -42,7 +42,9 @@ final class DefaultRoles
                 'description' => 'Views everything and gives final approvals.',
                 'permissions' => [
                     '*.view', 'projects.view_all', 'dashboard.view_financials', 'reports.view_financial', 'reports.export',
-                    'boq.approve', 'boq.view_costs', 'budget.approve', 'purchase.approve', 'bid_comparison.approve',
+                    'boq.approve', 'boq.view_costs', 'boq.view_material_requirements', 'boq.view_bbs', 'boq.approve_bbs', 'boq.view_reconciliation',
+                    'boq.view_variations', 'boq.manage_variations', 'boq.approve_variations',
+                    'budget.approve', 'purchase.approve', 'bid_comparison.approve',
                     'subcontract.approve_wo', 'subcontract.certify_bill', 'billing.certify', 'vendor_bills.approve',
                     'payments.approve', 'expenses.approve', 'crm.quotations.approve', 'inventory.view_valuation',
                     'inventory.approve_adjustment', 'ai.use',
@@ -52,7 +54,9 @@ final class DefaultRoles
                 'description' => 'Runs assigned projects: planning, site, approvals.',
                 'permissions' => [
                     'dashboard.view', 'approvals.view', 'projects.view', 'projects.update', 'projects.manage_team', 'projects.import', 'sites.*',
-                    'boq.view', 'boq.create', 'boq.update', 'boq.submit', 'boq.import', 'boq.view_costs', 'rate_analysis.view',
+                    'boq.view', 'boq.create', 'boq.update', 'boq.submit', 'boq.import', 'boq.view_costs', 'boq.manage_cost',
+                    'boq.view_material_requirements', 'boq.manage_material_norms', 'boq.view_bbs', 'boq.manage_bbs', 'boq.approve_bbs', 'boq.view_reconciliation',
+                    'boq.view_variations', 'boq.manage_variations', 'boq.approve_variations', 'rate_analysis.view',
                     'budget.view', 'planning.*', 'site_diary.*', 'dpr.*', 'material_requests.*', 'purchase.view',
                     'grn.view', 'grn.approve', 'inventory.view', 'labour.*', 'subcontract.view', 'subcontract.create',
                     'subcontract.update', 'subcontract.delete', 'subcontract.certify_bill', 'equipment.view',
@@ -63,7 +67,8 @@ final class DefaultRoles
             self::SITE_ENGINEER => [
                 'description' => 'Daily site work on assigned projects.',
                 'permissions' => [
-                    'dashboard.view', 'approvals.view', 'projects.view', 'sites.view', 'boq.view', 'planning.view',
+                    'dashboard.view', 'approvals.view', 'projects.view', 'sites.view', 'boq.view', 'boq.view_material_requirements', 'boq.view_bbs', 'boq.view_reconciliation',
+                    'boq.view_variations', 'boq.manage_variations', 'planning.view',
                     'planning.update_progress', 'site_diary.view', 'site_diary.create', 'site_diary.update',
                     'site_diary.submit', 'dpr.view', 'dpr.create', 'dpr.update', 'dpr.submit',
                     'material_requests.view', 'material_requests.create', 'material_requests.update', 'material_requests.import',
@@ -76,7 +81,8 @@ final class DefaultRoles
             self::PURCHASE_MANAGER => [
                 'description' => 'Procurement from material request to purchase order.',
                 'permissions' => [
-                    'dashboard.view', 'approvals.view', 'projects.view', 'ai.use', 'material_requests.view', 'material_requests.approve',
+                    'dashboard.view', 'approvals.view', 'projects.view', 'ai.use', 'boq.view_material_requirements', 'boq.view_bbs', 'boq.view_reconciliation', 'boq.view_variations',
+                    'material_requests.view', 'material_requests.approve',
                     'rfq.*', 'vendor_quotations.*', 'bid_comparison.view', 'bid_comparison.create', 'purchase.view',
                     'purchase.create', 'purchase.update', 'purchase.submit', 'purchase.export', 'purchase.import', 'grn.view',
                     'inventory.view', 'reports.view', 'masters.items.*', 'masters.vendors.*', 'masters.units.view',
@@ -86,7 +92,8 @@ final class DefaultRoles
             self::STORE_MANAGER => [
                 'description' => 'Receipts, stock movements and issues.',
                 'permissions' => [
-                    'dashboard.view', 'approvals.view', 'projects.view', 'purchase.view', 'grn.view', 'grn.create',
+                    'dashboard.view', 'approvals.view', 'projects.view', 'boq.view_material_requirements', 'boq.view_reconciliation', 'boq.view_variations',
+                    'purchase.view', 'grn.view', 'grn.create',
                     'grn.update', 'grn.submit', 'grn.import', 'inventory.view', 'inventory.issue', 'inventory.transfer',
                     'inventory.return', 'inventory.adjust', 'inventory.import', 'material_requests.view', 'reports.view',
                     'masters.items.view', 'masters.items.import', 'masters.units.view', 'masters.warehouses.*',
@@ -108,7 +115,9 @@ final class DefaultRoles
                 'description' => 'BOQ preparation and client / subcontractor billing.',
                 'permissions' => [
                     'dashboard.view', 'approvals.view', 'projects.view', 'boq.view', 'boq.create', 'boq.update',
-                    'boq.submit', 'boq.import', 'boq.export', 'boq.view_costs', 'rate_analysis.*', 'budget.view',
+                    'boq.submit', 'boq.import', 'boq.export', 'boq.view_costs', 'boq.manage_cost',
+                    'boq.view_material_requirements', 'boq.manage_material_norms', 'boq.view_bbs', 'boq.manage_bbs', 'boq.view_reconciliation',
+                    'boq.view_variations', 'boq.manage_variations', 'rate_analysis.*', 'budget.view',
                     'billing.view', 'billing.create', 'billing.update', 'billing.submit', 'billing.export',
                     'subcontract.view', 'subcontract.create', 'subcontract.update', 'dpr.view', 'planning.view',
                     'reports.view', ...$viewMasters,

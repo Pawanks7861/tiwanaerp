@@ -13,6 +13,7 @@ use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
 use App\Models\Projects\Site;
 use App\Models\User;
+use App\Services\Boq\EffectiveBoqQuantityService;
 use App\Support\Math\Decimal;
 
 /**
@@ -83,20 +84,26 @@ final class SiteExecutionPresenter
      */
     public static function boqItemOptions(Project $project): array
     {
+        $effective = app(EffectiveBoqQuantityService::class);
+
         return BoqItem::query()
             ->whereHas('boq', fn ($q) => $q->where('project_id', $project->id)->where('is_current', true)->where('status', BoqStatus::Approved))
             ->with('unit:id,symbol')
             ->orderBy('sort_order')
-            ->get(['id', 'item_code', 'name', 'unit_id', 'quantity', 'line_uid'])
-            ->map(fn (BoqItem $i) => [
-                'value' => $i->id,
-                'label' => trim(($i->item_code ? $i->item_code.' ' : '').$i->name),
-                'description' => 'BOQ qty '.self::qty($i->quantity).' '.$i->unit?->symbol,
-                'item_code' => $i->item_code,
-                'unit_id' => $i->unit_id,
-                'unit' => $i->unit?->symbol,
-                'quantity' => $i->quantity,
-            ])->all();
+            ->get(['id', 'item_code', 'name', 'unit_id', 'quantity', 'line_uid', 'is_variation_originated'])
+            ->map(function (BoqItem $i) use ($effective) {
+                $qty = $effective->forItem($i);
+
+                return [
+                    'value' => $i->id,
+                    'label' => trim(($i->item_code ? $i->item_code.' ' : '').$i->name),
+                    'description' => 'Effective qty '.self::qty($qty).' '.$i->unit?->symbol,
+                    'item_code' => $i->item_code,
+                    'unit_id' => $i->unit_id,
+                    'unit' => $i->unit?->symbol,
+                    'quantity' => $qty,
+                ];
+            })->all();
     }
 
     /**

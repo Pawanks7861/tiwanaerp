@@ -67,4 +67,48 @@ class Role extends SpatieRole
         $this->unsetRelation('permissions');
         $registrar->forgetCachedPermissions();
     }
+
+    /**
+     * Grant only the listed permissions that this role does not already have.
+     * Never removes existing permissions (safe for lightly customised system roles).
+     *
+     * @param  list<string>  $names
+     * @return list<string> names newly granted
+     */
+    public function grantMissingPermissionNames(array $names): array
+    {
+        $registrar = app(PermissionRegistrar::class);
+        $permissionClass = $registrar->getPermissionClass();
+        $wanted = $permissionClass::query()
+            ->where('guard_name', $this->guard_name)
+            ->whereIn('name', $names)
+            ->pluck('id', 'name');
+
+        $have = $this->permissions()->pluck('id')->all();
+        $toAdd = [];
+        $addedNames = [];
+        foreach ($wanted as $name => $id) {
+            if (! in_array((int) $id, array_map('intval', $have), true)) {
+                $toAdd[] = (int) $id;
+                $addedNames[] = (string) $name;
+            }
+        }
+
+        if ($toAdd === []) {
+            return [];
+        }
+
+        $relation = $this->permissions();
+        $pivot = $relation->newPivotStatement();
+        $roleKey = $relation->getForeignPivotKeyName();
+        $permissionKey = $relation->getRelatedPivotKeyName();
+        foreach (array_chunk($toAdd, 500) as $chunk) {
+            $pivot->clone()->insert(array_map(fn ($id) => [$roleKey => $this->getKey(), $permissionKey => $id], $chunk));
+        }
+
+        $this->unsetRelation('permissions');
+        $registrar->forgetCachedPermissions();
+
+        return $addedNames;
+    }
 }

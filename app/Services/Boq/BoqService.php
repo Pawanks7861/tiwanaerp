@@ -268,9 +268,24 @@ class BoqService
             $row['client_rate'] = $costs['client_rate'];
         }
 
+        $source = $item->quantity_source instanceof \App\Enums\Boq\QuantitySource
+            ? $item->quantity_source
+            : \App\Enums\Boq\QuantitySource::tryFrom((string) ($row['quantity_source'] ?? $item->getAttribute('quantity_source') ?? 'direct'))
+                ?? \App\Enums\Boq\QuantitySource::Direct;
+
+        if (array_key_exists('quantity_source', $row) && $canEditCosts) {
+            // quantity_source is managed via item workspace / measurement service; ignore silent client changes here
+        }
+
+        $quantity = (string) ($row['quantity'] ?? '0');
+        if ($source === \App\Enums\Boq\QuantitySource::Measurement && $item->exists) {
+            // Authoritative qty comes from approved measurement sheet — do not trust grid quantity.
+            $quantity = (string) $item->quantity;
+        }
+
         $calc = BoqCalculator::line([
             ...$costs,
-            'quantity' => (string) ($row['quantity'] ?? '0'),
+            'quantity' => $quantity,
             'client_rate' => $row['client_rate'] ?? null,
         ]);
 

@@ -3,6 +3,12 @@
 namespace App\Reports;
 
 use App\Models\User;
+use App\Reports\Definitions\BoqCostBuildUpReport;
+use App\Reports\Definitions\BoqHealthRiskReport;
+use App\Reports\Definitions\BoqItemAnalysisReport;
+use App\Reports\Definitions\BoqMeasurementSummaryReport;
+use App\Reports\Definitions\BoqProcurementGapReport;
+use App\Reports\Definitions\BoqProgressBillingReport;
 use App\Reports\Definitions\BoqProgressReport;
 use App\Reports\Definitions\BudgetVsActualReport;
 use App\Reports\Definitions\CashFlowReport;
@@ -10,6 +16,7 @@ use App\Reports\Definitions\CostByHeadReport;
 use App\Reports\Definitions\CrmFunnelReport;
 use App\Reports\Definitions\DelayedTasksReport;
 use App\Reports\Definitions\EquipmentReport;
+use App\Reports\Definitions\EstimatedVsActualCostReport;
 use App\Reports\Definitions\LabourCostReport;
 use App\Reports\Definitions\MaterialConsumptionReport;
 use App\Reports\Definitions\PayablesReport;
@@ -31,6 +38,13 @@ final class ReportRegistry
     public const REPORTS = [
         ProjectCostSummaryReport::class,
         BudgetVsActualReport::class,
+        EstimatedVsActualCostReport::class,
+        BoqCostBuildUpReport::class,
+        BoqItemAnalysisReport::class,
+        BoqMeasurementSummaryReport::class,
+        BoqProgressBillingReport::class,
+        BoqProcurementGapReport::class,
+        BoqHealthRiskReport::class,
         CostByHeadReport::class,
         BoqProgressReport::class,
         ProgressReport::class,

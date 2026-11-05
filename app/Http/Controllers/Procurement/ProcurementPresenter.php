@@ -152,13 +152,20 @@ final class ProcurementPresenter
             return [];
         }
 
-        return BoqItem::query()->where('boq_id', $boqId)->orderBy('sort_order')->get(['id', 'item_code', 'name', 'unit_id', 'quantity'])
-            ->map(fn (BoqItem $i) => [
-                'value' => $i->id,
-                'label' => trim(($i->item_code ? $i->item_code.' ' : '').$i->name),
-                'description' => 'BOQ qty '.rtrim(rtrim((string) $i->quantity, '0'), '.'),
-                'unit_id' => $i->unit_id,
-            ])->all();
+        $effective = app(\App\Services\Boq\EffectiveBoqQuantityService::class);
+
+        return BoqItem::query()->where('boq_id', $boqId)->orderBy('sort_order')->get(['id', 'item_code', 'name', 'unit_id', 'quantity', 'line_uid', 'is_variation_originated'])
+            ->map(function (BoqItem $i) use ($effective) {
+                $qty = $effective->forItem($i);
+
+                return [
+                    'value' => $i->id,
+                    'label' => trim(($i->item_code ? $i->item_code.' ' : '').$i->name),
+                    'description' => 'Effective qty '.rtrim(rtrim($qty, '0'), '.'),
+                    'unit_id' => $i->unit_id,
+                    'quantity' => $qty,
+                ];
+            })->all();
     }
 
     /**

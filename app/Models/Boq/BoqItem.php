@@ -2,10 +2,12 @@
 
 namespace App\Models\Boq;
 
+use App\Enums\Boq\QuantitySource;
 use App\Models\Masters\Unit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * BOQ line. Derived amounts (cost_rate, cost_amount, selling_rate, client_amount) are always
@@ -13,8 +15,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 #[Fillable([
     'boq_section_id', 'line_uid', 'item_code', 'name', 'description', 'hsn_sac', 'unit_id', 'quantity',
+    'quantity_source', 'takeoff_reference', 'bbs_applicable',
     'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'cost_rate', 'cost_amount',
-    'margin_percent', 'selling_rate', 'client_rate', 'client_amount', 'rate_analysis_id', 'sort_order',
+    'margin_percent', 'selling_rate', 'client_rate', 'client_amount', 'rate_analysis_id',
+    'origin_variation_item_id', 'is_variation_originated', 'sort_order',
 ])]
 class BoqItem extends Model
 {
@@ -41,6 +45,9 @@ class BoqItem extends Model
     {
         return [
             'quantity' => 'decimal:4',
+            'quantity_source' => QuantitySource::class,
+            'bbs_applicable' => 'boolean',
+            'is_variation_originated' => 'boolean',
             'material_rate' => 'decimal:4',
             'labour_rate' => 'decimal:4',
             'equipment_rate' => 'decimal:4',
@@ -85,5 +92,25 @@ class BoqItem extends Model
     public function rateAnalysis(): BelongsTo
     {
         return $this->belongsTo(RateAnalysis::class);
+    }
+
+    public function measurementSheets(): HasMany
+    {
+        return $this->hasMany(BoqMeasurementSheet::class);
+    }
+
+    public function costComponents(): HasMany
+    {
+        return $this->hasMany(BoqCostComponent::class)->orderBy('sequence')->orderBy('id');
+    }
+
+    public function materialNorms(): HasMany
+    {
+        return $this->hasMany(BoqMaterialNorm::class)->orderBy('sequence')->orderBy('id');
+    }
+
+    public function bbs(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(BoqBbs::class);
     }
 }

@@ -71,13 +71,35 @@ class MaterialRequestController extends Controller
         ]);
     }
 
-    public function create(Project $project): Response
+    public function create(Request $request, Project $project): Response
     {
         Gate::authorize('create', [MaterialRequest::class, $project]);
 
+        $prefill = $request->session()->pull('mr_requirement_prefill');
+        $materialRequest = null;
+        if (is_array($prefill) && $prefill !== []) {
+            $materialRequest = [
+                'id' => null,
+                'site_id' => null,
+                'priority' => null,
+                'required_date' => null,
+                'remarks' => 'Prefill from BOQ Material Requirement (planning). Adjust quantities before submit.',
+                'items' => collect($prefill)->values()->map(fn ($line, $i) => [
+                    'id' => null,
+                    'material_id' => $line['material_id'] ?? null,
+                    'unit_id' => $line['unit_id'] ?? null,
+                    'quantity' => $line['quantity'] ?? null,
+                    'boq_item_id' => $line['boq_item_id'] ?? null,
+                    'task_id' => null,
+                    'remarks' => $line['remarks'] ?? null,
+                    'sort_order' => $i,
+                ])->all(),
+            ];
+        }
+
         return Inertia::render('Procurement/MaterialRequests/Form', [
             'project' => ProjectHeader::for($project),
-            'materialRequest' => null,
+            'materialRequest' => $materialRequest,
             ...$this->formOptions($project),
         ]);
     }

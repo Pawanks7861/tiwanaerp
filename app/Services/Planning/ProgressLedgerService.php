@@ -9,6 +9,7 @@ use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
 use App\Models\SiteExecution\Dpr;
 use App\Models\SiteExecution\DprItem;
+use App\Services\Boq\EffectiveBoqQuantityService;
 use App\Support\Math\Decimal;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -23,12 +24,15 @@ use Illuminate\Validation\ValidationException;
  * - Idempotent: every row carries a deterministic posting_ref (unique in the database):
  *   "dpr:{id}:r{revision}:item:{item}" for postings, "reversal:{entry}" for reversals.
  * - Over-progress is refused: a task cannot exceed its planned quantity and a BOQ line (by
- *   line_uid, across revisions) cannot exceed the quantity of its current approved revision.
+ *   line_uid, across revisions) cannot exceed Effective BOQ Qty (original + approved variations).
  * - Task and BOQ rows are locked in id order before the checks so concurrent approvals serialise.
  */
 class ProgressLedgerService
 {
-    public function __construct(private readonly TaskProgressService $taskProgress) {}
+    public function __construct(
+        private readonly TaskProgressService $taskProgress,
+        private readonly EffectiveBoqQuantityService $effectiveQty,
+    ) {}
 
     public static function postingRef(Dpr $dpr, DprItem $item): string
     {
@@ -156,7 +160,7 @@ class ProgressLedgerService
                 $cumulative = TaskProgressService::sum(ProgressEntry::query()->where('task_id', $item->task_id))->plus($ownByTask[$item->task_id] ?? '0');
             } elseif ($uid) {
                 $line = $this->currentLine($project, $uid);
-                $planned = $line ? Decimal::of($line->quantity) : null;
+                $planned = $line ? Decimal::of($this->effectiveQty->forItem($line)) : null;
                 $cumulative = TaskProgressService::sum(ProgressEntry::query()->where('project_id', $project->id)->where('boq_line_uid', $uid))->plus($ownByLine[$uid] ?? '0');
             }
 
@@ -273,14 +277,18 @@ class ProgressLedgerService
 
         foreach ($byLine as $uid => $qty) {
             $line = $this->currentLine($project, $uid);
-            if ($line === null || ! Decimal::of($line->quantity)->isPositive()) {
+            if ($line === null) {
+                continue;
+            }
+            $cap = Decimal::of($this->effectiveQty->forItem($line));
+            if (! $cap->isPositive()) {
                 continue;
             }
             $done = TaskProgressService::sum(ProgressEntry::query()->where('project_id', $project->id)->where('boq_line_uid', $uid));
-            if ($done->plus($qty)->greaterThan($line->quantity)) {
+            if ($done->plus($qty)->greaterThan($cap)) {
                 throw ValidationException::withMessages(['items' => sprintf(
-                    'Over-progress on BOQ item %s: BOQ quantity %s, already executed %s, this DPR %s.',
-                    trim($line->item_code.' '.$line->name), Decimal::of($line->quantity)->toQuantity(), $done->toQuantity(), $qty->toQuantity(),
+                    'Over-progress on BOQ item %s: effective BOQ quantity %s, already executed %s, this DPR %s.',
+                    trim($line->item_code.' '.$line->name), $cap->toQuantity(), $done->toQuantity(), $qty->toQuantity(),
                 )]);
             }
         }

@@ -17,6 +17,8 @@ use App\Queries\Reports\ProgressQuery;
 use App\Queries\Reports\QualityCrmQuery;
 use App\Queries\Reports\ReceivablesQuery;
 use App\Queries\Reports\StockQuery;
+use App\Services\Boq\BoqIntelligenceService;
+use App\Services\Boq\EstimatedActualCostService;
 use App\Support\Math\Decimal;
 use App\Support\Reports\DashboardCache;
 use App\Support\Reports\Num;
@@ -41,6 +43,8 @@ final class DashboardService
         private readonly ProgressQuery $progress,
         private readonly QualityCrmQuery $quality,
         private readonly StockQuery $stock,
+        private readonly EstimatedActualCostService $estimatedActual,
+        private readonly BoqIntelligenceService $boqIntel,
     ) {}
 
     /**
@@ -158,11 +162,13 @@ final class DashboardService
     {
         $financial = $user->can('dashboard.view_financials');
         $valuation = $financial && $user->can('inventory.view_valuation');
+        $viewBoqCosts = $financial && $user->can('boq.view_costs');
+        $viewVariations = $user->can('boq.view_variations');
         $cid = (int) $project->company_id;
         $pid = (int) $project->id;
 
-        return $this->cache->remember($cid, 'project', ['project' => $pid, 'financial' => $financial, 'valuation' => $valuation, 'today' => $today],
-            function () use ($cid, $pid, $today, $financial, $valuation) {
+        return $this->cache->remember($cid, 'project', ['project' => $pid, 'financial' => $financial, 'valuation' => $valuation, 'boq_costs' => $viewBoqCosts, 'variations' => $viewVariations, 'today' => $today],
+            function () use ($cid, $pid, $today, $financial, $valuation, $viewBoqCosts, $viewVariations, $project) {
                 $progress = $this->progress->summary($cid, [$pid], $today);
                 $ncr = $this->quality->ncrStatusCounts($cid, [$pid]);
                 $inspections = DB::table('quality_inspections')->where('company_id', $cid)->where('project_id', $pid)->whereNull('deleted_at')
@@ -207,6 +213,14 @@ final class DashboardService
                 ];
                 if ($valuation) {
                     $data['financial']['stock_value'] = Num::money(DB::query()->fromSub($this->stock->summary($cid, $warehouses, $today), 's')->sum('value'));
+                }
+
+                if ($viewBoqCosts) {
+                    $data['financial']['estimated_vs_actual'] = $this->estimatedActual->projectWidget($project);
+                }
+
+                if ($viewVariations) {
+                    $data['operational']['variations'] = $this->boqIntel->variationWidget($project, $viewBoqCosts);
                 }
 
                 return $data;

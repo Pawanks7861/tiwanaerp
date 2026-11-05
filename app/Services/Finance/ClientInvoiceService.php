@@ -20,6 +20,7 @@ use App\Models\Planning\ProgressEntry;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
+use App\Services\Boq\EffectiveBoqQuantityService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Services\Resources\Concerns\ResolvesProjectRefs;
 use App\Services\Tax\GstCalculator;
@@ -34,9 +35,9 @@ use Illuminate\Validation\ValidationException;
  *
  * Lines are measured against the project's current approved BOQ, keyed by line_uid:
  * executed = Σ progress ledger quantity up to period_to; previous = Σ current quantity of the
- * line on earlier certified bills; cumulative = previous + current ≤ min(executed, BOQ quantity)
- * unless the user holds billing.override_qty and justifies the line (audited). Rate = BOQ client
- * rate (snapshot). gross = Σ round(current × rate, 2); GST (bill-level rate) via GstCalculator
+ * line on earlier certified bills; cumulative = previous + current ≤ min(executed, Effective BOQ Qty)
+ * unless the user holds billing.override_qty and justifies the line (audited). Rate = effective
+ * selling/client rate (rate_change variations apply prospectively; certified bills keep snapshots). gross = Σ round(current × rate, 2); GST (bill-level rate) via GstCalculator
  * with supplier = company state and place of supply = project state; retention and TDS =
  * round(gross × %, 2); advance recovery ≤ the client's unadjusted advance;
  * net = gross + GST − retention − advance − TDS − other deductions ≥ 0.
@@ -54,6 +55,7 @@ class ClientInvoiceService
         private readonly ApprovalService $approvals,
         private readonly GstCalculator $gst,
         private readonly PayableService $payables,
+        private readonly EffectiveBoqQuantityService $effectiveQty,
     ) {}
 
     /**
@@ -184,10 +186,11 @@ class ClientInvoiceService
                 if (! Decimal::of($item->previous_qty)->equals($previous[$item->boq_line_uid] ?? '0')) {
                     throw ValidationException::withMessages(['invoice' => "The previously billed quantity of \"{$item->description}\" changed. Send the bill back and resubmit it."]);
                 }
-                $boqQty = $boqItems->get($item->boq_line_uid)?->quantity;
-                if ($boqQty === null) {
+                $boqItem = $boqItems->get($item->boq_line_uid);
+                if ($boqItem === null) {
                     throw ValidationException::withMessages(['invoice' => "\"{$item->description}\" is no longer on the current BOQ. Send the bill back and resubmit it."]);
                 }
+                $boqQty = $this->effectiveQty->forItem($boqItem);
                 if (! $item->is_override) {
                     $this->assertWithinLimits($item->description, Decimal::of($item->cumulative_qty), $executed[$item->boq_line_uid] ?? Decimal::zero(), Decimal::of($boqQty), 'invoice');
                 }
@@ -225,7 +228,8 @@ class ClientInvoiceService
         return $items->map(function (BoqItem $i) use ($previous, $executed) {
             $prev = $previous[$i->line_uid] ?? Decimal::zero();
             $exec = $executed[$i->line_uid] ?? Decimal::zero();
-            $limit = Decimal::of($i->quantity)->lessThan($exec) ? Decimal::of($i->quantity) : $exec;
+            $effective = Decimal::of($this->effectiveQty->forItem($i));
+            $limit = $effective->lessThan($exec) ? $effective : $exec;
             $balance = $limit->minus($prev);
 
             return [
@@ -234,11 +238,11 @@ class ClientInvoiceService
                 'item_code' => $i->item_code,
                 'description' => $i->name ?: $i->description,
                 'unit' => $i->unit?->symbol,
-                'boq_qty' => $i->quantity,
+                'boq_qty' => $effective->toQuantity(),
                 'executed_qty' => $exec->toQuantity(),
                 'previous_qty' => $prev->toQuantity(),
                 'balance_qty' => ($balance->isNegative() ? Decimal::zero() : $balance)->toQuantity(),
-                'rate' => $i->client_rate,
+                'rate' => $this->effectiveQty->effectiveSellingRate($i),
             ];
         })->all();
     }
@@ -350,8 +354,10 @@ class ClientInvoiceService
         foreach ($parsed as $uid => [$boqItem, $current, $reason, $key]) {
             $prev = $previous[$uid] ?? Decimal::zero();
             $exec = $executed[$uid] ?? Decimal::zero();
+            $effective = Decimal::of($this->effectiveQty->forItem($boqItem));
+            $rate = Decimal::of($this->effectiveQty->effectiveSellingRate($boqItem));
             $cumulative = $prev->plus($current);
-            $limit = Decimal::of($boqItem->quantity)->lessThan($exec) ? Decimal::of($boqItem->quantity) : $exec;
+            $limit = $effective->lessThan($exec) ? $effective : $exec;
             $over = $cumulative->greaterThan($limit);
             $line = $existing->get($uid);
             $wasOverride = $line?->is_override && $keepOverrides;
@@ -360,10 +366,10 @@ class ClientInvoiceService
 
             if ($over && ! $wasOverride) {
                 if (! $canOverride) {
-                    $this->assertWithinLimits($boqItem->name ?: $boqItem->description, $cumulative, $exec, Decimal::of($boqItem->quantity), "{$key}.current_qty");
+                    $this->assertWithinLimits($boqItem->name ?: $boqItem->description, $cumulative, $exec, $effective, "{$key}.current_qty");
                 }
                 if (mb_strlen($reason) < 10) {
-                    throw ValidationException::withMessages(["{$key}.override_reason" => 'Billing beyond the executed / BOQ quantity needs a justification (at least 10 characters).']);
+                    throw ValidationException::withMessages(["{$key}.override_reason" => 'Billing beyond the executed / effective BOQ quantity needs a justification (at least 10 characters).']);
                 }
             }
 
@@ -374,13 +380,13 @@ class ClientInvoiceService
                 'item_code' => $boqItem->item_code,
                 'description' => mb_substr((string) ($boqItem->name ?: $boqItem->description), 0, 500),
                 'unit_id' => $boqItem->unit_id,
-                'boq_qty' => $boqItem->quantity,
+                'boq_qty' => $effective->toQuantity(),
                 'executed_qty' => $exec->toQuantity(),
                 'previous_qty' => $prev->toQuantity(),
                 'current_qty' => $current->toQuantity(),
                 'cumulative_qty' => $cumulative->toQuantity(),
-                'rate' => $boqItem->client_rate,
-                'current_amount' => $current->times($boqItem->client_rate)->round(2)->toMoney(),
+                'rate' => $rate->toRate(),
+                'current_amount' => $current->times($rate)->round(2)->toMoney(),
                 'is_override' => $over,
                 'override_reason' => $over ? ($wasOverride && $reason === '' ? $line->override_reason : $reason) : null,
                 'sort_order' => $sort++,
@@ -391,7 +397,7 @@ class ClientInvoiceService
                     'boq_line_uid' => $uid,
                     'cumulative_qty' => $cumulative->toQuantity(),
                     'executed_qty' => $exec->toQuantity(),
-                    'boq_qty' => (string) $boqItem->quantity,
+                    'boq_qty' => $effective->toQuantity(),
                     'reason' => $reason,
                 ]);
             }

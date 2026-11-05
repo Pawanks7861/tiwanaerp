@@ -6,11 +6,15 @@ use App\Queries\Reports\BoqProgressQuery;
 use App\Reports\ReportContext;
 use App\Reports\ReportDefinition;
 use App\Reports\ReportResult;
+use App\Services\Boq\EffectiveBoqQuantityService;
 use App\Support\Reports\Num;
 
 final class BoqProgressReport extends ReportDefinition
 {
-    public function __construct(private readonly BoqProgressQuery $boq) {}
+    public function __construct(
+        private readonly BoqProgressQuery $boq,
+        private readonly EffectiveBoqQuantityService $effectiveQty,
+    ) {}
 
     public function key(): string
     {
@@ -80,11 +84,13 @@ final class BoqProgressReport extends ReportDefinition
         }
 
         $pid = (int) $ctx->project->id;
+        $effective = $this->effectiveQty->mapForProject($ctx->project);
         $query = $this->boq->lines($cid, $pid, (int) $boq->id, $ctx->asOf(), $ctx->filter('search'))->orderBy('bi.sort_order')->orderBy('bi.id');
-        [$rows, $pagination] = $this->rows($query, $ctx, $paginate, function ($r) {
-            $qty = Num::dec($r->quantity);
+        [$rows, $pagination] = $this->rows($query, $ctx, $paginate, function ($r) use ($effective) {
+            $qty = Num::dec($effective[(string) $r->line_uid] ?? $r->quantity);
             $done = Num::dec($r->executed);
-            $planned = Num::dec($r->cost_amount);
+            $rate = Num::dec($r->cost_rate);
+            $planned = $qty->times($rate)->round(2);
             $actual = Num::dec($r->actual);
 
             return [
@@ -98,7 +104,7 @@ final class BoqProgressReport extends ReportDefinition
                 'actual' => $actual->toMoney(),
                 'variance' => $planned->minus($actual)->toMoney(),
                 'client_amount' => Num::money($r->client_amount),
-                'flag' => $done->greaterThan($qty) ? 'Executed beyond BOQ quantity' : null,
+                'flag' => $done->greaterThan($qty) ? 'Executed beyond effective BOQ quantity' : null,
             ];
         });
         $totals = $this->boq->totals($cid, $pid, (int) $boq->id, $ctx->asOf());

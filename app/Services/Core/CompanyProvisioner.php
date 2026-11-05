@@ -47,6 +47,7 @@ class CompanyProvisioner
             try {
                 DB::transaction(function () use ($company) {
                     $roles = $this->seedRoles($company);
+                    $this->grantMissingSystemRoleDefaults($company);
                     $this->seedMasters();
                     $this->seedFinancialYear($company);
                     $this->seedApprovalWorkflows($roles);
@@ -57,6 +58,97 @@ class CompanyProvisioner
         });
 
         $this->registrar->forgetCachedPermissions();
+    }
+
+    /**
+     * For every company: ensure catalogue permissions exist, then grant any missing
+     * DefaultRoles intents to matching system roles (additive only — never strips customs).
+     *
+     * @return array{companies: int, roles_touched: int, permissions_granted: int}
+     */
+    public function refreshAllSystemRoleDefaults(): array
+    {
+        $this->ensurePermissions();
+
+        $companies = 0;
+        $rolesTouched = 0;
+        $granted = 0;
+
+        Company::query()->orderBy('id')->each(function (Company $company) use (&$companies, &$rolesTouched, &$granted) {
+            $companies++;
+            $this->tenancy->runAs($company, function () use ($company, &$rolesTouched, &$granted) {
+                $previousTeam = $this->registrar->getPermissionsTeamId();
+                $this->registrar->setPermissionsTeamId($company->id);
+                try {
+                    $result = $this->grantMissingSystemRoleDefaults($company);
+                    $rolesTouched += $result['roles_touched'];
+                    $granted += $result['permissions_granted'];
+                } finally {
+                    $this->registrar->setPermissionsTeamId($previousTeam);
+                }
+            });
+        });
+
+        $this->registrar->forgetCachedPermissions();
+
+        return [
+            'companies' => $companies,
+            'roles_touched' => $rolesTouched,
+            'permissions_granted' => $granted,
+        ];
+    }
+
+    /**
+     * Additive sync of DefaultRoles intents onto existing system roles for one company.
+     * Custom (non-system) roles and unknown role names are untouched.
+     * Company Admin remains fully expanded to `*`.
+     *
+     * @return array{roles_touched: int, permissions_granted: int, details: array<string, list<string>>}
+     */
+    public function grantMissingSystemRoleDefaults(Company $company): array
+    {
+        $touched = 0;
+        $granted = 0;
+        $details = [];
+
+        foreach (DefaultRoles::definitions() as $name => $definition) {
+            $role = Role::query()
+                ->where('team_id', $company->id)
+                ->where('name', $name)
+                ->where('guard_name', 'web')
+                ->where('is_system', true)
+                ->first();
+
+            if (! $role) {
+                continue;
+            }
+
+            $intended = PermissionCatalog::expand($definition['permissions']);
+
+            if ($name === DefaultRoles::COMPANY_ADMIN) {
+                // Keep Company Admin complete; full sync is still safe (catalogue is authoritative).
+                $before = $role->permissions()->count();
+                $role->syncPermissionNames($intended);
+                $after = $role->permissions()->count();
+                $added = max(0, $after - $before);
+                if ($added > 0 || $after !== $before) {
+                    $touched++;
+                    $granted += $added;
+                    $details[$name] = array_values(array_diff($intended, []));
+                }
+
+                continue;
+            }
+
+            $addedNames = $role->grantMissingPermissionNames($intended);
+            if ($addedNames !== []) {
+                $touched++;
+                $granted += count($addedNames);
+                $details[$name] = $addedNames;
+            }
+        }
+
+        return ['roles_touched' => $touched, 'permissions_granted' => $granted, 'details' => $details];
     }
 
     public function ensurePermissions(): void

@@ -5,6 +5,7 @@ namespace App\Support\Tenancy;
 use App\Exceptions\NoCompanyContextException;
 use App\Models\Core\Company;
 use Closure;
+use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Holds the active company for the current request / job (registered as a scoped singleton).
@@ -64,12 +65,16 @@ class CurrentCompany
     public function runAs(Company $company, Closure $callback): mixed
     {
         $previous = $this->company;
+        $registrar = app(PermissionRegistrar::class);
+        $previousTeam = $registrar->getPermissionsTeamId();
         $this->company = $company;
+        $registrar->setPermissionsTeamId($company->id);
 
         try {
             return $callback();
         } finally {
             $this->company = $previous;
+            $registrar->setPermissionsTeamId($previousTeam);
         }
     }
 
