@@ -29,7 +29,10 @@ use Illuminate\Validation\ValidationException;
 class BoqService
 {
     /** Descriptive line columns any BOQ editor may change. */
-    private const LINE_FIELDS = ['item_code', 'name', 'description', 'hsn_sac', 'unit_id'];
+    private const LINE_FIELDS = [
+        'item_code', 'name', 'description', 'hsn_sac', 'unit_id', 'gst_rate',
+        'source_type', 'source_import_id', 'source_sheet', 'source_row',
+    ];
 
     public function __construct(
         private readonly DocumentNumberService $numbers,

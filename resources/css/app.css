@@ -86,3 +86,41 @@
 .sidebar-scroll::-webkit-scrollbar-thumb:hover {
     background: var(--sidebar-scroll-thumb-hover);
 }
+
+/* Content skeletons. Neutral only — not brand/accent. Shimmer is CSS-only. */
+.skeleton-block {
+    display: block;
+    max-width: 100%;
+    background-color: #e7eaef;
+}
+
+.skeleton-shimmer {
+    background-image: linear-gradient(90deg, #e7eaef 0%, #f6f7f9 42%, #e7eaef 84%);
+    background-size: 220% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+.skeleton-block-on-dark {
+    background-color: rgb(255 255 255 / 0.08);
+}
+
+.skeleton-block-on-dark.skeleton-shimmer {
+    background-image: linear-gradient(90deg, rgb(255 255 255 / 0.06) 0%, rgb(255 255 255 / 0.16) 42%, rgb(255 255 255 / 0.06) 84%);
+}
+
+@keyframes skeleton-shimmer {
+    0% {
+        background-position: 100% 0;
+    }
+
+    100% {
+        background-position: -100% 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skeleton-shimmer {
+        animation: none;
+        background-image: none;
+    }
+}

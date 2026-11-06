@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Boq;
 
 use App\Enums\Boq\BoqStatus;
+use App\Enums\Imports\ImportStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Http\Requests\Boq\BoqItemsRequest;
@@ -12,6 +13,7 @@ use App\Models\Boq\BoqSection;
 use App\Models\Boq\RateAnalysis;
 use App\Models\Documents\Drawing;
 use App\Models\Documents\DrawingRevision;
+use App\Models\Imports\DataImport;
 use App\Models\Masters\Unit;
 use App\Models\Projects\Project;
 use App\Models\User;
@@ -102,7 +104,10 @@ class BoqController extends Controller
 
         $sections = $boq->sections()->orderBy('sort_order')->orderBy('id')->get();
         $items = $boq->items()
-            ->with($withCosts ? ['simpleMaterialCosts'] : [])
+            ->with(array_values(array_filter([
+                'attachments.uploader:id,name',
+                $withCosts ? 'simpleMaterialCosts' : null,
+            ])))
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get();
@@ -151,7 +156,10 @@ class BoqController extends Controller
                 'created_at' => $boq->sourceImport->created_at?->toIso8601String(),
                 'uploaded_by' => $boq->sourceImport->uploader?->only(['id', 'name']),
                 'download_url' => route('imports.file', $boq->sourceImport),
+                'sheet' => $boq->sourceImport->context['sheet_name'] ?? null,
             ] : null,
+            'import_history' => $this->boqImportHistory($boq),
+            'source_imports' => $this->boqSourceImports($boq),
         ]);
     }
 
@@ -263,5 +271,62 @@ class BoqController extends Controller
             $revision->drawing?->drawing_number,
             $revision->revision_code,
         ])->values();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function boqImportHistory(Boq $boq): array
+    {
+        return DataImport::query()
+            ->with('uploader:id,name')
+            ->where('module', 'boq.items')
+            ->where('context->boq_id', $boq->id)
+            ->whereIn('status', [
+                ImportStatus::Completed->value,
+                ImportStatus::CompletedWithErrors->value,
+                ImportStatus::Failed->value,
+            ])
+            ->orderByDesc('id')
+            ->limit(20)
+            ->get()
+            ->map(fn (DataImport $import) => [
+                'id' => $import->id,
+                'original_filename' => $import->original_filename,
+                'sheet' => $import->context['sheet_name'] ?? null,
+                'uploaded_by' => $import->uploader?->only(['id', 'name']),
+                'date' => ($import->finished_at ?? $import->created_at)?->toIso8601String(),
+                'rows' => $import->create_count ?? $import->valid_rows,
+                'status' => $import->status instanceof ImportStatus ? $import->status->value : $import->status,
+                'status_label' => $import->status instanceof ImportStatus ? $import->status->label() : (string) $import->status,
+                'download_url' => route('imports.file', $import),
+            ])
+            ->all();
+    }
+
+    /**
+     * Successful source workbooks for this BOQ (all batches, not only the latest pointer).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function boqSourceImports(Boq $boq): array
+    {
+        return DataImport::query()
+            ->with('uploader:id,name')
+            ->where('module', 'boq.items')
+            ->where('context->boq_id', $boq->id)
+            ->whereIn('status', [ImportStatus::Completed->value, ImportStatus::CompletedWithErrors->value])
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (DataImport $import) => [
+                'id' => $import->id,
+                'original_filename' => $import->original_filename,
+                'sheet' => $import->context['sheet_name'] ?? null,
+                'created_at' => $import->created_at?->toIso8601String(),
+                'uploaded_by' => $import->uploader?->only(['id', 'name']),
+                'download_url' => route('imports.file', $import),
+                'is_primary' => (int) $boq->source_import_id === (int) $import->id,
+            ])
+            ->all();
     }
 }

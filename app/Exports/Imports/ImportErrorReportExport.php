@@ -22,7 +22,7 @@ class ImportErrorReportExport implements FromArray, ShouldAutoSize, WithHeadings
 
     public function headings(): array
     {
-        return ['Row', 'Field', 'Error'];
+        return ['Source Sheet', 'Source Row', 'Item Code', 'Description', 'Field', 'Error'];
     }
 
     public function array(): array
@@ -31,7 +31,10 @@ class ImportErrorReportExport implements FromArray, ShouldAutoSize, WithHeadings
         foreach ($this->rows as $row) {
             foreach ($row['errors'] ?? [] as $error) {
                 $out[] = [
+                    SpreadsheetText::cell($row['sheet'] ?? ''),
                     $row['row'] ?? '',
+                    SpreadsheetText::cell($row['preview']['code'] ?? $row['preview']['item_code'] ?? ''),
+                    SpreadsheetText::cell($row['preview']['name'] ?? ''),
                     SpreadsheetText::cell($error['field'] ?? ''),
                     SpreadsheetText::cell($error['message'] ?? ''),
                 ];

@@ -46,8 +46,19 @@ final class BoqPresenter
     {
         $data = $item->only([
             'id', 'boq_section_id', 'line_uid', 'item_code', 'name', 'description', 'hsn_sac', 'unit_id',
-            'quantity', 'client_rate', 'client_amount', 'rate_analysis_id', 'sort_order',
+            'quantity', 'client_rate', 'client_amount', 'gst_rate', 'rate_analysis_id', 'sort_order',
+            'source_type', 'source_sheet', 'source_row',
         ]);
+        $data['source_label'] = ($item->source_type === 'import' && $item->source_sheet && $item->source_row)
+            ? "Imported from {$item->source_sheet} → Row {$item->source_row}"
+            : null;
+
+        $attachments = $item->relationLoaded('attachments')
+            ? $item->attachments
+            : $item->attachments()->with('uploader:id,name')->get();
+        $data['attachments'] = \App\Http\Resources\AttachmentResource::collection(
+            $attachments->each(fn ($attachment) => $attachment->setRelation('attachable', $item))
+        )->resolve();
 
         if ($withCosts) {
             $data += $item->only(BoqItem::COST_FIELDS);
@@ -55,20 +66,30 @@ final class BoqPresenter
             $materials = $item->relationLoaded('simpleMaterialCosts')
                 ? $item->simpleMaterialCosts
                 : $item->simpleMaterialCosts()->get();
-            $data['simple_materials'] = $materials->map(fn ($row) => [
-                'id' => $row->id,
-                'material_id' => $row->material_id,
-                'material_name' => $row->material_name,
-                'quantity' => (string) $row->quantity,
-                'unit' => $row->unit,
-                'rate' => (string) $row->rate,
-                'amount' => (string) $row->amount,
-                'sequence' => $row->sequence,
-            ])->values()->all();
-            $totals = app(\App\Services\Boq\SimpleBoqMaterialCostService::class)
-                ->totals($materials, (string) $item->quantity);
+            $materialService = app(\App\Services\Boq\SimpleBoqMaterialCostService::class);
+            $data['simple_materials'] = $materials->map(function ($row) use ($materialService, $item) {
+                $metrics = $materialService->lineMetrics([
+                    'quantity' => (string) $row->quantity,
+                    'rate' => (string) $row->rate,
+                ], (string) $item->quantity);
+
+                return [
+                    'id' => $row->id,
+                    'material_id' => $row->material_id,
+                    'material_name' => $row->material_name,
+                    'quantity' => (string) $row->quantity,
+                    'unit' => $row->unit,
+                    'rate' => (string) $row->rate,
+                    'amount' => $metrics['amount'],
+                    'total_quantity' => $metrics['total_quantity'],
+                    'total_cost' => $metrics['total_cost'],
+                    'sequence' => $row->sequence,
+                ];
+            })->values()->all();
+            $totals = $materialService->totals($materials, (string) $item->quantity);
             $data['simple_material_cost_per_unit'] = $totals['per_unit'];
             $data['simple_material_cost_total'] = $totals['estimated_total'];
+            $data['simple_material_quantity_summary'] = $totals['quantity_summary'];
         }
 
         return $data;

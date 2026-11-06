@@ -158,6 +158,7 @@ use App\Models\Imports\DataImport;
 use App\Policies\ApprovalWorkflowPolicy;
 use App\Policies\DataImportPolicy;
 use App\Policies\AttachmentPolicy;
+use App\Policies\BoqItemPolicy;
 use App\Policies\BoqPolicy;
 use App\Policies\CompanyPolicy;
 use App\Policies\Crm\LeadPolicy;
@@ -395,6 +396,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Site::class, SitePolicy::class);
         Gate::policy(Attachment::class, AttachmentPolicy::class);
         Gate::policy(Boq::class, BoqPolicy::class);
+        Gate::policy(BoqItem::class, BoqItemPolicy::class);
         Gate::policy(RateAnalysis::class, RateAnalysisPolicy::class);
         Gate::policy(ProjectBudget::class, ProjectBudgetPolicy::class);
         Gate::policy(ProjectTask::class, ProjectTaskPolicy::class);

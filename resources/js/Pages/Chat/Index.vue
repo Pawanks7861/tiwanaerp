@@ -17,6 +17,8 @@ const page = usePage();
 const me = computed(() => page.props.auth.user.id);
 const list = ref(props.conversations);
 const messages = ref(props.active?.page?.messages ?? []);
+const peopleLoading = ref(false);
+const peopleError = ref('');
 const hasMore = ref(props.active?.page?.has_more ?? false);
 const query = ref('');
 const people = ref([]);
@@ -59,8 +61,16 @@ let searchTimer;
 function search() {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(async () => {
-        const response = await window.axios.get(route('chat.directory'), { params: { q: query.value } });
-        people.value = response.data.users;
+        peopleLoading.value = true;
+        peopleError.value = '';
+        try {
+            const response = await window.axios.get(route('chat.directory'), { params: { q: query.value } });
+            people.value = response.data.users;
+        } catch {
+            peopleError.value = 'Could not search colleagues.';
+        } finally {
+            peopleLoading.value = false;
+        }
     }, 250);
 }
 
@@ -170,7 +180,15 @@ onBeforeUnmount(() => {
                     <input id="chat-search" v-model="query" type="search" placeholder="Search name, email or role" class="w-full rounded-lg border-slate-300 text-sm" @input="search" />
                 </div>
                 <div class="min-h-0 flex-1 overflow-y-auto">
-                    <button v-for="person in people" :key="`u-${person.id}`" type="button" class="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50" @click="openWith(person.id)">
+                    <div v-if="peopleLoading" class="space-y-3 p-3" aria-busy="true">
+                        <span class="sr-only">Loading content…</span>
+                        <span v-for="row in 4" :key="row" class="skeleton-block skeleton-shimmer block h-10 w-full" aria-hidden="true" />
+                    </div>
+                    <p v-else-if="peopleError" class="px-3 py-3 text-sm text-slate-600">
+                        {{ peopleError }}
+                        <button type="button" class="mt-1 block font-medium text-brand-700" @click="search">Retry</button>
+                    </p>
+                    <button v-for="person in people" v-else :key="`u-${person.id}`" type="button" class="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50" @click="openWith(person.id)">
                         <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">{{ initials(person.name) }}</span>
                         <span class="min-w-0">
                             <span class="block truncate text-sm font-medium text-slate-900">{{ person.name }}</span>

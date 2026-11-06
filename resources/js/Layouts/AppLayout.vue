@@ -6,23 +6,43 @@ import UserOnboardingTour from '@/Components/Tutorial/UserOnboardingTour.vue';
 import AppDropdown from '@/Components/UI/AppDropdown.vue';
 import FlashMessages from '@/Components/UI/FlashMessages.vue';
 import Icon from '@/Components/UI/Icon.vue';
+import PageSkeleton from '@/Components/UI/Skeleton/PageSkeleton.vue';
 import { registerStoredPush } from '@/lib/fcm';
 import { initials } from '@/lib/format';
 import { buildNavigation } from '@/lib/navigation';
 import { usePermissions } from '@/lib/permissions';
 import { scrollToActiveSidebarItem } from '@/lib/scrollToActiveSidebarItem';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue';
 
 defineProps({
     title: { type: String, default: null },
 });
 
+const SIDEBAR_COLLAPSED_KEY = 'sidebar_collapsed';
 const page = usePage();
 const { can } = usePermissions();
 const sidebarOpen = ref(false);
+const sidebarCollapsed = ref(false);
 const sidebarNav = ref(null);
 let positionedForUrl = null;
+
+function readSidebarCollapsed() {
+    try {
+        return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+    } catch {
+        return false;
+    }
+}
+
+function toggleSidebarCollapsed() {
+    sidebarCollapsed.value = !sidebarCollapsed.value;
+    try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0');
+    } catch {
+        // Ignore storage failures (private mode / blocked storage).
+    }
+}
 
 function positionActiveSidebarItem({ instant = false } = {}) {
     const nav = sidebarNav.value;
@@ -80,7 +100,47 @@ const navigation = computed(() => {
 });
 
 const removeListener = router.on('navigate', () => (sidebarOpen.value = false));
+
+/** false | 'page' | 'section'. Page overlays main; section lets tables/cards skeleton in place. */
+const contentSkeleton = ref(false);
+provide('contentSkeleton', contentSkeleton);
+let skeletonTimer = null;
+let visitStarted = false;
+
+function clearSkeletonTimer() {
+    if (skeletonTimer) {
+        clearTimeout(skeletonTimer);
+        skeletonTimer = null;
+    }
+}
+
+const removeStart = router.on('start', (event) => {
+    const visit = event.detail?.visit;
+    if (visit?.prefetch) {
+        return;
+    }
+    visitStarted = true;
+    clearSkeletonTimer();
+    skeletonTimer = setTimeout(() => {
+        if (!visitStarted) {
+            return;
+        }
+        contentSkeleton.value = visit?.preserveState ? 'section' : 'page';
+    }, 120);
+});
+
+function endVisit() {
+    visitStarted = false;
+    clearSkeletonTimer();
+    contentSkeleton.value = false;
+}
+
+const removeFinish = router.on('finish', endVisit);
+const removeError = router.on('error', endVisit);
+const removeInvalid = router.on('invalid', endVisit);
+const removeException = router.on('exception', endVisit);
 onMounted(() => {
+    sidebarCollapsed.value = readSidebarCollapsed();
     positionActiveSidebarItem({ instant: true });
     refreshChat();
     presenceTimer = setInterval(refreshChat, 15000);
@@ -101,6 +161,12 @@ watch(sidebarOpen, (open) => {
 });
 onBeforeUnmount(() => {
     removeListener();
+    removeStart();
+    removeFinish();
+    removeError();
+    removeInvalid();
+    removeException();
+    clearSkeletonTimer();
     clearInterval(presenceTimer);
 });
 </script>
@@ -121,43 +187,56 @@ onBeforeUnmount(() => {
         <!-- Sidebar -->
         <aside
             data-tour="sidebar"
-            class="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-navy-900 transition-transform duration-200 lg:translate-x-0"
-            :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+            class="fixed inset-y-0 left-0 z-50 flex flex-col bg-navy-900 transition-[transform,width] duration-200 ease-out lg:translate-x-0"
+            :class="[
+                sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+                sidebarCollapsed ? 'w-64 lg:w-[4.5rem]' : 'w-64',
+            ]"
         >
-            <div class="flex h-14 shrink-0 items-center justify-between px-4">
-                <Link :href="route('dashboard')" class="flex min-w-0 flex-1 items-center gap-2" :aria-label="companyName || 'Dashboard'">
+            <div class="flex h-14 shrink-0 items-center justify-between px-4" :class="sidebarCollapsed ? 'lg:justify-center lg:px-2' : ''">
+                <Link :href="route('dashboard')" class="flex min-w-0 flex-1 items-center gap-2" :class="sidebarCollapsed ? 'lg:flex-none lg:justify-center' : ''" :aria-label="companyName || 'Dashboard'">
                     <img v-if="branding.logo_url" :src="branding.logo_url" alt="" class="h-8 w-8 shrink-0 rounded-lg bg-white object-contain" />
                     <span v-else class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-500 text-sm font-black text-white" aria-hidden="true">B</span>
-                    <span class="min-w-0 truncate text-base font-bold tracking-tight text-white">{{ companyName }}</span>
+                    <span class="min-w-0 truncate text-base font-bold tracking-tight text-white" :class="sidebarCollapsed ? 'lg:hidden' : ''">{{ companyName }}</span>
                 </Link>
                 <button type="button" class="rounded-md p-1 text-white/70 hover:bg-white/10 lg:hidden" aria-label="Close menu" @click="sidebarOpen = false">
                     <Icon name="close" />
                 </button>
             </div>
 
-            <div v-if="multiCompany" class="border-y border-white/10 px-2 py-2">
+            <div v-if="multiCompany" class="border-y border-white/10 px-2 py-2" :class="sidebarCollapsed ? 'lg:hidden' : ''">
                 <CompanySwitcher />
             </div>
 
             <nav ref="sidebarNav" class="sidebar-scroll flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-2 py-4" aria-label="Main">
                 <div v-for="(section, i) in navigation" :key="section.title ?? i">
-                    <p v-if="section.title" class="mb-1 px-3 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+                    <p
+                        v-if="section.title"
+                        class="mb-1 px-3 text-[11px] font-semibold tracking-wider text-white/40 uppercase"
+                        :class="sidebarCollapsed ? 'lg:hidden' : ''"
+                    >
                         {{ section.title }}
                     </p>
                     <ul class="space-y-0.5">
                         <li v-for="item in section.items" :key="item.href">
                             <Link
                                 :href="item.href"
-                                class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition"
-                                :class="item.active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'"
+                                class="relative flex items-center rounded-lg py-2 text-sm font-medium transition"
+                                :class="[
+                                    item.active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white',
+                                    sidebarCollapsed ? 'gap-3 px-3 lg:justify-center lg:px-2' : 'gap-3 px-3',
+                                ]"
+                                :title="sidebarCollapsed ? item.label : undefined"
+                                :aria-label="item.label"
                                 :aria-current="item.active ? 'page' : undefined"
                                 :data-tour="item.label === 'Projects' ? 'nav-projects' : item.label === 'Reports' ? 'nav-reports' : item.label === 'Dashboard' ? 'nav-dashboard' : undefined"
                             >
                                 <Icon :name="item.icon" :size="18" :class="item.active ? 'text-accent-400' : ''" />
-                                <span class="truncate">{{ item.label }}</span>
+                                <span class="truncate" :class="sidebarCollapsed ? 'lg:hidden' : ''">{{ item.label }}</span>
                                 <span
                                     v-if="item.label === 'Chat' && chatUnread > 0"
-                                    class="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent-500 px-1 text-[10px] font-bold text-white tabular"
+                                    class="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent-500 px-1 text-[10px] font-bold text-white tabular"
+                                    :class="sidebarCollapsed ? 'ml-auto lg:absolute lg:top-1 lg:right-1 lg:ml-0 lg:h-4 lg:min-w-4' : 'ml-auto'"
                                 >
                                     {{ chatUnread > 99 ? '99+' : chatUnread }}
                                 </span>
@@ -166,9 +245,24 @@ onBeforeUnmount(() => {
                     </ul>
                 </div>
             </nav>
+
+            <div class="hidden border-t border-white/10 p-2 lg:block">
+                <button
+                    type="button"
+                    class="flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-white/70 transition hover:bg-white/5 hover:text-white"
+                    :class="sidebarCollapsed ? 'justify-center px-2' : 'gap-3'"
+                    :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+                    :aria-expanded="!sidebarCollapsed"
+                    :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+                    @click="toggleSidebarCollapsed"
+                >
+                    <Icon :name="sidebarCollapsed ? 'chevron-right' : 'chevron-left'" :size="18" />
+                    <span :class="sidebarCollapsed ? 'sr-only' : ''">{{ sidebarCollapsed ? 'Expand' : 'Collapse' }}</span>
+                </button>
+            </div>
         </aside>
 
-        <div class="lg:pl-64">
+        <div class="transition-[padding] duration-200 ease-out" :class="sidebarCollapsed ? 'lg:pl-[4.5rem]' : 'lg:pl-64'">
             <!-- Top bar -->
             <header class="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-line bg-white/95 px-3 backdrop-blur sm:gap-3 sm:px-6">
                 <button type="button" class="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 lg:hidden" aria-label="Open menu" @click="sidebarOpen = true">
@@ -242,12 +336,17 @@ onBeforeUnmount(() => {
 
             <slot name="header" />
 
-            <main data-tour="main-content" class="mx-auto w-full max-w-7xl px-3 py-5 sm:px-6 sm:py-6">
+            <main data-tour="main-content" class="relative mx-auto w-full max-w-7xl px-3 py-5 sm:px-6 sm:py-6" :aria-busy="contentSkeleton === 'page'">
                 <div v-if="recommendTwoFactor" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                     Two-factor authentication is recommended for this account.
                     <Link :href="route('profile.edit')" class="font-semibold underline">Set it up</Link>
                 </div>
-                <slot />
+                <div :class="contentSkeleton === 'page' ? 'invisible' : ''" :aria-hidden="contentSkeleton === 'page'">
+                    <slot />
+                </div>
+                <div v-if="contentSkeleton === 'page'" class="absolute inset-x-3 top-5 sm:inset-x-6">
+                    <PageSkeleton />
+                </div>
             </main>
         </div>
         <AiAssistantWidget />

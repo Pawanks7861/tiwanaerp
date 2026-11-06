@@ -6,6 +6,8 @@ import AppCard from '@/Components/UI/AppCard.vue';
 import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
 import EmptyState from '@/Components/UI/EmptyState.vue';
 import Icon from '@/Components/UI/Icon.vue';
+import SkeletonList from '@/Components/UI/Skeleton/SkeletonList.vue';
+import { useContentSkeleton } from '@/composables/useContentSkeleton';
 import { formatDateTime } from '@/lib/format';
 import { router, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
@@ -20,10 +22,13 @@ const props = defineProps({
     attachableId: { type: Number, required: true },
     canUpload: { type: Boolean, default: false },
     canDelete: { type: Boolean, default: false },
+    title: { type: String, default: 'Documents' },
+    embedded: { type: Boolean, default: false },
     placeholder: { type: String, default: 'GST certificate, PAN, cancelled cheque…' },
 });
 
 const form = useForm({ attachable_type: props.attachableType, attachable_id: props.attachableId, category: '' });
+const sectionLoading = useContentSkeleton();
 const viewing = ref(null);
 const removing = ref(null);
 const removeProcessing = ref(false);
@@ -54,8 +59,8 @@ function size(bytes) {
 </script>
 
 <template>
-    <AppCard title="Documents" :subtitle="`${attachments.length} file${attachments.length === 1 ? '' : 's'}`" :padded="false">
-        <div v-if="canUpload" class="space-y-3 border-b border-line p-4">
+    <component :is="embedded ? 'div' : AppCard" v-bind="embedded ? { class: 'rounded-xl border border-line' } : { title, subtitle: `${attachments.length} file${attachments.length === 1 ? '' : 's'}`, padded: false }">
+        <div v-if="canUpload" class="space-y-3 border-b border-line p-3 sm:p-4">
             <FormInput v-model="form.category" label="Document type (optional)" :placeholder="placeholder" maxlength="50" :error="form.errors.category" />
             <LargeFileUploader
                 module="attachment"
@@ -66,8 +71,12 @@ function size(bytes) {
             />
         </div>
 
-        <ul v-if="attachments.length" class="divide-y divide-line">
-            <li v-for="file in attachments" :key="file.id" class="flex items-center gap-3 px-4 py-3">
+        <div v-if="sectionLoading && !attachments.length" aria-busy="true">
+            <span class="sr-only">Loading content…</span>
+            <SkeletonList :rows="3" />
+        </div>
+        <ul v-else-if="attachments.length" class="divide-y divide-line">
+            <li v-for="file in attachments" :key="file.id" class="flex items-center gap-3 px-3 py-3 sm:px-4">
                 <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-[10px] font-bold text-slate-500 uppercase">
                     {{ file.extension }}
                 </div>
@@ -112,5 +121,5 @@ function size(bytes) {
             @close="removing = null"
             @confirm="remove"
         />
-    </AppCard>
+    </component>
 </template>

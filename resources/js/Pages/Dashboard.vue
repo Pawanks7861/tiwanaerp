@@ -4,6 +4,10 @@ import StatCard from '@/Components/Data/StatCard.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
+import SkeletonChart from '@/Components/UI/Skeleton/SkeletonChart.vue';
+import SkeletonList from '@/Components/UI/Skeleton/SkeletonList.vue';
+import SkeletonStatCard from '@/Components/UI/Skeleton/SkeletonStatCard.vue';
+import { useContentSkeleton } from '@/composables/useContentSkeleton';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { formatDate, formatMoneyShort, formatPercent } from '@/lib/format';
 import { Link, router, usePage } from '@inertiajs/vue3';
@@ -20,6 +24,7 @@ const props = defineProps({
 });
 
 const page = usePage();
+const sectionLoading = useContentSkeleton();
 const greeting = computed(() => {
     const hour = new Date().getHours();
 
@@ -78,7 +83,15 @@ const selectClass = 'rounded-lg border-slate-300 py-2 text-sm shadow-sm focus:bo
             </label>
         </form>
 
-        <template v-if="dashboard">
+        <div v-if="sectionLoading" class="space-y-4" aria-busy="true">
+            <span class="sr-only">Loading content…</span>
+            <SkeletonStatCard :count="4" />
+            <div class="grid gap-4 lg:grid-cols-2">
+                <SkeletonChart />
+                <SkeletonChart />
+            </div>
+        </div>
+        <template v-else-if="dashboard">
             <div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
                 <StatCard label="Total projects" :value="kpis.total_projects" icon="building" tone="slate" />
                 <StatCard label="Active projects" :value="kpis.active_projects" icon="building" tone="green" :href="route('projects.index', { status: 'active' })" />
@@ -111,7 +124,8 @@ const selectClass = 'rounded-lg border-slate-300 py-2 text-sm shadow-sm focus:bo
         </template>
 
         <AppCard title="Open projects" class="mt-4" :padded="false">
-            <ul v-if="recentProjects.length" class="divide-y divide-line">
+            <SkeletonList v-if="sectionLoading" :rows="4" />
+            <ul v-else-if="recentProjects.length" class="divide-y divide-line">
                 <li v-for="project in recentProjects" :key="project.id">
                     <Link :href="route('projects.show', project.id)" class="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 sm:px-5">
                         <div class="min-w-0 flex-1">

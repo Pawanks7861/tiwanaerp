@@ -1,5 +1,7 @@
 <script setup>
 import EmptyState from '@/Components/UI/EmptyState.vue';
+import SkeletonTable from '@/Components/UI/Skeleton/SkeletonTable.vue';
+import { useContentSkeleton } from '@/composables/useContentSkeleton';
 import { router } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import CellValue from './CellValue.vue';
@@ -17,7 +19,12 @@ const props = defineProps({
     emptyTitle: { type: String, default: 'Nothing here yet' },
     emptyDescription: { type: String, default: null },
     emptyIcon: { type: String, default: 'folder' },
+    loading: { type: Boolean, default: false },
+    error: { type: String, default: '' },
 });
+
+const contentBusy = useContentSkeleton();
+const busy = computed(() => props.loading || contentBusy.value);
 
 const numericTypes = ['money', 'rate', 'qty', 'percent'];
 const alignOf = (col) => col.align ?? (numericTypes.includes(col.type) ? 'right' : 'left');
@@ -32,8 +39,33 @@ function open(row) {
 </script>
 
 <template>
-    <div>
-        <template v-if="rows.length">
+    <div :aria-busy="busy">
+        <div v-if="busy" role="status">
+            <span class="sr-only">Loading content…</span>
+            <div class="hidden overflow-x-auto md:block">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-slate-50">
+                        <tr>
+                            <th
+                                v-for="col in columns"
+                                :key="col.key"
+                                scope="col"
+                                class="px-4 py-2.5 text-xs font-semibold tracking-wide whitespace-nowrap text-slate-500 uppercase"
+                                :class="alignOf(col) === 'right' ? 'text-right' : 'text-left'"
+                            >
+                                {{ col.label }}
+                            </th>
+                        </tr>
+                    </thead>
+                </table>
+            </div>
+            <SkeletonTable :rows="6" :columns="columns.length" />
+        </div>
+        <div v-else-if="error" class="px-4 py-8 text-center text-sm text-slate-600">
+            <p>{{ error }}</p>
+            <slot name="error" />
+        </div>
+        <template v-else-if="rows.length">
             <!-- Desktop -->
             <div class="hidden overflow-x-auto md:block">
                 <table class="min-w-full divide-y divide-line text-sm">

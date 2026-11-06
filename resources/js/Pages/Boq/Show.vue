@@ -1,4 +1,5 @@
 <script setup>
+import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
 import ApprovedDrawingPicker from '@/Components/Boq/ApprovedDrawingPicker.vue';
 import CellDecimal from '@/Components/Boq/CellDecimal.vue';
 import UniversalFileViewer from '@/Components/Files/UniversalFileViewer.vue';
@@ -36,6 +37,8 @@ const props = defineProps({
     approved_drawings: { type: Array, default: () => [] },
     has_newer_approved_revision: { type: Boolean, default: false },
     source_import: { type: Object, default: null },
+    source_imports: { type: Array, default: () => [] },
+    import_history: { type: Array, default: () => [] },
 });
 
 const COST_FIELDS = ['material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent'];
@@ -108,13 +111,43 @@ function materialAmount(row) {
     return qty * rate;
 }
 
+function materialTotalQty(line, boqQty) {
+    const qty = Number(line.quantity);
+    const total = Number(boqQty);
+    if (!Number.isFinite(qty) || !Number.isFinite(total)) return 0;
+    return qty * total;
+}
+
+function materialTotalCost(line, boqQty) {
+    return materialTotalQty(line, boqQty) * (Number.isFinite(Number(line.rate)) ? Number(line.rate) : 0);
+}
+
 function materialTotals(row) {
     const lines = row.simple_materials || [];
     const perUnit = lines.reduce((sum, line) => sum + materialAmount(line), 0);
     const qty = Number(row.quantity);
     const estimated = Number.isFinite(qty) ? perUnit * qty : 0;
-    return { perUnit, estimated };
+    const aggregated = new Map();
+    lines.forEach((line) => {
+        const name = String(line.material_name || '').trim();
+        const unit = String(line.unit || '').trim();
+        if (!name || !unit) return;
+        const key = `${name.toLowerCase()}|${unit.toLowerCase()}`;
+        const per = Number(line.quantity);
+        if (!Number.isFinite(per)) return;
+        const current = aggregated.get(key) || { material_name: name, unit, per_unit_quantity: 0 };
+        current.per_unit_quantity += per;
+        aggregated.set(key, current);
+    });
+    const quantitySummary = [...aggregated.values()].map((group) => ({
+        ...group,
+        total_quantity: Number.isFinite(qty) ? group.per_unit_quantity * qty : 0,
+    }));
+
+    return { perUnit, estimated, quantitySummary };
 }
+
+const attachmentsOpen = ref(false);
 
 function markMaterialsDirty(row) {
     row.simple_materials_dirty = true;
@@ -147,6 +180,8 @@ function toRow(item) {
         simple_materials_initialized: !!item.simple_materials_initialized,
         simple_materials_dirty: false,
         simple_materials: costs.value ? mapSimpleMaterials(item) : [],
+        attachments: Array.isArray(item.attachments) ? item.attachments : [],
+        line_uid: item.line_uid ?? null,
     };
     if (detailedCosts.value) {
         COST_FIELDS.forEach((f) => (row[f] = item[f] ?? null));
@@ -172,8 +207,32 @@ function reset() {
     errors.value = {};
     baseline.value = serialise();
 }
-// Section edits reload the page props too; only reset local edits when the lines really changed.
-watch(() => JSON.stringify(props.items), reset, { immediate: true });
+
+function syncAttachmentsFromProps() {
+    const byId = Object.fromEntries(props.items.filter((item) => item.id).map((item) => [item.id, item]));
+    rows.value.forEach((row) => {
+        if (row.id && byId[row.id]) {
+            row.attachments = Array.isArray(byId[row.id].attachments) ? byId[row.id].attachments : [];
+        }
+    });
+}
+
+// Section/attachment reloads update page props. Keep local edits when dirty; always refresh attachments.
+watch(() => JSON.stringify(props.items), () => {
+    if (!baseline.value) {
+        reset();
+        return;
+    }
+    if (dirty.value) {
+        syncAttachmentsFromProps();
+        return;
+    }
+    const editingId = editingRow.value?.id ?? null;
+    reset();
+    if (editingId) {
+        editingRow.value = rows.value.find((row) => row.id === editingId) ?? null;
+    }
+}, { immediate: true });
 
 const dirty = computed(() => deletedIds.value.length > 0 || serialise() !== baseline.value);
 const calc = computed(() => Object.fromEntries(rows.value.map((r) => [r._key, boqLine(r)])));
@@ -271,6 +330,8 @@ function save() {
                 simple_materials,
                 simple_materials_dirty,
                 simple_materials_initialized,
+                attachments,
+                line_uid,
                 ...data
             } = r;
             if (!detailedCosts.value) {
@@ -493,8 +554,9 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                             </template>
                             <AppButton v-if="approval?.can_cancel" size="sm" variant="secondary" @click="openApproval('cancel')">Withdraw</AppButton>
                             <AppButton v-if="can.revise" size="sm" variant="secondary" @click="confirming = 'revise'">Create revision</AppButton>
-                            <AppButton v-if="can.import && !dirty" size="sm" icon="folder" @click="showImport = true">Import Excel/CSV</AppButton>
+                            <AppButton v-if="can.import && !dirty" size="sm" icon="folder" @click="showImport = true">Import Excel / CSV</AppButton>
                             <ImportTemplateDownload v-if="can.import" module="boq.items" :project-id="project.id" size="sm" label="Download template" />
+                            <AppButton v-if="editable" size="sm" variant="secondary" @click="addRow">Add item manually</AppButton>
                             <a v-if="can.export" :href="route('projects.boqs.export', [project.id, boq.id])" class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">
                                 <Icon name="download" :size="14" /> Export
                             </a>
@@ -514,30 +576,76 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                 A newer approved drawing revision is available. Review whether this BOQ requires an update.
             </div>
 
-            <AppCard v-if="source_import" title="Source files" subtitle="Spreadsheet used to populate or update this BOQ.">
-                <dl class="grid gap-3 text-sm sm:grid-cols-2">
-                    <div>
-                        <dt class="text-xs font-medium text-slate-500 uppercase">File</dt>
-                        <dd class="mt-0.5 text-slate-900">{{ source_import.original_filename }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-xs font-medium text-slate-500 uppercase">Uploaded</dt>
-                        <dd class="mt-0.5 text-slate-800">{{ formatDateTime(source_import.created_at) }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-xs font-medium text-slate-500 uppercase">By</dt>
-                        <dd class="mt-0.5 text-slate-800">{{ source_import.uploaded_by?.name ?? '—' }}</dd>
-                    </div>
-                    <div class="flex items-end">
-                        <a
-                            v-if="source_import.download_url"
-                            :href="source_import.download_url"
-                            class="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline"
-                        >
-                            <Icon name="download" :size="16" /> Download file
-                        </a>
-                    </div>
-                </dl>
+            <AppCard
+                v-if="(source_imports?.length || source_import)"
+                title="Source files"
+                subtitle="Original workbooks retained from successful BOQ imports."
+            >
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-slate-50 text-[11px] tracking-wide text-slate-600 uppercase">
+                            <tr>
+                                <th class="px-3 py-2 text-left">File</th>
+                                <th class="px-3 py-2 text-left">Sheet</th>
+                                <th class="px-3 py-2 text-left">Imported by</th>
+                                <th class="px-3 py-2 text-left">Date</th>
+                                <th class="px-3 py-2 text-right" />
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-line">
+                            <tr v-for="file in (source_imports?.length ? source_imports : [source_import])" :key="file.id">
+                                <td class="px-3 py-2 text-slate-900">
+                                    {{ file.original_filename }}
+                                    <span v-if="file.is_primary" class="ml-1 text-[10px] font-medium uppercase text-slate-500">latest</span>
+                                </td>
+                                <td class="px-3 py-2 text-slate-700">{{ file.sheet ?? '—' }}</td>
+                                <td class="px-3 py-2 text-slate-700">{{ file.uploaded_by?.name ?? '—' }}</td>
+                                <td class="px-3 py-2 text-slate-700">{{ formatDateTime(file.created_at) }}</td>
+                                <td class="px-3 py-2 text-right">
+                                    <a
+                                        v-if="file.download_url"
+                                        :href="file.download_url"
+                                        class="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline"
+                                    >
+                                        <Icon name="download" :size="16" /> Download
+                                    </a>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </AppCard>
+
+            <AppCard
+                v-if="import_history?.length"
+                title="Import history"
+                subtitle="Recent import batches for this BOQ."
+                :padded="false"
+            >
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-slate-50 text-[11px] tracking-wide text-slate-600 uppercase">
+                            <tr>
+                                <th class="px-4 py-2 text-left">Filename</th>
+                                <th class="px-4 py-2 text-left">Sheet</th>
+                                <th class="px-4 py-2 text-left">Imported by</th>
+                                <th class="px-4 py-2 text-left">Date</th>
+                                <th class="px-4 py-2 text-right">Rows</th>
+                                <th class="px-4 py-2 text-left">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-line">
+                            <tr v-for="row in import_history" :key="row.id">
+                                <td class="px-4 py-2 text-slate-900">{{ row.original_filename }}</td>
+                                <td class="px-4 py-2 text-slate-700">{{ row.sheet ?? '—' }}</td>
+                                <td class="px-4 py-2 text-slate-700">{{ row.uploaded_by?.name ?? '—' }}</td>
+                                <td class="px-4 py-2 text-slate-700">{{ formatDateTime(row.date) }}</td>
+                                <td class="px-4 py-2 text-right tabular text-slate-700">{{ row.rows ?? '—' }}</td>
+                                <td class="px-4 py-2 text-slate-700">{{ row.status_label }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </AppCard>
 
             <AppCard title="Approved Drawings" subtitle="Source drawings used to prepare this BOQ. Later approvals do not change these links or quantities." :padded="false">
@@ -855,62 +963,7 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                         </p>
                     </div>
 
-                    <div class="hidden space-y-2 sm:block">
-                        <div class="grid grid-cols-[minmax(0,1.4fr)_4.5rem_4.5rem_5.5rem_5.5rem_1.75rem] gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                            <span>Material</span>
-                            <span class="text-right">Qty</span>
-                            <span>Unit</span>
-                            <span class="text-right">Rate</span>
-                            <span class="text-right">Amount</span>
-                            <span></span>
-                        </div>
-                        <div
-                            v-for="(mat, mi) in editingRow.simple_materials"
-                            :key="mat._key"
-                            class="grid grid-cols-[minmax(0,1.4fr)_4.5rem_4.5rem_5.5rem_5.5rem_1.75rem] items-center gap-2"
-                        >
-                            <input
-                                v-model="mat.material_name"
-                                class="w-full rounded border-slate-200 px-2 py-1.5 text-sm"
-                                :disabled="!editable"
-                                placeholder="Material name"
-                                @input="markMaterialsDirty(editingRow)"
-                            />
-                            <input
-                                v-model="mat.quantity"
-                                class="w-full rounded border-slate-200 px-2 py-1.5 text-right text-sm tabular"
-                                :disabled="!editable"
-                                inputmode="decimal"
-                                @input="markMaterialsDirty(editingRow)"
-                            />
-                            <input
-                                v-model="mat.unit"
-                                class="w-full rounded border-slate-200 px-2 py-1.5 text-sm"
-                                :disabled="!editable"
-                                placeholder="Bag"
-                                @input="markMaterialsDirty(editingRow)"
-                            />
-                            <input
-                                v-model="mat.rate"
-                                class="w-full rounded border-slate-200 px-2 py-1.5 text-right text-sm tabular"
-                                :disabled="!editable"
-                                inputmode="decimal"
-                                @input="markMaterialsDirty(editingRow)"
-                            />
-                            <div class="text-right text-sm font-medium tabular text-slate-800">{{ formatMoney(materialAmount(mat)) }}</div>
-                            <button
-                                v-if="editable"
-                                type="button"
-                                class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
-                                aria-label="Remove material"
-                                @click="removeSimpleMaterial(editingRow, mi)"
-                            >
-                                <Icon name="trash" :size="14" />
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="space-y-2 sm:hidden">
+                    <div class="space-y-2">
                         <div
                             v-for="(mat, mi) in editingRow.simple_materials"
                             :key="mat._key"
@@ -928,7 +981,7 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                                     v-model="mat.quantity"
                                     class="rounded border-slate-200 px-2 py-1.5 text-sm tabular"
                                     :disabled="!editable"
-                                    placeholder="Qty"
+                                    :placeholder="`Qty / ${unitLabel(editingRow.unit_id) || 'unit'}`"
                                     inputmode="decimal"
                                     @input="markMaterialsDirty(editingRow)"
                                 />
@@ -948,8 +1001,18 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                                     @input="markMaterialsDirty(editingRow)"
                                 />
                                 <div class="flex items-center justify-between rounded bg-slate-50 px-2 text-sm">
-                                    <span class="text-slate-500">Amt</span>
+                                    <span class="text-slate-500">Cost / unit</span>
                                     <span class="font-medium tabular">{{ formatMoney(materialAmount(mat)) }}</span>
+                                </div>
+                            </div>
+                            <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+                                <div class="rounded bg-slate-50 px-2 py-1.5">
+                                    <p class="text-[11px] text-slate-500">Total Qty</p>
+                                    <p class="font-medium tabular">{{ formatQty(materialTotalQty(mat, editingRow.quantity)) }} {{ mat.unit || '' }}</p>
+                                </div>
+                                <div class="rounded bg-slate-50 px-2 py-1.5">
+                                    <p class="text-[11px] text-slate-500">Estimated Cost</p>
+                                    <p class="font-medium tabular">{{ formatMoney(materialTotalCost(mat, editingRow.quantity)) }}</p>
                                 </div>
                             </div>
                             <button
@@ -980,11 +1043,48 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                             <span class="font-semibold tabular text-slate-900">{{ formatMoney(materialTotals(editingRow).perUnit) }}</span>
                         </div>
                         <div class="mt-1 flex items-center justify-between gap-3 text-slate-600">
-                            <span>Estimated Material Cost for {{ formatQty(editingRow.quantity) }} {{ unitLabel(editingRow.unit_id) || 'units' }}</span>
+                            <span>Total Estimated Material Cost</span>
                             <span class="font-semibold tabular text-slate-900">{{ formatMoney(materialTotals(editingRow).estimated) }}</span>
+                        </div>
+                        <div v-if="materialTotals(editingRow).quantitySummary.length" class="mt-3 border-t border-slate-200 pt-2">
+                            <p class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Total Material Quantities</p>
+                            <ul class="mt-1 space-y-0.5">
+                                <li
+                                    v-for="group in materialTotals(editingRow).quantitySummary"
+                                    :key="`${group.material_name}|${group.unit}`"
+                                    class="flex items-center justify-between gap-3 text-slate-700"
+                                >
+                                    <span>{{ group.material_name }}</span>
+                                    <span class="tabular">{{ formatQty(group.total_quantity) }} {{ group.unit }}</span>
+                                </li>
+                            </ul>
                         </div>
                     </div>
                 </div>
+
+                <details v-if="editingRow.id" class="rounded-xl border border-line" :open="attachmentsOpen || undefined" @toggle="attachmentsOpen = $event.target.open">
+                    <summary class="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-slate-900 marker:content-none [&::-webkit-details-marker]:hidden">
+                        <span class="inline-flex items-center gap-2">
+                            <Icon name="paperclip" :size="16" class="text-slate-500" />
+                            Attachments ({{ editingRow.attachments?.length || 0 }})
+                        </span>
+                    </summary>
+                    <div class="border-t border-line">
+                        <AttachmentPanel
+                            :attachments="editingRow.attachments || []"
+                            attachable-type="boq_item"
+                            :attachable-id="editingRow.id"
+                            :can-upload="editable"
+                            :can-delete="editable"
+                            embedded
+                            title="Attachments"
+                            placeholder="Excel calc, PDF, drawing, photo, specification…"
+                        />
+                    </div>
+                </details>
+                <p v-else-if="editable" class="rounded-xl border border-dashed border-line px-3 py-2 text-xs text-slate-500">
+                    Save the BOQ once to attach files to this new item.
+                </p>
 
                 <p v-if="!editable && editingRow.description" class="text-sm whitespace-pre-line text-slate-600">{{ editingRow.description }}</p>
             </div>

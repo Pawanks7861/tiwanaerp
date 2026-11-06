@@ -184,7 +184,9 @@ onBeforeUnmount(() => {
         <p v-if="memoryWarning" class="px-3 py-2 text-xs text-amber-200">{{ memoryWarning }} · {{ formatBytes(sizeBytes) }}</p>
         <div class="relative min-h-0 min-w-0 flex-1">
             <div ref="container" class="h-full min-h-[24rem] w-full max-w-full" />
-            <div v-if="loading" class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-950/80 px-4 text-center">
+            <div v-if="loading" class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-950/90 px-4 text-center" aria-busy="true">
+                <span class="sr-only">Loading content…</span>
+                <span class="skeleton-block skeleton-block-on-dark skeleton-shimmer h-40 w-full max-w-lg" aria-hidden="true" />
                 <p class="text-sm">{{ progress }}</p>
                 <div class="h-1.5 w-48 overflow-hidden rounded bg-white/10">
                     <div class="h-full bg-white" :style="{ width: `${Math.max(8, Math.min(100, percent || 15))}%` }" />

@@ -119,7 +119,10 @@ class DataImportController extends Controller
             'context.boq_id' => ['nullable', 'integer', 'exists:boqs,id'],
             'context.material_request_id' => ['nullable', 'integer', 'exists:material_requests,id'],
             'context.stock_adjustment_id' => ['nullable', 'integer', 'exists:stock_adjustments,id'],
+            'context.reimport_action' => ['nullable', 'string', 'in:additional,replace'],
+            'context.header_row' => ['nullable', 'integer', 'min:1'],
             'sheet_index' => ['nullable', 'integer', 'min:0'],
+            'header_row' => ['nullable', 'integer', 'min:1'],
         ]);
 
         $project = isset($data['project_id'])
@@ -129,6 +132,9 @@ class DataImportController extends Controller
         $context = $data['context'] ?? [];
         if (isset($data['sheet_index'])) {
             $context['sheet_index'] = $data['sheet_index'];
+        }
+        if (isset($data['header_row'])) {
+            $context['header_row'] = $data['header_row'];
         }
 
         $result = $this->imports->upload(
@@ -142,11 +148,16 @@ class DataImportController extends Controller
         return response()->json([
             'import' => $this->payload($result['import']),
             'headers' => $result['headers'],
+            'raw_headers' => $result['raw_headers'] ?? [],
             'mapping' => $result['mapping'],
             'fields' => $result['fields'],
             'modes' => $result['modes'],
             'instructions' => $result['instructions'],
             'sheets' => $result['sheets'] ?? [],
+            'suggested_sheet_index' => $result['suggested_sheet_index'] ?? null,
+            'header_row' => $result['header_row'] ?? null,
+            'suggested_header_row' => $result['suggested_header_row'] ?? null,
+            'prior_import' => $result['prior_import'] ?? null,
         ]);
     }
 
@@ -156,15 +167,24 @@ class DataImportController extends Controller
 
         $data = $request->validate([
             'sheet_index' => ['required', 'integer', 'min:0'],
+            'header_row' => ['nullable', 'integer', 'min:1'],
         ]);
 
-        $result = $this->imports->selectSheet($import, (int) $data['sheet_index'], $request->user());
+        $result = $this->imports->selectSheet(
+            $import,
+            (int) $data['sheet_index'],
+            $request->user(),
+            isset($data['header_row']) ? (int) $data['header_row'] : null,
+        );
 
         return response()->json([
             'import' => $this->payload($result['import']),
             'headers' => $result['headers'],
+            'raw_headers' => $result['raw_headers'] ?? [],
             'mapping' => $result['mapping'],
             'sheets' => $result['sheets'],
+            'header_row' => $result['header_row'] ?? null,
+            'suggested_header_row' => $result['suggested_header_row'] ?? null,
         ]);
     }
 
@@ -209,6 +229,16 @@ class DataImportController extends Controller
     public function confirm(Request $request, DataImport $import): JsonResponse|RedirectResponse
     {
         Gate::authorize('view', $import);
+
+        $data = $request->validate([
+            'reimport_action' => ['nullable', 'string', 'in:additional,replace'],
+        ]);
+        if (! empty($data['reimport_action'])) {
+            $context = $import->context ?? [];
+            $context['reimport_action'] = $data['reimport_action'];
+            $import->forceFill(['context' => $context])->save();
+        }
+
         $import = $this->imports->confirm($import, $request->user());
 
         if ($request->wantsJson()) {

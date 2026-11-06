@@ -3,8 +3,10 @@
 namespace App\Models\Boq;
 
 use App\Enums\Boq\QuantitySource;
+use App\Models\Concerns\HasAttachments;
 use App\Models\Masters\Unit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -17,11 +19,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'boq_section_id', 'line_uid', 'item_code', 'name', 'description', 'hsn_sac', 'unit_id', 'quantity',
     'quantity_source', 'takeoff_reference', 'bbs_applicable',
     'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'cost_rate', 'cost_amount',
-    'margin_percent', 'selling_rate', 'client_rate', 'client_amount', 'rate_analysis_id',
+    'margin_percent', 'selling_rate', 'client_rate', 'client_amount', 'gst_rate', 'rate_analysis_id',
     'origin_variation_item_id', 'is_variation_originated', 'sort_order', 'simple_materials_initialized',
+    'source_type', 'source_import_id', 'source_sheet', 'source_row',
 ])]
 class BoqItem extends Model
 {
+    use HasAttachments;
+
     /** Internal cost fields, hidden from users without boq.view_costs. */
     public const COST_FIELDS = [
         'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'cost_rate', 'cost_amount',
@@ -59,7 +64,10 @@ class BoqItem extends Model
             'selling_rate' => 'decimal:4',
             'client_rate' => 'decimal:4',
             'client_amount' => 'decimal:2',
+            'gst_rate' => 'decimal:4',
             'sort_order' => 'integer',
+            'source_import_id' => 'integer',
+            'source_row' => 'integer',
         ];
     }
 
@@ -118,5 +126,21 @@ class BoqItem extends Model
     public function bbs(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(BoqBbs::class);
+    }
+
+    /**
+     * Attachments store under company/{id}/…; BOQ items inherit company from the parent BOQ.
+     */
+    protected function companyId(): Attribute
+    {
+        return Attribute::get(function (): ?int {
+            if ($this->relationLoaded('boq') && $this->boq) {
+                return (int) $this->boq->company_id;
+            }
+
+            $companyId = Boq::query()->withoutGlobalScopes()->whereKey($this->boq_id)->value('company_id');
+
+            return $companyId !== null ? (int) $companyId : null;
+        });
     }
 }

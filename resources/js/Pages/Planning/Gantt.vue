@@ -3,6 +3,7 @@ import PlanningNav from '@/Components/Planning/PlanningNav.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import EmptyState from '@/Components/UI/EmptyState.vue';
+import SkeletonChart from '@/Components/UI/Skeleton/SkeletonChart.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatDate } from '@/lib/format';
 import { Link } from '@inertiajs/vue3';
@@ -108,7 +109,10 @@ onBeforeUnmount(() => {
                 </div>
             </template>
 
-            <div v-if="loading" class="px-6 py-12 text-center text-sm text-slate-500">Loading schedule…</div>
+            <div v-if="loading" class="p-4" aria-busy="true">
+                <span class="sr-only">Loading content…</span>
+                <SkeletonChart />
+            </div>
             <EmptyState v-else-if="error" icon="warning" title="Schedule unavailable" :description="error">
                 <AppButton size="sm" variant="secondary" @click="load">Retry</AppButton>
             </EmptyState>

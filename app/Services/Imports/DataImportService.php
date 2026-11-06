@@ -51,13 +51,21 @@ class DataImportService
 
         $uuid = (string) Str::uuid();
         $stored = $this->reader->storeUpload($file, (int) $this->company->id(), $uuid);
-        $sheetIndex = max(0, (int) ($context['sheet_index'] ?? 0));
         $sheetNames = $this->reader->sheetNames($stored['disk'], $stored['path']);
+        $suggestedSheet = $this->reader->suggestSheetIndex($sheetNames);
+        $sheetIndex = array_key_exists('sheet_index', $context)
+            ? max(0, (int) $context['sheet_index'])
+            : (int) ($suggestedSheet ?? 0);
         if ($sheetIndex >= count($sheetNames)) {
             $sheetIndex = 0;
         }
+        $headerRow = isset($context['header_row']) ? max(1, (int) $context['header_row']) : null;
         $context['sheet_index'] = $sheetIndex;
-        $sheet = $this->reader->read($stored['disk'], $stored['path'], $sheetIndex);
+        $sheet = $this->reader->read($stored['disk'], $stored['path'], $sheetIndex, $headerRow);
+        $context['header_row'] = $sheet['header_row'];
+        $context['suggested_header_row'] = $sheet['suggested_header_row'];
+        $context['sheet_name'] = $sheet['sheet_name'];
+        $context['suggested_sheet_index'] = $suggestedSheet;
         $mapping = $this->mapper->suggest($definition, $sheet['headers']);
 
         $import = new DataImport;
@@ -81,18 +89,23 @@ class DataImportService
         return [
             'import' => $import,
             'headers' => $sheet['headers'],
+            'raw_headers' => $sheet['raw_headers'],
             'mapping' => $mapping,
             'fields' => $definition->fieldsPayload(),
             'modes' => $definition->modeOptions(),
             'instructions' => $definition->instructions(),
             'sheets' => $sheetNames,
+            'suggested_sheet_index' => $suggestedSheet,
+            'header_row' => $sheet['header_row'],
+            'suggested_header_row' => $sheet['suggested_header_row'],
+            'prior_import' => $this->priorBoqImport($import, $context),
         ];
     }
 
     /**
-     * @return array{import: DataImport, headers: list<string>, mapping: array<string, string|null>, sheets: list<string>}
+     * @return array{import: DataImport, headers: list<string>, raw_headers: list<string>, mapping: array<string, string|null>, sheets: list<string>, header_row: int, suggested_header_row: int}
      */
-    public function selectSheet(DataImport $import, int $sheetIndex, User $user): array
+    public function selectSheet(DataImport $import, int $sheetIndex, User $user, ?int $headerRow = null): array
     {
         $definition = $this->definition($import->module);
         if (! $definition->authorize($user, $import->project)) {
@@ -106,7 +119,19 @@ class DataImportService
 
         $context = $import->context ?? [];
         $context['sheet_index'] = $sheetIndex;
-        $sheet = $this->reader->read($import->disk, $import->path, $sheetIndex);
+        if ($headerRow !== null) {
+            $context['header_row'] = max(1, $headerRow);
+        }
+
+        $sheet = $this->reader->read(
+            $import->disk,
+            $import->path,
+            $sheetIndex,
+            isset($context['header_row']) ? (int) $context['header_row'] : null,
+        );
+        $context['header_row'] = $sheet['header_row'];
+        $context['suggested_header_row'] = $sheet['suggested_header_row'];
+        $context['sheet_name'] = $sheet['sheet_name'];
         $mapping = $this->mapper->suggest($definition, $sheet['headers']);
 
         $import->forceFill([
@@ -117,21 +142,24 @@ class DataImportService
             'error_report_path' => null,
             'summary' => null,
             'total_rows' => count($sheet['rows']),
-            'valid_rows' => null,
-            'invalid_rows' => null,
-            'duplicate_rows' => null,
-            'create_count' => null,
-            'update_count' => null,
-            'skip_count' => null,
-            'fail_count' => null,
+            'valid_rows' => 0,
+            'invalid_rows' => 0,
+            'duplicate_rows' => 0,
+            'create_count' => 0,
+            'update_count' => 0,
+            'skip_count' => 0,
+            'fail_count' => 0,
             'failure_message' => null,
         ])->save();
 
         return [
             'import' => $import->fresh(),
             'headers' => $sheet['headers'],
+            'raw_headers' => $sheet['raw_headers'],
             'mapping' => $mapping,
             'sheets' => $sheetNames,
+            'header_row' => $sheet['header_row'],
+            'suggested_header_row' => $sheet['suggested_header_row'],
         ];
     }
 
@@ -151,7 +179,7 @@ class DataImportService
         foreach ($definition->fields() as $field) {
             if ($field->required && blank($mapping[$field->key] ?? null)) {
                 throw ValidationException::withMessages([
-                    "mapping.{$field->key}" => "Map a column to {$field->label}.",
+                    "mapping.{$field->key}" => "Please map {$field->label} before continuing.",
                 ]);
             }
         }
@@ -176,8 +204,22 @@ class DataImportService
     public function runValidation(DataImport $import): DataImport
     {
         $definition = $this->definition($import->module);
-        $sheet = $this->reader->read($import->disk, $import->path, $this->sheetIndex($import));
-        $context = $this->importContext($import);
+        $headerRow = (int) (($import->context ?? [])['header_row'] ?? 0) ?: null;
+        $sheet = $this->reader->read($import->disk, $import->path, $this->sheetIndex($import), $headerRow);
+        $contextMeta = array_merge($import->context ?? [], [
+            'import_id' => $import->id,
+            'sheet_name' => $sheet['sheet_name'],
+            'header_row' => $sheet['header_row'],
+        ]);
+        $import->forceFill([
+            'context' => array_merge($import->context ?? [], [
+                'sheet_name' => $sheet['sheet_name'],
+                'header_row' => $sheet['header_row'],
+                'suggested_header_row' => $sheet['suggested_header_row'],
+            ]),
+        ])->save();
+
+        $context = new ImportContext($import->company, $import->uploader, $import->project, $contextMeta);
         $mode = $import->mode instanceof ImportMode ? $import->mode : ImportMode::from($import->mode);
 
         $rows = [];
@@ -190,10 +232,14 @@ class DataImportService
             'create' => 0,
             'update' => 0,
             'skip' => 0,
+            'warnings' => 0,
+            'boq_value' => 0.0,
+            'sheet_name' => $sheet['sheet_name'],
+            'header_row' => $sheet['header_row'],
         ];
 
         foreach ($sheet['rows'] as $index => $raw) {
-            $line = $index + 2;
+            $line = $sheet['header_row'] + $index + 1;
             $mapped = $this->mapper->apply($import->mapping ?? [], $raw);
             $summary['total']++;
 
@@ -210,12 +256,14 @@ class DataImportService
                 }
 
                 $prepared = $definition->prepareRow($mapped, $mode, $context);
+                $prepared['source_row'] = $line;
                 $action = $prepared['action'];
 
                 if ($action === 'skip') {
                     $summary['skip']++;
                     $rows[] = [
                         'row' => $line,
+                        'sheet' => $sheet['sheet_name'],
                         'status' => 'skipped',
                         'action' => 'skip',
                         'errors' => [],
@@ -232,10 +280,18 @@ class DataImportService
                 }
                 $summary['valid']++;
                 $summary[$action]++;
+                $warnings = $prepared['warnings'] ?? ($prepared['preview']['warnings'] ?? []);
+                if ($warnings !== []) {
+                    $summary['warnings']++;
+                }
+                if (isset($prepared['preview']['amount'])) {
+                    $summary['boq_value'] += (float) $prepared['preview']['amount'];
+                }
 
                 $rows[] = [
                     'row' => $line,
-                    'status' => $isDuplicate ? 'duplicate' : 'valid',
+                    'sheet' => $sheet['sheet_name'],
+                    'status' => $warnings !== [] ? 'warning' : ($isDuplicate ? 'duplicate' : 'valid'),
                     'action' => $action,
                     'errors' => [],
                     'preview' => $prepared['preview'],
@@ -251,10 +307,15 @@ class DataImportService
                 }
                 $rows[] = [
                     'row' => $line,
+                    'sheet' => $sheet['sheet_name'],
                     'status' => 'invalid',
                     'action' => null,
                     'errors' => $messages,
-                    'preview' => $mapped,
+                    'preview' => [
+                        'code' => $mapped['item_code'] ?? null,
+                        'name' => $mapped['name'] ?? null,
+                        ...$mapped,
+                    ],
                     'prepared' => null,
                 ];
             } catch (Throwable $e) {
@@ -262,6 +323,7 @@ class DataImportService
                 $summary['invalid']++;
                 $rows[] = [
                     'row' => $line,
+                    'sheet' => $sheet['sheet_name'],
                     'status' => 'invalid',
                     'action' => null,
                     'errors' => [['field' => 'row', 'message' => 'This row could not be validated.']],
@@ -309,6 +371,27 @@ class DataImportService
         }
         if (($import->valid_rows ?? 0) < 1) {
             throw ValidationException::withMessages(['import' => 'There are no valid rows to import. Fix the errors and upload again.']);
+        }
+
+        if ($definition instanceof \App\Support\Imports\Definitions\BoqItemsImportDefinition) {
+            $definition->assertReimportAllowed($this->importContext($import), $import);
+            $action = (string) (($import->context ?? [])['reimport_action'] ?? '');
+            if ($action === 'replace') {
+                $previous = DataImport::query()
+                    ->where('module', 'boq.items')
+                    ->where('company_id', $import->company_id)
+                    ->where('id', '!=', $import->id)
+                    ->where('original_filename', $import->original_filename)
+                    ->whereIn('status', [ImportStatus::Completed->value, ImportStatus::CompletedWithErrors->value])
+                    ->where('context->boq_id', (int) (($import->context ?? [])['boq_id'] ?? 0))
+                    ->latest('id')
+                    ->first();
+                if ($previous) {
+                    $ctx = $import->context ?? [];
+                    $ctx['replace_import_id'] = $previous->id;
+                    $import->forceFill(['context' => $ctx])->save();
+                }
+            }
         }
 
         $import->forceFill([
@@ -464,6 +547,42 @@ class DataImportService
     }
 
     /**
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>|null
+     */
+    private function priorBoqImport(DataImport $import, array $context): ?array
+    {
+        if ($import->module !== 'boq.items') {
+            return null;
+        }
+        $boqId = (int) ($context['boq_id'] ?? 0);
+        if ($boqId < 1) {
+            return null;
+        }
+
+        $previous = DataImport::query()
+            ->where('module', 'boq.items')
+            ->where('company_id', $import->company_id)
+            ->where('id', '!=', $import->id)
+            ->where('original_filename', $import->original_filename)
+            ->whereIn('status', [ImportStatus::Completed->value, ImportStatus::CompletedWithErrors->value])
+            ->where('context->boq_id', $boqId)
+            ->latest('id')
+            ->first();
+
+        if (! $previous) {
+            return null;
+        }
+
+        return [
+            'id' => $previous->id,
+            'original_filename' => $previous->original_filename,
+            'finished_at' => $previous->finished_at?->toIso8601String(),
+            'message' => 'This file has already been imported into this BOQ.',
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      */
     private function writeJson(DataImport $import, string $filename, array $payload): string
@@ -498,7 +617,10 @@ class DataImportService
 
     private function importContext(DataImport $import): ImportContext
     {
-        $meta = array_merge($import->context ?? [], ['import_id' => $import->id]);
+        $meta = array_merge($import->context ?? [], [
+            'import_id' => $import->id,
+            'sheet_name' => ($import->context ?? [])['sheet_name'] ?? null,
+        ]);
 
         return new ImportContext($import->company, $import->uploader, $import->project, $meta);
     }

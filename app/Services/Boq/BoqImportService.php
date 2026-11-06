@@ -26,13 +26,24 @@ class BoqImportService
     public const HEADINGS = [
         'Section Code', 'Section Name', 'Subsection Code', 'Subsection Name', 'Item Code', 'Name', 'Description',
         'HSN SAC', 'Unit', 'Quantity', 'Material Rate', 'Labour Rate', 'Equipment Rate', 'Subcontract Rate',
-        'Margin Percent', 'Client Rate',
+        'Margin Percent', 'Client Rate', 'GST Rate', 'Amount', 'Remarks',
     ];
 
-    private const REQUIRED_COLUMNS = ['section_name', 'name', 'unit', 'quantity'];
+    private const REQUIRED_COLUMNS = ['name', 'unit', 'quantity'];
 
     private const NUMERIC_COLUMNS = [
-        'quantity', 'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent', 'client_rate',
+        'quantity', 'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent',
+        'client_rate', 'gst_rate', 'amount',
+    ];
+
+    /** @var list<string> */
+    private const EXCEL_ERRORS = [
+        '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NAME?', '#NUM!', '#NULL!', '#GETTING_DATA', '#FORMULA!',
+    ];
+
+    /** @var list<string> */
+    private const SUMMARY_PREFIXES = [
+        'total', 'subtotal', 'sub total', 'grand total', 'b/f', 'c/f', 'brought forward', 'carried forward',
     ];
 
     private const MAX_ROWS = 5000;
@@ -81,7 +92,8 @@ class BoqImportService
             $nextSort = (int) $boq->items()->max('sort_order');
 
             foreach ($parsed as $row) {
-                $section = $this->section($boq, $sections, $row['section_code'] ?? null, $row['section_name'], null);
+                $sectionName = $row['section_name'] ?? 'General';
+                $section = $this->section($boq, $sections, $row['section_code'] ?? null, $sectionName, null);
                 if (($row['subsection_name'] ?? null) !== null) {
                     $section = $this->section($boq, $sections, $row['subsection_code'] ?? null, $row['subsection_name'], $section);
                 }
@@ -90,6 +102,15 @@ class BoqImportService
                 $this->boqs->fillLine($item, $row, $canEditCosts, collect());
                 $item->boq_section_id = $section->id;
                 $item->sort_order = ++$nextSort;
+                if (array_key_exists('gst_rate', $row)) {
+                    $item->gst_rate = $row['gst_rate'];
+                }
+                if (isset($row['source_type'])) {
+                    $item->source_type = $row['source_type'];
+                    $item->source_import_id = $row['source_import_id'] ?? null;
+                    $item->source_sheet = $row['source_sheet'] ?? null;
+                    $item->source_row = $row['source_row'] ?? null;
+                }
                 $item->boq()->associate($boq);
                 $item->save();
             }
@@ -99,14 +120,34 @@ class BoqImportService
     }
 
     /**
+     * Remove items previously created by a draft import batch (manual items kept).
+     */
+    public function replaceImportBatch(Boq $boq, int $previousImportId): int
+    {
+        $boq->assertEditable();
+
+        return DB::transaction(function () use ($boq, $previousImportId) {
+            Boq::query()->whereKey($boq->id)->lockForUpdate()->firstOrFail()->assertEditable();
+
+            $deleted = $boq->items()
+                ->where('source_import_id', $previousImportId)
+                ->delete();
+
+            $this->boqs->recalculateTotals($boq);
+
+            return (int) $deleted;
+        });
+    }
+
+    /**
      * Validate one mapped spreadsheet row for the universal importer.
      *
      * @param  array<string, mixed>  $mapped
-     * @return array<string, mixed>
+     * @return array{row: array<string, mixed>, warnings: list<string>}
      */
     public function validateMappedRow(array $mapped): array
     {
-        [$parsed, $errors] = $this->parse([$mapped]);
+        [$parsed, $errors, $warnings] = $this->parse([$mapped], collectWarnings: true);
         if ($errors !== []) {
             throw ValidationException::withMessages(['row' => [$errors[0]]]);
         }
@@ -114,38 +155,92 @@ class BoqImportService
             throw ValidationException::withMessages(['row' => ['This row is empty.']]);
         }
 
-        return $parsed[0];
+        return ['row' => $parsed[0], 'warnings' => $warnings[0] ?? []];
+    }
+
+    /**
+     * Classify a mapped row before numeric validation (blank / summary / head / item).
+     *
+     * @param  array<string, mixed>  $mapped
+     * @return array{kind: string, head?: string, subhead?: string}
+     */
+    public function classifyMappedRow(array $mapped): array
+    {
+        $values = $this->normalise($mapped);
+        if (array_filter($values, fn ($v) => $v !== null) === []) {
+            return ['kind' => 'blank'];
+        }
+
+        $name = $values['name'] ?? $values['description'] ?? null;
+        $hasQty = $values['quantity'] !== null && $values['quantity'] !== '';
+        $hasUnit = $values['unit'] !== null && $values['unit'] !== '';
+        $hasRate = $values['client_rate'] !== null && $values['client_rate'] !== '';
+
+        if ($name !== null && $this->isSummaryLabel($name) && ! $hasQty && ! $hasUnit) {
+            return ['kind' => 'summary'];
+        }
+
+        if ($name !== null && ! $hasQty && ! $hasUnit && ! $hasRate) {
+            if ($this->looksLikeSubhead($name)) {
+                return ['kind' => 'subhead', 'subhead' => $name];
+            }
+
+            return ['kind' => 'head', 'head' => $name];
+        }
+
+        return ['kind' => 'item'];
     }
 
     /**
      * @param  array<int, array<string, mixed>>  $rows
-     * @return array{0: list<array<string, mixed>>, 1: list<string>}
+     * @return array{0: list<array<string, mixed>>, 1: list<string>, 2?: list<list<string>>}
      */
-    public function parse(array $rows): array
+    public function parse(array $rows, bool $collectWarnings = false): array
     {
         if ($rows === []) {
-            return [[], ['The file has no data rows. Use the sample template.']];
+            return [[], ['The file has no data rows. Use the sample template.'], []];
         }
 
-        $missing = array_diff(self::REQUIRED_COLUMNS, array_keys($rows[array_key_first($rows)]));
-        if ($missing !== []) {
-            return [[], ['Missing column(s): '.implode(', ', $missing).'. Use the sample template headings.']];
+        $firstKeys = array_keys($rows[array_key_first($rows)]);
+        $missing = array_diff(self::REQUIRED_COLUMNS, $firstKeys);
+        // Soften: allow missing keys in key list when values can still be null — only fail if truly absent from schema.
+        if ($missing !== [] && ! array_intersect(self::REQUIRED_COLUMNS, $firstKeys)) {
+            return [[], ['Missing column(s): '.implode(', ', $missing).'. Map Item Description, Unit, and Quantity.'], []];
         }
 
         if (count($rows) > self::MAX_ROWS) {
-            return [[], ['The file has more than '.self::MAX_ROWS.' rows. Split it into smaller files.']];
+            return [[], ['The file has more than '.self::MAX_ROWS.' rows. Split it into smaller files.'], []];
         }
 
         $units = $this->unitLookup();
         $parsed = [];
         $errors = [];
+        $allWarnings = [];
 
         foreach (array_values($rows) as $index => $raw) {
             $line = $index + 2;
+            $rowWarnings = [];
+
+            foreach (['quantity', 'client_rate', 'gst_rate', 'amount'] as $numericField) {
+                if (isset($raw[$numericField]) && $this->isExcelError($raw[$numericField])) {
+                    $errors[] = "Row {$line}: ".ucfirst(str_replace('_', ' ', $numericField)).' contains Excel error '.$raw[$numericField];
+
+                    continue 2;
+                }
+            }
+
             $values = $this->normalise($raw);
 
             if (array_filter($values, fn ($v) => $v !== null) === []) {
                 continue;
+            }
+
+            if (($values['name'] ?? null) !== null && $this->isSummaryLabel($values['name']) && $values['quantity'] === null && $values['unit'] === null) {
+                continue;
+            }
+
+            if (($values['section_name'] ?? null) === null || trim((string) $values['section_name']) === '') {
+                $values['section_name'] = 'General';
             }
 
             $validator = Validator::make($values, $this->rules());
@@ -157,21 +252,48 @@ class BoqImportService
                 continue;
             }
 
-            $unitId = $units->get(Str::lower($values['unit']));
+            $unitId = $this->resolveUnitId($units, (string) $values['unit']);
             if ($unitId === null) {
-                $errors[] = "Row {$line}: Unit \"{$values['unit']}\" is not an active unit of this company.";
+                $errors[] = "Row {$line}: Unit \"{$values['unit']}\" could not be resolved.";
 
                 continue;
             }
 
+            if (($values['amount'] ?? null) !== null && ($values['client_rate'] ?? null) !== null) {
+                $expected = (float) $values['quantity'] * (float) $values['client_rate'];
+                $imported = (float) $values['amount'];
+                if (abs($expected - $imported) > 0.05) {
+                    $rowWarnings[] = 'Imported Amount does not match Quantity × Rate; ERP will use Quantity × Rate.';
+                }
+            }
+
+            unset($values['amount'], $values['remarks']);
             $parsed[] = [...$values, 'unit_id' => $unitId];
+            $allWarnings[] = $rowWarnings;
         }
 
         if ($parsed === [] && $errors === []) {
             $errors[] = 'The file has no data rows.';
         }
 
-        return [$parsed, $errors];
+        return $collectWarnings ? [$parsed, $errors, $allWarnings] : [$parsed, $errors];
+    }
+
+    public function isExcelError(mixed $value): bool
+    {
+        return is_string($value) && in_array(strtoupper(trim($value)), self::EXCEL_ERRORS, true);
+    }
+
+    public function isSummaryLabel(string $name): bool
+    {
+        $normalized = Str::lower(trim($name));
+        foreach (self::SUMMARY_PREFIXES as $prefix) {
+            if ($normalized === $prefix || str_starts_with($normalized, $prefix.' ') || str_starts_with($normalized, $prefix.':')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -204,7 +326,7 @@ class BoqImportService
             'item_code' => ['nullable', 'string', 'max:30'],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
-            'hsn_sac' => ['nullable', 'string', 'max:10'],
+            'hsn_sac' => ['nullable', 'string', 'max:16'],
             'unit' => ['required', 'string', 'max:20'],
             'quantity' => ['required', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
             'material_rate' => $rate,
@@ -213,6 +335,9 @@ class BoqImportService
             'subcontract_rate' => $rate,
             'margin_percent' => ['nullable', 'numeric', 'min:-100', 'max:999', 'decimal:0,4'],
             'client_rate' => $rate,
+            'gst_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,4'],
+            'amount' => $rate,
+            'remarks' => ['nullable', 'string', 'max:2000'],
         ];
     }
 
@@ -224,9 +349,45 @@ class BoqImportService
      */
     private function normalise(array $raw): array
     {
+        $keys = array_unique(array_merge(
+            array_map(fn ($h) => Str::slug($h, '_'), self::HEADINGS),
+            array_keys($raw),
+        ));
+
         $values = [];
-        foreach (array_map(fn ($h) => Str::slug($h, '_'), self::HEADINGS) as $key) {
+        foreach ($keys as $key) {
+            if (! in_array($key, array_map(fn ($h) => Str::slug($h, '_'), self::HEADINGS), true)
+                && ! in_array($key, ['section_code', 'section_name', 'subsection_code', 'subsection_name', 'item_code', 'name', 'description', 'hsn_sac', 'unit', 'quantity', 'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent', 'client_rate', 'gst_rate', 'amount', 'remarks'], true)) {
+                continue;
+            }
+
             $value = $raw[$key] ?? null;
+
+            if ($this->isExcelError($value)) {
+                $values[$key] = is_string($value) ? trim($value) : '#REF!';
+
+                continue;
+            }
+
+            if (in_array($key, ['item_code', 'hsn_sac'], true)) {
+                if ($value === null || $value === '') {
+                    $values[$key] = null;
+                } elseif (is_float($value) || is_int($value)) {
+                    $values[$key] = is_float($value) && floor($value) != $value
+                        ? rtrim(rtrim(sprintf('%.6F', $value), '0'), '.')
+                        : (string) (int) $value;
+                } else {
+                    $values[$key] = trim((string) $value) ?: null;
+                }
+
+                continue;
+            }
+
+            if (in_array($key, self::NUMERIC_COLUMNS, true)) {
+                $values[$key] = $this->parseNumeric($value);
+
+                continue;
+            }
 
             if (is_float($value)) {
                 $value = rtrim(rtrim(sprintf('%.6F', $value), '0'), '.');
@@ -234,17 +395,52 @@ class BoqImportService
                 $value = (string) $value;
             } elseif (is_string($value)) {
                 $value = trim($value);
-                if (in_array($key, self::NUMERIC_COLUMNS, true)) {
-                    $value = str_replace([',', ' '], '', $value);
-                }
             } elseif ($value !== null) {
                 $value = trim((string) $value);
             }
 
-            $values[$key] = $value === '' ? null : $value;
+            $values[$key] = $value === '' || $value === null ? null : $value;
+        }
+
+        // Fold remarks into description when description empty.
+        if (($values['description'] ?? null) === null && ($values['remarks'] ?? null) !== null) {
+            $values['description'] = $values['remarks'];
         }
 
         return $values;
+    }
+
+    private function parseNumeric(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return rtrim(rtrim(sprintf('%.6F', (float) $value), '0'), '.');
+        }
+
+        $text = trim((string) $value);
+        $text = preg_replace('/^(rs\.?|inr)\s*/iu', '', $text) ?? $text;
+        $text = str_replace(['₹', 'Rs.', 'Rs', 'INR', '%'], '', $text);
+        $text = str_replace(["\u{00A0}", ' '], '', $text);
+        $text = str_replace(',', '', $text);
+
+        if (! is_numeric($text)) {
+            return null;
+        }
+
+        return $text;
+    }
+
+    private function looksLikeSubhead(string $name): bool
+    {
+        $normalized = Str::lower($name);
+
+        return str_contains($normalized, 'subhead')
+            || str_contains($normalized, 'sub-head')
+            || str_contains($normalized, 'subsection')
+            || str_starts_with($normalized, 'sub ');
     }
 
     /**
@@ -262,13 +458,36 @@ class BoqImportService
     }
 
     /**
+     * @param  Collection<string, int>  $units
+     */
+    private function resolveUnitId(Collection $units, string $unit): ?int
+    {
+        $key = Str::lower(trim($unit));
+        if ($units->has($key)) {
+            return $units->get($key);
+        }
+
+        // Flexible UOM: create a company unit from the imported symbol when missing.
+        $created = Unit::query()->create([
+            'name' => $unit,
+            'symbol' => Str::limit($unit, 20, ''),
+            'decimal_places' => 3,
+            'is_active' => true,
+        ]);
+        $units->put(Str::lower($created->name), $created->id);
+        $units->put(Str::lower($created->symbol), $created->id);
+
+        return $created->id;
+    }
+
+    /**
      * @param  Collection<int, BoqSection>  $sections
      */
     private function section(Boq $boq, Collection $sections, ?string $code, string $name, ?BoqSection $parent): BoqSection
     {
         $parentId = $parent?->id;
         $match = $sections->first(fn (BoqSection $s) => ($s->parent_id === null ? null : (int) $s->parent_id) === $parentId && (
-            $code !== null ? Str::lower((string) $s->code) === Str::lower($code) : Str::lower($s->name) === Str::lower($name)
+            $code !== null ? Str::lower((string) $s->code) === Str::lower($code) : Str::lower(trim($s->name)) === Str::lower(trim($name))
         ));
 
         if ($match !== null) {

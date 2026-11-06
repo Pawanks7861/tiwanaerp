@@ -32,6 +32,7 @@ const cad = computed(() => file.value?.status === 'ready' && usesBrowserCad(file
 const pdf = computed(() => file.value?.status === 'ready' && (file.value?.strategy === 'pdf' || file.value?.strategy === 'office'));
 const generating = computed(() => ['pending', 'processing'].includes(file.value?.status));
 const retrying = ref(false);
+const loadingPreview = ref(false);
 const activeSheet = computed(() => body.value?.sheets?.[sheet.value] ?? null);
 
 watch(() => [props.show, props.source, props.fileId], () => {
@@ -56,6 +57,7 @@ async function load() {
     stop();
     error.value = '';
     body.value = null;
+    loadingPreview.value = true;
     scale.value = 1;
     rotation.value = 0;
     sheet.value = 0;
@@ -77,6 +79,10 @@ async function load() {
     } catch (exception) {
         file.value = null;
         error.value = exception?.response?.status === 403 ? 'Permission denied' : 'Preview not available';
+    } finally {
+        if (!generating.value) {
+            loadingPreview.value = false;
+        }
     }
 }
 
@@ -161,10 +167,14 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="min-h-0 flex-1 overflow-auto bg-slate-100" :class="cad ? 'p-0' : 'p-3'">
-                <p v-if="error" class="rounded-lg bg-white p-4 text-sm text-slate-700">{{ error }}</p>
-                <p v-else-if="!file" class="p-4 text-sm text-slate-500">Opening…</p>
-                <div v-else-if="generating" class="rounded-lg bg-white p-6 text-center text-sm text-slate-700">
-                    {{ file.strategy === 'cad' ? 'Generating drawing preview…' : 'Generating preview…' }}
+                <p v-if="error" class="rounded-lg bg-white p-4 text-sm text-slate-700">
+                    {{ error }}
+                    <button type="button" class="mt-2 block text-sm font-medium text-brand-700" @click="load">Retry</button>
+                </p>
+                <div v-else-if="!file || generating || loadingPreview" class="space-y-3 rounded-lg bg-white p-4" aria-busy="true">
+                    <span class="sr-only">Loading content…</span>
+                    <span class="skeleton-block skeleton-shimmer block h-4 w-40" aria-hidden="true" />
+                    <span class="skeleton-block skeleton-shimmer block h-64 w-full" aria-hidden="true" />
                 </div>
                 <div v-else-if="visual" class="flex min-h-full items-center justify-center overflow-auto">
                     <img :src="file.stream_url" :alt="file.name" class="max-w-full origin-center object-contain" :style="{ transform: `scale(${scale}) rotate(${rotation}deg)` }" />

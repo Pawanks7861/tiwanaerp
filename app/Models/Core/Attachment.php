@@ -22,6 +22,9 @@ class Attachment extends Model
 
     protected $hidden = ['disk', 'path'];
 
+    /** @var list<string> */
+    protected array $auditExclude = ['disk', 'path', 'checksum'];
+
     protected function casts(): array
     {
         return [

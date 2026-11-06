@@ -127,24 +127,75 @@ class SimpleBoqMaterialCostService
     }
 
     /**
-     * @param  list<BoqItemMaterialCost>|iterable<BoqItemMaterialCost>  $rows
-     * @return array{per_unit: string, estimated_total: string}
+     * Authoritative per-row metrics. Totals never trust a frontend-submitted amount/total qty.
+     *
+     * @param  array{quantity?: mixed, rate?: mixed}  $row
+     * @return array{amount: string, total_quantity: string, total_cost: string}
+     */
+    public function lineMetrics(array $row, string $boqQuantity): array
+    {
+        $qty = Decimal::of((string) ($row['quantity'] ?? '0'))->toQuantity();
+        $rate = Decimal::of((string) ($row['rate'] ?? '0'))->toRate();
+        $boqQty = Decimal::of($boqQuantity)->toQuantity();
+        $totalQty = Decimal::of($qty)->times($boqQty)->toQuantity();
+
+        return [
+            'amount' => Decimal::of($qty)->times($rate)->toMoney(),
+            'total_quantity' => $totalQty,
+            'total_cost' => Decimal::of($totalQty)->times($rate)->toMoney(),
+        ];
+    }
+
+    /**
+     * @param  list<BoqItemMaterialCost>|iterable<BoqItemMaterialCost|array<string, mixed>>  $rows
+     * @return array{per_unit: string, estimated_total: string, quantity_summary: list<array{material_name: string, unit: string, per_unit_quantity: string, total_quantity: string}>}
      */
     public function totals(iterable $rows, string $boqQuantity): array
     {
         $perUnit = Decimal::zero();
+        $aggregated = [];
+
         foreach ($rows as $row) {
+            $name = trim((string) ($row->material_name ?? $row['material_name'] ?? ''));
+            $unit = trim((string) ($row->unit ?? $row['unit'] ?? ''));
             $qty = Decimal::of((string) ($row->quantity ?? $row['quantity'] ?? '0'));
             $rate = Decimal::of((string) ($row->rate ?? $row['rate'] ?? '0'));
             $perUnit = $perUnit->plus($qty->times($rate));
+
+            if ($name === '' || $unit === '') {
+                continue;
+            }
+
+            $key = mb_strtolower($name).'|'.mb_strtolower($unit);
+            if (! isset($aggregated[$key])) {
+                $aggregated[$key] = [
+                    'material_name' => $name,
+                    'unit' => $unit,
+                    'per_unit_quantity' => Decimal::zero(),
+                ];
+            }
+            $aggregated[$key]['per_unit_quantity'] = $aggregated[$key]['per_unit_quantity']->plus($qty);
+        }
+
+        $boqQty = Decimal::of($boqQuantity)->toQuantity();
+        $quantitySummary = [];
+        foreach ($aggregated as $group) {
+            $perUnitQty = $group['per_unit_quantity']->toQuantity();
+            $quantitySummary[] = [
+                'material_name' => $group['material_name'],
+                'unit' => $group['unit'],
+                'per_unit_quantity' => $perUnitQty,
+                'total_quantity' => Decimal::of($perUnitQty)->times($boqQty)->toQuantity(),
+            ];
         }
 
         $perUnitMoney = $perUnit->toMoney();
-        $estimated = Decimal::of($perUnitMoney)->times(Decimal::of($boqQuantity)->toQuantity())->toMoney();
+        $estimated = Decimal::of($perUnitMoney)->times($boqQty)->toMoney();
 
         return [
             'per_unit' => $perUnitMoney,
             'estimated_total' => $estimated,
+            'quantity_summary' => $quantitySummary,
         ];
     }
 
