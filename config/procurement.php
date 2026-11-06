@@ -9,4 +9,11 @@ return [
      */
     'grn_tolerance_percent' => '0',
 
+    /*
+     * RFQ, vendor quotations and bid comparison. Off hides that workflow and blocks its routes.
+     * Material request → purchase order → goods receipt stays available. Tables and history remain.
+     * A company setting with the same key overrides this default.
+     */
+    'rfq_enabled' => false,
+
 ];

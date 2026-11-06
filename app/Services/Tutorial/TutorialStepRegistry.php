@@ -4,6 +4,7 @@ namespace App\Services\Tutorial;
 
 use App\Models\Projects\Project;
 use App\Models\User;
+use App\Support\Procurement\ProcurementSettings;
 
 class TutorialStepRegistry
 {
@@ -234,7 +235,7 @@ class TutorialStepRegistry
             ['material_requests.view', 'projects.material-requests.index'],
             ['purchase.view', 'projects.purchase-orders.index'],
             ['grn.view', 'projects.grns.index'],
-            ['rfq.view', 'projects.rfqs.index'],
+            ...(ProcurementSettings::rfqEnabled() ? [['rfq.view', 'projects.rfqs.index']] : []),
         ];
 
         foreach ($candidates as [$perm, $route]) {

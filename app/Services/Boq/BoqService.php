@@ -14,6 +14,7 @@ use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
+use App\Support\Boq\BoqCompanySettings;
 use App\Services\Numbering\DocumentNumberService;
 use App\Support\Math\Decimal;
 use Illuminate\Database\Eloquent\Builder;
@@ -239,13 +240,15 @@ class BoqService
                 $item->save();
 
                 if ($canEditCosts && array_key_exists('simple_materials', $row) && is_array($row['simple_materials'])) {
-                    app(SimpleBoqMaterialCostService::class)->syncForItem(
+                    $materials = app(SimpleBoqMaterialCostService::class);
+                    $materials->syncForItem(
                         $boq,
                         $item,
                         $row['simple_materials'],
                         auth()->user(),
                         "rows.{$i}.simple_materials",
                     );
+                    $this->applySimplifiedMaterialRate($boq, $item, $materials);
                 }
             }
 
@@ -303,6 +306,35 @@ class BoqService
         ]);
 
         $item->fill([...$calc, 'rate_analysis_id' => $analysisId]);
+    }
+
+    /**
+     * Simplified BOQ only. When a material row has quantity > 0, the item rate is the
+     * material cost per BOQ unit. Submitted client_rate is ignored in that case.
+     * Empty or zero-quantity rows leave the existing manual/imported rate unchanged.
+     */
+    private function applySimplifiedMaterialRate(Boq $boq, BoqItem $item, SimpleBoqMaterialCostService $materials): void
+    {
+        if (BoqCompanySettings::enabled($boq->company)) {
+            return;
+        }
+
+        $stored = $item->simpleMaterialCosts()->get();
+        if (! $materials->drivesItemRate($stored)) {
+            return;
+        }
+
+        $perUnit = $materials->totals($stored, (string) $item->quantity)['per_unit'];
+        $calc = BoqCalculator::line([
+            'quantity' => (string) $item->quantity,
+            'material_rate' => (string) ($item->material_rate ?? '0'),
+            'labour_rate' => (string) ($item->labour_rate ?? '0'),
+            'equipment_rate' => (string) ($item->equipment_rate ?? '0'),
+            'subcontract_rate' => (string) ($item->subcontract_rate ?? '0'),
+            'margin_percent' => (string) ($item->margin_percent ?? '0'),
+            'client_rate' => $perUnit,
+        ]);
+        $item->fill($calc)->save();
     }
 
     /**

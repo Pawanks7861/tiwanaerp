@@ -23,6 +23,8 @@ class BidComparisonService
 
     public function forRfq(Rfq $rfq): BidComparison
     {
+        $this->rfqs->assertEnabled();
+
         return DB::transaction(function () use ($rfq) {
             $rfq = Rfq::query()->whereKey($rfq->id)->lockForUpdate()->firstOrFail();
             $existing = BidComparison::query()->where('rfq_id', $rfq->id)->first();
@@ -43,6 +45,8 @@ class BidComparisonService
      */
     public function save(BidComparison $comparison, array $data): BidComparison
     {
+        $this->rfqs->assertEnabled();
+
         return DB::transaction(function () use ($comparison, $data) {
             $comparison = BidComparison::query()->whereKey($comparison->id)->lockForUpdate()->firstOrFail();
             $comparison->assertEditable();
@@ -64,6 +68,7 @@ class BidComparisonService
 
     public function submit(BidComparison $comparison, User $user): void
     {
+        $this->rfqs->assertEnabled();
         DB::transaction(function () use ($comparison, $user) {
             $comparison = BidComparison::query()->whereKey($comparison->id)->lockForUpdate()->firstOrFail();
             $comparison->assertEditable();
@@ -90,6 +95,7 @@ class BidComparisonService
 
     public function approve(BidComparison $comparison, User $user): void
     {
+        $this->rfqs->assertEnabled();
         DB::transaction(function () use ($comparison, $user) {
             $comparison = $this->lockSubmitted($comparison);
             $this->assertNotSubmitter($comparison, $user);
@@ -109,6 +115,7 @@ class BidComparisonService
 
     public function reject(BidComparison $comparison, User $user, string $reason): void
     {
+        $this->rfqs->assertEnabled();
         DB::transaction(function () use ($comparison, $user, $reason) {
             $comparison = $this->lockSubmitted($comparison);
             $this->assertNotSubmitter($comparison, $user);

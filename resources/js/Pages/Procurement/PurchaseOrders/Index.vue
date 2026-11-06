@@ -8,6 +8,8 @@ import AppCard from '@/Components/UI/AppCard.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatDate, formatMoney } from '@/lib/format';
+import { usePage } from '@inertiajs/vue3';
+import { computed } from 'vue';
 
 defineProps({
     project: { type: Object, required: true },
@@ -16,6 +18,8 @@ defineProps({
     statuses: { type: Array, required: true },
     can: { type: Object, required: true },
 });
+
+const rfqEnabled = computed(() => usePage().props.features?.procurement_rfq === true);
 
 const columns = [
     { key: 'po_number', label: 'Purchase order' },
@@ -30,9 +34,9 @@ const columns = [
 <template>
     <ProjectLayout :project="project" active="procurement" title="Purchase orders">
         <ProcurementNav :project-id="project.id" active="purchase-orders" />
-        <AppCard title="Purchase orders" subtitle="Created from approved bid comparisons, or directly with a justification." :padded="false">
+        <AppCard :title="'Purchase Orders'" :subtitle="rfqEnabled ? 'Created from an approved bid comparison, or directly from an approved material request.' : 'Created from an approved material request. Select the vendor and enter rates on the order.'" :padded="false">
             <template #actions>
-                <AppButton v-if="can.create" size="sm" variant="secondary" icon="plus" :href="route('projects.purchase-orders.create', project.id)">Direct PO</AppButton>
+                <AppButton v-if="can.create" size="sm" icon="plus" :href="route('projects.purchase-orders.create', project.id)">{{ rfqEnabled ? 'Direct PO' : 'New Purchase Order' }}</AppButton>
             </template>
 
             <FilterBar
@@ -47,13 +51,13 @@ const columns = [
                 :row-href="(row) => route('projects.purchase-orders.show', [project.id, row.id])"
                 empty-icon="document"
                 empty-title="No purchase orders"
-                empty-description="Approve a bid comparison on an RFQ to create a purchase order."
+                :empty-description="rfqEnabled ? 'Approve a bid comparison on an RFQ, or create a purchase order from an approved material request.' : 'Create a purchase order from an approved material request.'"
             >
                 <template #cell-po_number="{ row }">
                     <div class="font-mono text-xs font-medium text-slate-900">
                         {{ row.po_number }}
                         <span v-if="row.revision_no > 0" class="ml-1 rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-600">Rev {{ row.revision_no }}</span>
-                        <span v-if="row.is_direct" class="ml-1 rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-700">Direct</span>
+                        <span v-if="rfqEnabled && row.is_direct" class="ml-1 rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-700">Direct</span>
                     </div>
                     <div class="text-xs text-slate-500">{{ formatDate(row.po_date) }} · {{ row.items_count }} item(s)</div>
                 </template>

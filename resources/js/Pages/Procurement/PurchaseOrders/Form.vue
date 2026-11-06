@@ -11,7 +11,7 @@ import Icon from '@/Components/UI/Icon.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatMoney, formatQty } from '@/lib/format';
 import { orderLine, orderTotals, str } from '@/lib/gstPreview';
-import { Link, useForm } from '@inertiajs/vue3';
+import { Link, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 const props = defineProps({
@@ -22,8 +22,10 @@ const props = defineProps({
     taxRates: { type: Array, required: true },
     states: { type: Array, required: true },
     defaults: { type: Object, required: true },
+    prefillItemIds: { type: Array, default: () => [] },
 });
 
+const rfqEnabled = computed(() => usePage().props.features?.procurement_rfq === true);
 const editing = computed(() => !!props.order);
 const direct = computed(() => !editing.value || props.order.is_direct);
 const lineById = Object.fromEntries(props.lines.map((l) => [l.id, l]));
@@ -91,6 +93,9 @@ function addLine(id) {
     }
     lineToAdd.value = null;
 }
+if (!editing.value) {
+    props.prefillItemIds.forEach((id) => addLine(id));
+}
 const lineError = (index, field) => form.errors[`items.${index}.${field}`];
 const openQty = (item) => (item.material_request_item_id && lineById[item.material_request_item_id] ? lineById[item.material_request_item_id].remaining_qty : null);
 
@@ -132,7 +137,7 @@ function submit() {
 </script>
 
 <template>
-    <ProjectLayout :project="project" active="procurement" :title="editing ? order.po_number : 'Direct purchase order'">
+    <ProjectLayout :project="project" active="procurement" :title="editing ? order.po_number : 'New purchase order'">
         <ProcurementNav :project-id="project.id" active="purchase-orders" />
         <form class="space-y-4 pb-20 md:pb-0" @submit.prevent="submit">
             <AppCard :padded="false">
@@ -140,10 +145,11 @@ function submit() {
                     <Link :href="route('projects.purchase-orders.index', project.id)" class="text-xs font-medium text-slate-500 hover:text-slate-700">Purchase orders</Link>
                     <h2 class="text-lg font-semibold text-slate-900">
                         <template v-if="editing">Edit {{ order.po_number }}<span v-if="order.revision_no > 0" class="ml-2 text-sm font-normal text-slate-500">revision {{ order.revision_no }}</span></template>
-                        <template v-else>Direct purchase order</template>
+                        <template v-else>New purchase order</template>
                     </h2>
                     <p v-if="editing" class="text-xs text-slate-500">Vendor: <span class="font-medium text-slate-700">{{ order.vendor?.name }}</span></p>
-                    <p v-else class="text-xs text-slate-500">Use a direct PO only when an RFQ is not practical. Lines must come from approved material requests, and a justification is required.</p>
+                    <p v-else-if="rfqEnabled" class="text-xs text-slate-500">Use a direct PO only when an RFQ is not practical. Lines must come from approved material requests, and a justification is required.</p>
+                    <p v-else class="text-xs text-slate-500">Select a vendor and enter rates for lines from an approved material request. GST is calculated per item.</p>
                 </div>
                 <div class="grid gap-4 border-t border-line p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-4">
                     <SearchSelect v-if="!editing" v-model="form.vendor_id" label="Vendor" required :options="vendors" class="sm:col-span-2" :error="form.errors.vendor_id" />
@@ -156,7 +162,7 @@ function submit() {
                             <Icon name="receipt" :size="14" class="mr-1 inline align-text-bottom" />{{ taxTypeNote }}
                         </p>
                     </div>
-                    <FormInput v-if="direct" v-model="form.direct_justification" label="Why a direct PO?" required multiline :rows="2" maxlength="2000" class="sm:col-span-2 lg:col-span-4" :error="form.errors.direct_justification" />
+                    <FormInput v-if="direct" v-model="form.direct_justification" :label="rfqEnabled ? 'Why a direct PO?' : 'Note'" required multiline :rows="2" maxlength="2000" class="sm:col-span-2 lg:col-span-4" :error="form.errors.direct_justification" />
                     <FormInput v-model="form.billing_address" label="Billing address" multiline :rows="3" class="sm:col-span-2" :placeholder="editing ? '' : 'Leave empty to use the company address'" :error="form.errors.billing_address" />
                     <FormInput v-model="form.shipping_address" label="Shipping address" multiline :rows="3" class="sm:col-span-2" :error="form.errors.shipping_address" />
                 </div>

@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\Approval\ApprovalService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Support\Math\Decimal;
+use App\Support\Procurement\ProcurementSettings;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -114,7 +115,9 @@ class MaterialRequestService
             foreach ($allocated as $qty) {
                 if ($qty->isPositive()) {
                     throw ValidationException::withMessages([
-                        'material_request' => 'Lines of this request are already on an RFQ or purchase order. Cancel those documents first.',
+                        'material_request' => ProcurementSettings::rfqEnabled()
+                            ? 'Lines of this request are already on an RFQ or purchase order. Cancel those documents first.'
+                            : 'Lines of this request are already on a purchase order. Cancel that order first.',
                     ]);
                 }
             }

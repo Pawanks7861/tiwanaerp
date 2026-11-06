@@ -28,7 +28,7 @@ class FcmChannel
 
         $notifiable->deviceTokens()->pluck('token')->each(function (string $token) use ($payload, $data) {
             $this->fcm->send($token, [
-                'title' => (string) ($payload['title'] ?? 'BUILDIFY360'),
+                'title' => (string) ($payload['title'] ?? config('app.name')),
                 'body' => (string) ($payload['body'] ?? ''),
             ], $data);
         });

@@ -20,14 +20,15 @@ const props = defineProps({
 const { can } = usePermissions();
 const page = usePage();
 const advancedBoq = computed(() => page.props.features?.advanced_boq_calculations === true);
+const rfqEnabled = computed(() => page.props.features?.procurement_rfq === true);
 
 const procurementHome = computed(() => {
     const first = [
         ['material_requests.view', 'projects.material-requests.index'],
-        ['rfq.view', 'projects.rfqs.index'],
+        rfqEnabled.value ? ['rfq.view', 'projects.rfqs.index'] : null,
         ['purchase.view', 'projects.purchase-orders.index'],
         ['grn.view', 'projects.grns.index'],
-    ].find(([permission]) => can(permission));
+    ].filter(Boolean).find(([permission]) => can(permission));
 
     return first ? route(first[1], props.project.id) : null;
 });

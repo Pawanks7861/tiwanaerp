@@ -57,8 +57,8 @@ const lockedReason = computed(() => {
         return null;
     }
     return {
-        approved: 'Approved. Lines are locked; procurement quantities update automatically as RFQs and purchase orders are raised.',
-        partially_ordered: 'Partly ordered. Remaining quantities can still go out for quotation.',
+        approved: 'Approved. Lines are locked. Create a purchase order for the quantities still open.',
+        partially_ordered: 'Partly ordered. Remaining quantities can still be purchased.',
         ordered: 'Fully ordered.',
         received: 'All ordered material has been received.',
         cancelled: mr.value.cancelled_reason ? `Cancelled: ${mr.value.cancelled_reason}` : 'Cancelled.',
@@ -94,6 +94,7 @@ const lockedReason = computed(() => {
                         <AppButton v-if="can.submit" size="sm" @click="confirming = 'submit'">Submit for approval</AppButton>
                         <ApprovalActions :approval="approval" noun="material request" />
                         <AppButton v-if="can.create_rfq" size="sm" :href="route('projects.rfqs.create', { project: project.id, material_request: mr.id })">Create RFQ</AppButton>
+                        <AppButton v-if="can.create_po" size="sm" icon="plus" :href="route('projects.purchase-orders.create', { project: project.id, material_request: mr.id })">Create Purchase Order</AppButton>
                         <AppButton v-if="can.cancel" size="sm" variant="ghost" class="text-red-600" @click="(cancelForm.reset(), (showCancel = true))">Cancel request</AppButton>
                         <AppButton v-if="can.delete" size="sm" variant="ghost" icon="trash" aria-label="Delete request" @click="confirming = 'delete'" />
                     </div>
@@ -162,7 +163,7 @@ const lockedReason = computed(() => {
                             <StatusBadge :status="doc.status" :label="doc.status_label" />
                         </li>
                     </ul>
-                    <p v-else class="px-4 py-6 text-center text-sm text-slate-500">No RFQs or purchase orders yet.</p>
+                    <p v-else class="px-4 py-6 text-center text-sm text-slate-500">{{ can.create_rfq ? 'No RFQs or purchase orders yet.' : 'No purchase orders yet.' }}</p>
                 </AppCard>
                 <AttachmentPanel
                     :attachments="attachments"
@@ -196,7 +197,7 @@ const lockedReason = computed(() => {
         />
 
         <AppModal :show="showCancel" title="Cancel material request" @close="showCancel = false">
-            <p class="mb-3 text-sm text-slate-600">Only requests with nothing in an open RFQ or purchase order can be cancelled.</p>
+            <p class="mb-3 text-sm text-slate-600">{{ can.create_rfq ? 'Only requests with nothing in an open RFQ or purchase order can be cancelled.' : 'Only requests with nothing on a purchase order can be cancelled.' }}</p>
             <FormInput v-model="cancelForm.reason" label="Reason" required multiline :rows="3" maxlength="500" :error="cancelForm.errors.reason || cancelForm.errors.material_request" />
             <template #footer>
                 <AppButton variant="secondary" @click="showCancel = false">Back</AppButton>

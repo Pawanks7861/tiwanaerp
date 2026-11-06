@@ -10,6 +10,7 @@ use App\Http\Controllers\Projects\ProjectHeader;
 use App\Http\Requests\Procurement\PurchaseOrderRequest;
 use App\Models\Core\Company;
 use App\Models\Procurement\Grn;
+use App\Models\Procurement\MaterialRequest;
 use App\Models\Procurement\MaterialRequestItem;
 use App\Models\Procurement\PurchaseOrder;
 use App\Models\Procurement\PurchaseOrderItem;
@@ -21,6 +22,7 @@ use App\Services\Procurement\ProcurementQuantityService;
 use App\Services\Procurement\PurchaseOrderAmendmentService;
 use App\Services\Procurement\PurchaseOrderService;
 use App\Support\Format\IndianNumber;
+use App\Support\Procurement\ProcurementSettings;
 use App\Support\Math\Decimal;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Builder;
@@ -73,14 +75,25 @@ class PurchaseOrderController extends Controller
         ]);
     }
 
-    /** Direct PO form (no RFQ). */
-    public function create(Project $project): Response
+    /** Purchase order from approved material request lines. RFQ is not required while that feature is off. */
+    public function create(Request $request, Project $project): Response
     {
         Gate::authorize('create', [PurchaseOrder::class, $project]);
+
+        $prefill = [];
+        if ($request->filled('material_request')) {
+            $mr = MaterialRequest::query()
+                ->where('project_id', $project->id)
+                ->find($request->integer('material_request'));
+            if ($mr?->status->isProcurable()) {
+                $prefill = $mr->items()->pluck('id')->map(fn ($id) => (int) $id)->all();
+            }
+        }
 
         return Inertia::render('Procurement/PurchaseOrders/Form', [
             'project' => ProjectHeader::for($project),
             'order' => null,
+            'prefillItemIds' => $prefill,
             ...$this->formOptions($project, null),
         ]);
     }
@@ -118,7 +131,10 @@ class PurchaseOrderController extends Controller
                 'place_of_supply_label' => IndianState::tryFrom((string) $po->place_of_supply_state)?->label(),
                 'tax_type_label' => $po->tax_type?->label(),
                 'vendor' => ProcurementPresenter::vendor($po->vendor),
-                'rfq' => $po->rfq ? ['id' => $po->rfq->id, 'number' => $po->rfq->rfq_number, 'url' => route('projects.rfqs.show', [$project, $po->rfq->id])] : null,
+                'rfq' => ProcurementSettings::rfqEnabled() && $po->rfq
+                    ? ['id' => $po->rfq->id, 'number' => $po->rfq->rfq_number, 'url' => route('projects.rfqs.show', [$project, $po->rfq->id])]
+                    : null,
+                'source_requests' => $items->map(fn (PurchaseOrderItem $i) => $i->materialRequestItem?->materialRequest?->request_number)->filter()->unique()->values()->all(),
                 'quotation_number' => $po->quotation?->quotation_number,
                 'approved_by' => $po->approver?->name,
                 'approved_at' => $po->approved_at?->toIso8601String(),

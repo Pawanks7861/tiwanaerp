@@ -13,6 +13,7 @@ use App\Models\Procurement\RfqVendor;
 use App\Models\Projects\Project;
 use App\Services\Numbering\DocumentNumberService;
 use App\Support\Math\Decimal;
+use App\Support\Procurement\ProcurementSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -28,8 +29,15 @@ class RfqService
     /**
      * @param  array<string, mixed>  $data  validated header, items and vendor_ids
      */
+    public function assertEnabled(): void
+    {
+        abort_unless(ProcurementSettings::rfqEnabled(), 404);
+    }
+
     public function create(Project $project, array $data): Rfq
     {
+        $this->assertEnabled();
+
         return DB::transaction(function () use ($project, $data) {
             $rfq = new Rfq($this->header($data));
             $rfq->forceFill([
@@ -50,6 +58,8 @@ class RfqService
      */
     public function update(Rfq $rfq, array $data): Rfq
     {
+        $this->assertEnabled();
+
         return DB::transaction(function () use ($rfq, $data) {
             $rfq = Rfq::query()->whereKey($rfq->id)->lockForUpdate()->firstOrFail();
             $rfq->assertEditable();
@@ -63,6 +73,7 @@ class RfqService
 
     public function delete(Rfq $rfq): void
     {
+        $this->assertEnabled();
         $rfq->assertEditable();
         $rfq->delete();
     }
@@ -74,6 +85,7 @@ class RfqService
      */
     public function syncVendors(Rfq $rfq, array $vendorIds): void
     {
+        $this->assertEnabled();
         if (! in_array($rfq->status, [RfqStatus::Draft, RfqStatus::Sent, RfqStatus::QuotesReceived], true)) {
             throw ValidationException::withMessages(['vendor_ids' => 'Vendors can no longer be changed on this RFQ.']);
         }
@@ -117,6 +129,7 @@ class RfqService
 
     public function send(Rfq $rfq): void
     {
+        $this->assertEnabled();
         DB::transaction(function () use ($rfq) {
             $rfq = Rfq::query()->whereKey($rfq->id)->lockForUpdate()->firstOrFail();
             if ($rfq->status !== RfqStatus::Draft) {
@@ -159,6 +172,12 @@ class RfqService
 
     public function close(Rfq $rfq): void
     {
+        $this->assertEnabled();
+        $this->closeUnlocked($rfq);
+    }
+
+    private function closeUnlocked(Rfq $rfq): void
+    {
         DB::transaction(function () use ($rfq) {
             $rfq = Rfq::query()->whereKey($rfq->id)->lockForUpdate()->firstOrFail();
             if (! in_array($rfq->status, [RfqStatus::Sent, RfqStatus::QuotesReceived, RfqStatus::Evaluated], true)) {
@@ -171,6 +190,7 @@ class RfqService
 
     public function cancel(Rfq $rfq, string $reason): void
     {
+        $this->assertEnabled();
         DB::transaction(function () use ($rfq, $reason) {
             $rfq = Rfq::query()->whereKey($rfq->id)->lockForUpdate()->firstOrFail();
             if (! $rfq->status->isOpen()) {

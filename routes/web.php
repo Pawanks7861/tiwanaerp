@@ -413,7 +413,8 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::post('/cancel', [MaterialRequestController::class, 'cancel'])->name('cancel');
         });
 
-        // Procurement: RFQs, vendor quotations, bid comparison
+        // Procurement: RFQs, vendor quotations, bid comparison. Hidden while procurement.rfq_enabled is off.
+        Route::middleware('procurement.rfq')->group(function () {
         Route::get('/rfqs', [RfqController::class, 'index'])->name('projects.rfqs.index');
         Route::get('/rfqs/create', [RfqController::class, 'create'])->name('projects.rfqs.create');
         Route::post('/rfqs', [RfqController::class, 'store'])->name('projects.rfqs.store');
@@ -440,6 +441,7 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::post('/comparison/reject', [BidComparisonController::class, 'reject'])->name('comparison.reject');
 
             Route::post('/purchase-order', [PurchaseOrderController::class, 'storeFromRfq'])->name('purchase-order');
+        });
         });
 
         // Procurement: purchase orders

@@ -127,6 +127,27 @@ class SimpleBoqMaterialCostService
     }
 
     /**
+     * Simplified BOQ: at least one row with quantity > 0 and rate >= 0 drives the item rate.
+     * Zero-quantity placeholders do not.
+     *
+     * @param  iterable<BoqItemMaterialCost|array<string, mixed>>  $rows
+     */
+    public function drivesItemRate(iterable $rows): bool
+    {
+        foreach ($rows as $row) {
+            $qty = is_array($row) ? ($row['quantity'] ?? '0') : ($row->quantity ?? '0');
+            $rate = is_array($row) ? ($row['rate'] ?? '0') : ($row->rate ?? '0');
+            $qty = Decimal::of((string) $qty);
+            $rate = Decimal::of((string) $rate);
+            if ($qty->isPositive() && ! $rate->isNegative()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Authoritative per-row metrics. Totals never trust a frontend-submitted amount/total qty.
      *
      * @param  array{quantity?: mixed, rate?: mixed}  $row

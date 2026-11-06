@@ -1,6 +1,6 @@
 <script setup>
 import { usePermissions } from '@/lib/permissions';
-import { Link } from '@inertiajs/vue3';
+import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
 const props = defineProps({
@@ -9,14 +9,15 @@ const props = defineProps({
 });
 
 const { can } = usePermissions();
+const rfqEnabled = computed(() => usePage().props.features?.procurement_rfq === true);
 
 const items = computed(() =>
     [
-        { key: 'material-requests', label: 'Material requests', short: 'MRs', route: 'projects.material-requests.index', permission: 'material_requests.view' },
-        { key: 'rfqs', label: 'RFQs', short: 'RFQs', route: 'projects.rfqs.index', permission: 'rfq.view' },
-        { key: 'purchase-orders', label: 'Purchase orders', short: 'POs', route: 'projects.purchase-orders.index', permission: 'purchase.view' },
-        { key: 'grns', label: 'Goods receipts', short: 'GRNs', route: 'projects.grns.index', permission: 'grn.view' },
-    ].filter((item) => can(item.permission)),
+        { key: 'material-requests', label: 'Material Requests', short: 'MRs', route: 'projects.material-requests.index', permission: 'material_requests.view' },
+        rfqEnabled.value && { key: 'rfqs', label: 'RFQs', short: 'RFQs', route: 'projects.rfqs.index', permission: 'rfq.view' },
+        { key: 'purchase-orders', label: 'Purchase Orders', short: 'POs', route: 'projects.purchase-orders.index', permission: 'purchase.view' },
+        { key: 'grns', label: 'Goods Receipts', short: 'GRNs', route: 'projects.grns.index', permission: 'grn.view' },
+    ].filter((item) => item && can(item.permission)),
 );
 </script>
 

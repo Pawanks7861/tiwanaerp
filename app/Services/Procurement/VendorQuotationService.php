@@ -30,6 +30,8 @@ class VendorQuotationService
      */
     public function save(Rfq $rfq, array $data, ?VendorQuotation $quotation = null): VendorQuotation
     {
+        $this->rfqs->assertEnabled();
+
         return DB::transaction(function () use ($rfq, $data, $quotation) {
             $rfq = Rfq::query()->whereKey($rfq->id)->lockForUpdate()->firstOrFail();
             if (! $rfq->status->acceptsQuotations()) {
@@ -69,6 +71,7 @@ class VendorQuotationService
 
     public function delete(VendorQuotation $quotation): void
     {
+        $this->rfqs->assertEnabled();
         DB::transaction(function () use ($quotation) {
             $quotation->assertEditable();
             $quotation->delete();

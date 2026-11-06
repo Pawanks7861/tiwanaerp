@@ -9,6 +9,7 @@ use App\Models\Procurement\MaterialRequest;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Notifications\Procurement\ProcurementNotification;
+use App\Support\Procurement\ProcurementSettings;
 use App\Support\Tenancy\CompanyScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -24,7 +25,8 @@ class SendProcurementNotifications
     public function handleMaterialRequestSubmitted(MaterialRequestSubmitted $event): void
     {
         $mr = $event->materialRequest;
-        $recipients = $this->withPermission($mr->company_id, ['rfq.create'])->reject(fn (User $u) => $u->id === $mr->requested_by);
+        $permission = ProcurementSettings::rfqEnabled() ? 'rfq.create' : 'purchase.create';
+        $recipients = $this->withPermission($mr->company_id, [$permission])->reject(fn (User $u) => $u->id === $mr->requested_by);
 
         Notification::send($recipients, new ProcurementNotification(
             $mr->company_id, 'procurement.mr_submitted', 'Material request submitted',

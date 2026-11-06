@@ -19,6 +19,7 @@ import Icon from '@/Components/UI/Icon.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { boqLine, sum } from '@/lib/boqCalc';
+import Decimal from 'decimal.js';
 import { formatDate, formatDateTime, formatMoney, formatPercent, formatQty, formatRate } from '@/lib/format';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -149,8 +150,30 @@ function materialTotals(row) {
 
 const attachmentsOpen = ref(false);
 
+function materialAutoActive(row) {
+    return (row?.simple_materials || []).some((line) => {
+        const qty = Number(line.quantity);
+        const rate = Number(line.rate);
+
+        return Number.isFinite(qty) && qty > 0 && Number.isFinite(rate) && rate >= 0;
+    });
+}
+
+function applyMaterialDerivedRate(row) {
+    if (!showSimpleMaterials.value || !row || !materialAutoActive(row)) {
+        return;
+    }
+
+    const next = new Decimal(materialTotals(row).perUnit).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toFixed(2);
+    const current = Number(row.client_rate);
+    if (!Number.isFinite(current) || Math.abs(current - Number(next)) >= 0.005) {
+        row.client_rate = next;
+    }
+}
+
 function markMaterialsDirty(row) {
     row.simple_materials_dirty = true;
+    applyMaterialDerivedRate(row);
 }
 
 function addSimpleMaterial(row) {
@@ -206,6 +229,7 @@ function reset() {
     deletedIds.value = [];
     errors.value = {};
     baseline.value = serialise();
+    rows.value.forEach((row) => applyMaterialDerivedRate(row));
 }
 
 function syncAttachmentsFromProps() {
@@ -797,7 +821,8 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.margin_percent" allow-negative :error="!!cellError(row, 'margin_percent')" /></td>
                                             </template>
                                             <td class="px-1 py-1">
-                                                <CellDecimal v-model="row.client_rate" :placeholder="detailedCosts ? calc[row._key].selling_rate : null" :error="!!cellError(row, 'client_rate')" />
+                                                <span v-if="materialAutoActive(row)" class="block px-1.5 py-1 text-right text-xs tabular text-slate-800" title="Auto-calculated from materials">{{ formatMoney(calc[row._key].client_rate) }}</span>
+                                                <CellDecimal v-else v-model="row.client_rate" :placeholder="detailedCosts ? calc[row._key].selling_rate : null" :error="!!cellError(row, 'client_rate')" />
                                             </td>
                                         </template>
                                         <template v-else>
@@ -930,6 +955,11 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                             />
                         </div>
                     </template>
+                    <div v-else-if="materialAutoActive(editingRow)" class="rounded-lg border border-line bg-slate-50 px-3 py-2">
+                        <p class="text-xs font-medium text-slate-500">Rate</p>
+                        <p class="mt-0.5 text-base font-semibold tabular text-slate-900">{{ formatMoney(materialTotals(editingRow).perUnit) }}</p>
+                        <p class="mt-0.5 text-xs text-slate-500">Rate is calculated automatically from material cost.</p>
+                    </div>
                     <DecimalInput v-else v-model="editingRow.client_rate" label="Rate" :decimals="4" prefix="₹" :error="cellError(editingRow, 'client_rate')" />
                 </template>
 
@@ -944,14 +974,12 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                         <dt class="text-slate-500">Cost amount</dt><dd class="text-right tabular">{{ formatMoney(calc[editingRow._key].cost_amount) }}</dd>
                         <dt class="text-slate-500">Selling rate</dt><dd class="text-right tabular">{{ formatRate(calc[editingRow._key].selling_rate) }}</dd>
                     </template>
-                    <dt class="text-slate-500">Rate</dt><dd class="text-right tabular">{{ formatRate(calc[editingRow._key].client_rate) }}</dd>
+                    <dt class="text-slate-500">Rate</dt>
+                    <dd class="text-right tabular">
+                        {{ formatMoney(calc[editingRow._key].client_rate) }}
+                        <span v-if="materialAutoActive(editingRow)" class="mt-0.5 block text-[11px] font-normal text-slate-500">Auto-calculated from materials</span>
+                    </dd>
                     <dt class="font-medium text-slate-700">Amount</dt><dd class="text-right font-semibold tabular">{{ formatMoney(calc[editingRow._key].client_amount) }}</dd>
-                    <template v-if="showSimpleMaterials && editingRow.simple_materials_initialized && editingRow.simple_materials?.length">
-                        <dt class="text-slate-500">Material Cost / {{ unitLabel(editingRow.unit_id) || 'unit' }}</dt>
-                        <dd class="text-right tabular">{{ formatMoney(materialTotals(editingRow).perUnit) }}</dd>
-                        <dt class="text-slate-500">Est. Material Cost</dt>
-                        <dd class="text-right tabular">{{ formatMoney(materialTotals(editingRow).estimated) }}</dd>
-                    </template>
                 </dl>
 
                 <div v-if="showSimpleMaterials" class="space-y-3 rounded-xl border border-line p-3">
@@ -959,7 +987,7 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                         <h3 class="text-sm font-semibold text-slate-900">Material</h3>
                         <p class="mt-0.5 text-xs text-slate-500">
                             Enter material required for 1 {{ unitLabel(editingRow.unit_id) || 'BOQ unit' }} of this BOQ item.
-                            Internal estimate only — does not change the BOQ Rate.
+                            A material with quantity above zero sets the BOQ rate from this cost.
                         </p>
                     </div>
 
@@ -1042,7 +1070,7 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                             <span class="text-slate-600">Material Cost / {{ unitLabel(editingRow.unit_id) || 'unit' }}</span>
                             <span class="font-semibold tabular text-slate-900">{{ formatMoney(materialTotals(editingRow).perUnit) }}</span>
                         </div>
-                        <div class="mt-1 flex items-center justify-between gap-3 text-slate-600">
+                        <div v-if="!materialAutoActive(editingRow)" class="mt-1 flex items-center justify-between gap-3 text-slate-600">
                             <span>Total Estimated Material Cost</span>
                             <span class="font-semibold tabular text-slate-900">{{ formatMoney(materialTotals(editingRow).estimated) }}</span>
                         </div>

@@ -43,6 +43,8 @@ class PurchaseOrderService
      */
     public function createFromComparison(Rfq $rfq): PurchaseOrder
     {
+        $this->rfqs->assertEnabled();
+
         return DB::transaction(function () use ($rfq) {
             $rfq = Rfq::query()->whereKey($rfq->id)->lockForUpdate()->firstOrFail();
             $comparison = BidComparison::query()->where('rfq_id', $rfq->id)->first();

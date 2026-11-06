@@ -66,6 +66,7 @@ const user = computed(() => page.props.auth.user);
 const unread = computed(() => page.props.unreadNotifications ?? 0);
 const branding = computed(() => page.props.branding ?? { logo_url: null, favicon_url: null });
 const companyName = computed(() => page.props.company?.current?.name ?? '');
+const appName = computed(() => page.props.app?.name || 'Tiwana Construction ERP');
 const multiCompany = computed(() => page.props.features?.multi_company === true);
 const advancedBoqCalculations = computed(() => page.props.features?.advanced_boq_calculations === true);
 const chatUnread = ref(page.props.chatUnread ?? 0);
@@ -194,10 +195,10 @@ onBeforeUnmount(() => {
             ]"
         >
             <div class="flex h-14 shrink-0 items-center justify-between px-4" :class="sidebarCollapsed ? 'lg:justify-center lg:px-2' : ''">
-                <Link :href="route('dashboard')" class="flex min-w-0 flex-1 items-center gap-2" :class="sidebarCollapsed ? 'lg:flex-none lg:justify-center' : ''" :aria-label="companyName || 'Dashboard'">
+                <Link :href="route('dashboard')" class="flex min-w-0 flex-1 items-center gap-2" :class="sidebarCollapsed ? 'lg:flex-none lg:justify-center' : ''" :aria-label="companyName ? `${appName}, ${companyName}` : appName" :title="appName">
                     <img v-if="branding.logo_url" :src="branding.logo_url" alt="" class="h-8 w-8 shrink-0 rounded-lg bg-white object-contain" />
-                    <span v-else class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-500 text-sm font-black text-white" aria-hidden="true">B</span>
-                    <span class="min-w-0 truncate text-base font-bold tracking-tight text-white" :class="sidebarCollapsed ? 'lg:hidden' : ''">{{ companyName }}</span>
+                    <span v-else class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-500 text-sm font-black text-white" aria-hidden="true">T</span>
+                    <span class="line-clamp-2 min-w-0 text-[13px] font-bold leading-tight tracking-tight text-white" :class="sidebarCollapsed ? 'lg:hidden' : ''">{{ appName }}</span>
                 </Link>
                 <button type="button" class="rounded-md p-1 text-white/70 hover:bg-white/10 lg:hidden" aria-label="Close menu" @click="sidebarOpen = false">
                     <Icon name="close" />

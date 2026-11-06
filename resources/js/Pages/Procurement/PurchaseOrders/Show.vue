@@ -12,7 +12,7 @@ import Icon from '@/Components/UI/Icon.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatDate, formatDateTime, formatMoney, formatPercent, formatQty, formatRate } from '@/lib/format';
-import { Link, router, useForm } from '@inertiajs/vue3';
+import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 const props = defineProps({
@@ -27,15 +27,24 @@ const props = defineProps({
     can: { type: Object, required: true },
 });
 
+const rfqEnabled = computed(() => usePage().props.features?.procurement_rfq === true);
 const po = computed(() => props.order);
+const sourceRequests = computed(() => po.value.source_requests ?? []);
 const intra = computed(() => po.value.tax_type === 'intra');
 
 const confirming = ref(null);
 const processing = ref(false);
-const ACTIONS = {
+const ACTIONS = computed(() => ({
     submit: { title: 'Submit for approval?', message: 'GST and totals are recalculated, then the order is locked while it is being approved.', label: 'Submit', danger: false },
-    delete: { title: 'Delete this purchase order?', message: 'This draft is removed. If it was created from an RFQ, the RFQ is reopened for evaluation.', label: 'Delete', danger: true },
-};
+    delete: {
+        title: 'Delete this purchase order?',
+        message: rfqEnabled.value
+            ? 'This draft is removed. If it was created from an RFQ, the RFQ is reopened for evaluation.'
+            : 'This draft is removed.',
+        label: 'Delete',
+        danger: true,
+    },
+}));
 function confirmAction() {
     processing.value = true;
     const options = { preserveScroll: true, onFinish: () => ((processing.value = false), (confirming.value = null)) };
@@ -94,7 +103,7 @@ const statusNote = computed(() => {
                             <h2 class="font-mono text-lg font-semibold text-slate-900">{{ po.po_number }}</h2>
                             <StatusBadge :status="po.status" :label="po.status_label" />
                             <span v-if="po.revision_no > 0" class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">Revision {{ po.revision_no }}</span>
-                            <span v-if="po.is_direct" class="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">Direct PO</span>
+                            <span v-if="rfqEnabled && po.is_direct" class="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">Direct PO</span>
                         </div>
                         <p class="mt-1 text-sm text-slate-800">{{ po.vendor?.name }} <span class="text-xs text-slate-500">· {{ po.vendor?.gstin || 'No GSTIN' }}</span></p>
                         <dl class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
@@ -102,7 +111,8 @@ const statusNote = computed(() => {
                             <div><dt class="text-slate-500">Delivery by</dt><dd>{{ formatDate(po.delivery_date) }}</dd></div>
                             <div><dt class="text-slate-500">Place of supply</dt><dd>{{ po.place_of_supply_label ?? po.place_of_supply_state }}</dd></div>
                             <div><dt class="text-slate-500">GST</dt><dd>{{ po.tax_type_label ?? '—' }} <span class="text-slate-400">(vendor state {{ po.vendor_state_code }})</span></dd></div>
-                            <div v-if="po.rfq"><dt class="text-slate-500">RFQ</dt><dd><Link :href="po.rfq.url" class="font-mono text-brand-700 hover:underline">{{ po.rfq.number }}</Link></dd></div>
+                            <div v-if="rfqEnabled && po.rfq"><dt class="text-slate-500">RFQ</dt><dd><Link :href="po.rfq.url" class="font-mono text-brand-700 hover:underline">{{ po.rfq.number }}</Link></dd></div>
+                            <div v-if="sourceRequests.length"><dt class="text-slate-500">Source material request</dt><dd class="font-mono">{{ sourceRequests.join(', ') }}</dd></div>
                             <div v-if="po.payment_terms"><dt class="text-slate-500">Payment terms</dt><dd>{{ po.payment_terms }}</dd></div>
                         </dl>
                         <p v-if="po.approved_at" class="mt-2 text-xs text-slate-500">Approved {{ formatDateTime(po.approved_at) }}<template v-if="po.approved_by"> by {{ po.approved_by }}</template></p>

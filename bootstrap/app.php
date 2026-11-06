@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureFeatureEnabled;
+use App\Http\Middleware\EnsureProcurementRfqEnabled;
 use App\Http\Middleware\EnsureProjectAccess;
 use App\Http\Middleware\EnsureTwoFactor;
 use App\Http\Middleware\HandleInertiaRequests;
@@ -41,6 +42,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'company' => SetCurrentCompany::class,
             'feature' => EnsureFeatureEnabled::class,
+            'procurement.rfq' => EnsureProcurementRfqEnabled::class,
             'project.access' => EnsureProjectAccess::class,
         ]);
 

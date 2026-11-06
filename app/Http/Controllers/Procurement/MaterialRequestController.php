@@ -11,7 +11,9 @@ use App\Models\Boq\BoqItem;
 use App\Models\Procurement\MaterialRequest;
 use App\Models\Procurement\MaterialRequestItem;
 use App\Models\Procurement\PurchaseOrderItem;
+use App\Models\Procurement\PurchaseOrder;
 use App\Models\Procurement\Rfq;
+use App\Support\Procurement\ProcurementSettings;
 use App\Models\Procurement\RfqItem;
 use App\Models\Projects\Project;
 use App\Models\User;
@@ -148,7 +150,8 @@ class MaterialRequestController extends Controller
             'can' => [
                 ...$this->abilities($user, $mr),
                 'import' => $mr->isEditable() && $user->can('material_requests.import') && $user->can('update', $mr),
-                'create_rfq' => $mr->status->isProcurable() && $user->can('create', [Rfq::class, $project]),
+                'create_rfq' => ProcurementSettings::rfqEnabled() && $mr->status->isProcurable() && $user->can('create', [Rfq::class, $project]),
+                'create_po' => ! ProcurementSettings::rfqEnabled() && $mr->status->isProcurable() && $user->can('create', [PurchaseOrder::class, $project]),
                 'attach' => $user->can('update', $mr),
             ],
         ]);
@@ -271,8 +274,10 @@ class MaterialRequestController extends Controller
      */
     private function linkedDocuments(array $itemIds): array
     {
-        $rfqs = RfqItem::query()->whereIn('material_request_item_id', $itemIds)->whereHas('rfq')
-            ->with('rfq:id,project_id,rfq_number,status')->get()->pluck('rfq')->unique('id')->values();
+        $rfqs = ProcurementSettings::rfqEnabled()
+            ? RfqItem::query()->whereIn('material_request_item_id', $itemIds)->whereHas('rfq')
+                ->with('rfq:id,project_id,rfq_number,status')->get()->pluck('rfq')->unique('id')->values()
+            : collect();
         $orders = PurchaseOrderItem::query()->whereIn('material_request_item_id', $itemIds)->whereHas('purchaseOrder')
             ->with('purchaseOrder:id,project_id,po_number,status,revision_no')->get()->pluck('purchaseOrder')->unique('id')->values();
 
