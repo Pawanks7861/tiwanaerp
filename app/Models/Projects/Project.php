@@ -20,6 +20,7 @@ use App\Models\Equipment\EquipmentFuelLog;
 use App\Models\Equipment\EquipmentRepair;
 use App\Models\Equipment\EquipmentUsageLog;
 use App\Models\Finance\ClientInvoice;
+use App\Models\Gate\GatePass;
 use App\Models\Finance\Expense;
 use App\Models\Finance\Payment;
 use App\Models\Finance\PettyCashAccount;
@@ -235,6 +236,14 @@ class Project extends Model
     public function purchaseOrders(): HasMany
     {
         return $this->hasMany(PurchaseOrder::class);
+    }
+
+    /**
+     * @return HasMany<GatePass, $this>
+     */
+    public function gatePasses(): HasMany
+    {
+        return $this->hasMany(GatePass::class);
     }
 
     /**

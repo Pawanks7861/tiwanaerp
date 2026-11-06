@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Services\Finance\ClientInvoiceService;
 use App\Services\Finance\PayableService;
 use App\Support\Format\IndianNumber;
+use App\Support\Pdf\PdfResponder;
 use App\Support\Permissions\CompanyPermission;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
@@ -137,7 +138,7 @@ class ClientInvoiceController extends Controller
         return back()->with('success', 'RA bill submitted for certification.');
     }
 
-    public function pdf(Project $project, ClientInvoice $clientInvoice): HttpResponse
+    public function pdf(Request $request, Project $project, ClientInvoice $clientInvoice): HttpResponse
     {
         Gate::authorize('export', $clientInvoice);
         $invoice = $clientInvoice->load(['client', 'taxRate:id,name']);
@@ -145,7 +146,7 @@ class ClientInvoiceController extends Controller
         $items = $invoice->items()->with('unit:id,symbol')->get();
         $name = ($invoice->invoice_number ?? "RA-{$invoice->ra_sequence}-DRAFT").'.pdf';
 
-        return Pdf::loadView('pdf.client-invoice', [
+        $pdf = Pdf::loadView('pdf.client-invoice', [
             'invoice' => $invoice,
             'items' => $items,
             'company' => $company,
@@ -155,7 +156,9 @@ class ClientInvoiceController extends Controller
             'money' => fn ($v) => IndianNumber::money($v),
             'qty' => fn ($v) => IndianNumber::quantity($v),
             'words' => IndianNumber::rupeesInWords((string) $invoice->net_payable),
-        ])->setPaper('a4')->download(str_replace('/', '-', $name));
+        ])->setPaper('a4');
+
+        return PdfResponder::send($pdf, str_replace('/', '-', $name), $request->routeIs('projects.ra-bills.pdf.view'));
     }
 
     /**

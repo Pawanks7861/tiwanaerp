@@ -95,6 +95,13 @@ abstract class MasterDefinition
     }
 
     /**
+     * Hook after the master row is saved. $before is the original attributes (empty on create).
+     *
+     * @param  array<string, mixed>  $before
+     */
+    public function afterSave(Model $record, array $before): void {}
+
+    /**
      * Fields uppercased before validation (codes, GSTIN, PAN, IFSC).
      *
      * @return list<string>

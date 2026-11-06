@@ -20,6 +20,7 @@ use App\Models\SiteExecution\SiteDiary;
 use App\Services\SiteExecution\DprAggregationService;
 use App\Services\SiteExecution\DprService;
 use App\Support\Format\IndianNumber;
+use App\Support\Pdf\PdfResponder;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -230,13 +231,13 @@ class DprController extends Controller
     /**
      * Printable DPR from stored values only (snapshots frozen at approval).
      */
-    public function pdf(Project $project, Dpr $dpr): \Symfony\Component\HttpFoundation\Response
+    public function pdf(Request $request, Project $project, Dpr $dpr): \Symfony\Component\HttpFoundation\Response
     {
         Gate::authorize('export', $dpr);
 
         $dpr->load(['engineer:id,name', 'approver:id,name']);
 
-        return Pdf::loadView('pdf.dpr', [
+        $pdf = Pdf::loadView('pdf.dpr', [
             'dpr' => $dpr,
             'company' => Company::query()->findOrFail($dpr->company_id),
             'project' => $project,
@@ -245,7 +246,9 @@ class DprController extends Controller
             'equipment' => $dpr->equipment()->with('equipmentType:id,name')->get(),
             'materials' => $dpr->materials()->with(['material:id,code,name', 'unit:id,symbol'])->get(),
             'qty' => fn ($v) => $v === null ? '—' : IndianNumber::quantity($v),
-        ])->setPaper('a4')->download("{$dpr->dpr_number}.pdf");
+        ])->setPaper('a4');
+
+        return PdfResponder::send($pdf, "{$dpr->dpr_number}.pdf", $request->routeIs('projects.dprs.pdf.view'));
     }
 
     /**

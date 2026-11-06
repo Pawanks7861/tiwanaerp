@@ -1,6 +1,7 @@
 <script setup>
 import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
 import ReasonDialog from '@/Components/Inventory/ReasonDialog.vue';
+import PdfActions from '@/Components/Pdf/PdfActions.vue';
 import ApprovalActions from '@/Components/Procurement/ApprovalActions.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
@@ -91,11 +92,12 @@ const statusNote = computed(() => ({
                         <AppButton v-if="can.submit" size="sm" @click="confirming = 'submit'">Submit for approval</AppButton>
                         <ApprovalActions :approval="approval" noun="DPR" />
                         <AppButton v-if="can.reopen" size="sm" variant="danger" @click="reopening = true">Reopen for correction</AppButton>
-                        <a
+                        <PdfActions
                             v-if="can.export"
-                            :href="route('projects.dprs.pdf', base)"
-                            class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-                        ><Icon name="download" :size="14" /> PDF</a>
+                            :title="`${dpr.dpr_number}.pdf`"
+                            :view-url="route('projects.dprs.pdf.view', base)"
+                            :download-url="route('projects.dprs.pdf', base)"
+                        />
                         <AppButton v-if="can.delete" size="sm" variant="ghost" icon="trash" aria-label="Delete DPR" @click="confirming = 'delete'" />
                     </div>
                 </div>

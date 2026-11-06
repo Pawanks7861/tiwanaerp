@@ -105,6 +105,41 @@ class MaterialIssueService
      * Final approval (inside the approval engine's transaction). Insufficient stock aborts the
      * whole approval. Repeating it on a posted issue changes nothing.
      */
+    /**
+     * Fuel drawn for equipment. Posts an approved material issue (stock and project cost once)
+     * and returns the posted line so the fuel log can point at it.
+     *
+     * @param  array{material_id: int, quantity: string, issue_date: string, issued_to_name: string, warehouse_id: int, remarks?: string|null}  $data
+     */
+    public function issueForEquipment(Project $project, array $data, int $userId): MaterialIssueItem
+    {
+        return DB::transaction(function () use ($project, $data, $userId) {
+            $issue = new MaterialIssue($this->header($project, [
+                'warehouse_id' => $data['warehouse_id'],
+                'issue_date' => $data['issue_date'],
+                'issued_to_name' => $data['issued_to_name'],
+                'purpose' => 'Equipment fuel',
+                'remarks' => $data['remarks'] ?? null,
+            ]));
+            $issue->forceFill([
+                'project_id' => $project->id,
+                'issue_number' => $this->numbers->next('material_issue', $project),
+                'status' => InventoryDocumentStatus::Draft,
+            ])->save();
+
+            $this->replaceLines($issue, $project, [[
+                'material_id' => $data['material_id'],
+                'quantity' => $data['quantity'],
+                'remarks' => 'Equipment fuel',
+            ]]);
+
+            $issue->forceFill(['status' => InventoryDocumentStatus::Submitted])->save();
+            $this->post($issue, $userId);
+
+            return $issue->items()->firstOrFail();
+        });
+    }
+
     public function post(MaterialIssue $issue, ?int $approverId): void
     {
         DB::transaction(function () use ($issue, $approverId) {

@@ -46,6 +46,7 @@ final class PermissionCatalog
             'labour' => ['label' => 'Labour', 'group' => 'Resources', 'actions' => [...$std, 'mark_attendance', 'approve_attendance', 'manage_payments', 'import']],
             'subcontract' => ['label' => 'Subcontract', 'group' => 'Resources', 'actions' => [...$std, 'approve_wo', 'certify_bill', 'import']],
             'equipment' => ['label' => 'Equipment', 'group' => 'Resources', 'actions' => [...$std, 'assign', 'log_usage', 'import']],
+            'gate_pass' => ['label' => 'Gate Pass', 'group' => 'Site', 'actions' => ['view', 'create', 'approve', 'verify']],
 
             'expenses' => ['label' => 'Expenses', 'group' => 'Finance', 'actions' => [...$std, 'submit', 'approve', 'import']],
             'petty_cash' => ['label' => 'Petty Cash', 'group' => 'Finance', 'actions' => ['view', 'fund', 'spend']],

@@ -2,6 +2,7 @@
 import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
 import AuditTrail from '@/Components/Audit/AuditTrail.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
+import PdfActions from '@/Components/Pdf/PdfActions.vue';
 import ApprovalActions from '@/Components/Procurement/ApprovalActions.vue';
 import ProcurementNav from '@/Components/Procurement/ProcurementNav.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
@@ -127,11 +128,12 @@ const statusNote = computed(() => {
                             <AppButton v-if="can.submit" size="sm" @click="confirming = 'submit'">Submit for approval</AppButton>
                             <ApprovalActions :approval="approval" noun="purchase order" />
                             <AppButton v-if="can.receive" size="sm" icon="truck" :href="route('projects.grns.create', { project: project.id, purchase_order: po.id })">Receive goods</AppButton>
-                            <a
+                            <PdfActions
                                 v-if="can.export"
-                                :href="route('projects.purchase-orders.pdf', [project.id, po.id])"
-                                class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-                            ><Icon name="download" :size="14" /> PDF</a>
+                                :title="`${po.po_number}.pdf`"
+                                :view-url="route('projects.purchase-orders.pdf.view', [project.id, po.id])"
+                                :download-url="route('projects.purchase-orders.pdf', [project.id, po.id])"
+                            />
                             <AppButton v-if="can.amend" size="sm" variant="secondary" @click="openReason('amend')">Amend</AppButton>
                             <AppButton v-if="can.close" size="sm" variant="ghost" @click="openReason('close')">Close</AppButton>
                             <AppButton v-if="can.cancel" size="sm" variant="ghost" class="text-red-600" @click="openReason('cancel')">Cancel</AppButton>
@@ -185,7 +187,7 @@ const statusNote = computed(() => {
                                 </template>
                                 <td v-else class="px-3 py-2.5 text-right tabular">{{ formatMoney(item.igst_amount) }}<div class="text-slate-400">{{ formatPercent(item.igst_rate) }}</div></td>
                                 <td class="px-3 py-2.5 text-right font-medium text-slate-900 tabular">{{ formatMoney(item.amount) }}</td>
-                                <td class="px-3 py-2.5 text-right tabular">{{ formatQty(item.received_qty) }}</td>
+                                <td class="px-3 py-2.5 text-right tabular">{{ formatQty(item.received_qty) }}<div v-if="item.over_received_qty && item.over_received_qty !== '0.0000'" class="text-amber-700">Over {{ formatQty(item.over_received_qty) }}</div></td>
                             </tr>
                         </tbody>
                     </table>
@@ -202,7 +204,7 @@ const statusNote = computed(() => {
                             <template v-if="intra">CGST {{ formatMoney(item.cgst_amount) }} · SGST {{ formatMoney(item.sgst_amount) }}</template>
                             <template v-else>IGST {{ formatMoney(item.igst_amount) }}</template>
                         </p>
-                        <p class="text-xs text-slate-500">Received {{ formatQty(item.received_qty) }} {{ item.unit }}</p>
+                        <p class="text-xs text-slate-500">Received {{ formatQty(item.received_qty) }} {{ item.unit }}<template v-if="item.over_received_qty && item.over_received_qty !== '0.0000'"> · Over received {{ formatQty(item.over_received_qty) }}</template></p>
                     </li>
                 </ul>
                 <dl class="ml-auto max-w-sm space-y-1 border-t border-line p-4 text-sm">

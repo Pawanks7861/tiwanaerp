@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Masters;
 
 use App\Http\Controllers\Controller;
+use App\Models\Equipment\Equipment;
 use App\Http\Requests\Masters\MasterRequest;
 use App\Http\Resources\AttachmentResource;
 use App\Models\Masters\MasterModel;
@@ -65,6 +66,8 @@ class MasterController extends Controller
             'attachments' => AttachmentResource::collection($model->attachments()->with('uploader:id,name')->get())->resolve(),
             'attachableType' => $model->getMorphClass(),
             'can' => $this->abilities($request, $definition),
+            'locationHistory' => $model instanceof Equipment ? $this->locationHistory($model) : [],
+            'locationTypes' => $model instanceof Equipment ? \App\Enums\Equipment\EquipmentLocationType::options() : [],
         ]);
     }
 
@@ -93,6 +96,21 @@ class MasterController extends Controller
         $this->service->delete($definition, $model);
 
         return redirect()->route('masters.index', $master)->with('success', "{$definition->singular()} deleted.");
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function locationHistory(Equipment $equipment): array
+    {
+        return $equipment->locationHistory()->with('changer:id,name')->limit(30)->get()->map(fn ($row) => [
+            'id' => $row->id,
+            'from' => trim(($row->from_location_type?->label() ?? '').' '.($row->from_location_name ?? '')),
+            'to' => trim($row->to_location_type->label().' '.($row->to_location_name ?? '')),
+            'remarks' => $row->remarks,
+            'changed_by' => $row->changer?->name,
+            'changed_at' => $row->changed_at?->toIso8601String(),
+        ])->all();
     }
 
     private function find(MasterDefinition $definition, int $id): MasterModel

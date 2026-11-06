@@ -2,12 +2,15 @@
 
 namespace App\Support\Masters\Definitions;
 
+use App\Enums\Equipment\EquipmentLocationType;
 use App\Enums\Equipment\EquipmentOwnership;
 use App\Enums\Equipment\EquipmentStatus;
 use App\Models\Equipment\Equipment;
 use App\Models\Masters\EquipmentType;
 use App\Models\Masters\Vendor;
+use App\Models\Projects\Project;
 use App\Rules\ExistsInCompany;
+use App\Services\Equipment\EquipmentLocationService;
 use App\Support\Masters\MasterDefinition;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -61,7 +64,15 @@ class EquipmentDefinition extends MasterDefinition
             ['name' => 'code', 'label' => 'Code', 'type' => 'text', 'maxlength' => 30, 'uppercase' => true, 'section' => 'General'],
             ['name' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true, 'maxlength' => 150, 'section' => 'General'],
             ['name' => 'equipment_type_id', 'label' => 'Type', 'type' => 'select', 'options' => 'types', 'required' => true, 'section' => 'General'],
-            ['name' => 'registration_no', 'label' => 'Registration / serial no.', 'type' => 'text', 'maxlength' => 50, 'uppercase' => true, 'section' => 'General'],
+            ['name' => 'registration_no', 'label' => 'Registration no.', 'type' => 'text', 'maxlength' => 50, 'uppercase' => true, 'section' => 'Identity', 'help' => 'Required for registered vehicles. A serial number can be used instead for plant that is not registered.'],
+            ['name' => 'serial_no', 'label' => 'Serial no.', 'type' => 'text', 'maxlength' => 50, 'uppercase' => true, 'section' => 'Identity'],
+            ['name' => 'make', 'label' => 'Make', 'type' => 'text', 'maxlength' => 80, 'section' => 'Identity'],
+            ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'maxlength' => 80, 'section' => 'Identity'],
+            ['name' => 'manufacture_year', 'label' => 'Year', 'type' => 'text', 'maxlength' => 4, 'section' => 'Identity'],
+            ['name' => 'location_type', 'label' => 'Location', 'type' => 'select', 'options' => 'locations', 'default' => 'central_store', 'section' => 'Location'],
+            ['name' => 'location_project_id', 'label' => 'Project / site', 'type' => 'select', 'options' => 'projects', 'showWhen' => ['location_type' => 'project_site'], 'section' => 'Location'],
+            ['name' => 'location_name', 'label' => 'Location name', 'type' => 'text', 'maxlength' => 150, 'section' => 'Location'],
+            ['name' => 'location_notes', 'label' => 'Location notes', 'type' => 'textarea', 'span' => 'full', 'section' => 'Location'],
             ['name' => 'ownership', 'label' => 'Ownership', 'type' => 'select', 'options' => 'ownerships', 'required' => true, 'default' => 'owned', 'section' => 'Ownership'],
             ['name' => 'owner_vendor_id', 'label' => 'Owner (vendor)', 'type' => 'select', 'options' => 'vendors', 'showWhen' => ['ownership' => 'hired'], 'section' => 'Ownership'],
             ['name' => 'purchase_date', 'label' => 'Purchase date', 'type' => 'date', 'showWhen' => ['ownership' => 'owned'], 'section' => 'Ownership'],
@@ -80,7 +91,15 @@ class EquipmentDefinition extends MasterDefinition
             'code' => $this->codeRules('equipment', $record),
             'name' => ['required', 'string', 'max:150'],
             'equipment_type_id' => ['required', new ExistsInCompany(EquipmentType::class)],
-            'registration_no' => ['nullable', 'string', 'max:50'],
+            'registration_no' => ['nullable', 'required_without:serial_no', 'string', 'max:50'],
+            'serial_no' => ['nullable', 'required_without:registration_no', 'string', 'max:50'],
+            'make' => ['nullable', 'string', 'max:80'],
+            'model' => ['nullable', 'string', 'max:80'],
+            'manufacture_year' => ['nullable', 'integer', 'min:1950', 'max:2100'],
+            'location_type' => ['nullable', Rule::enum(EquipmentLocationType::class)],
+            'location_project_id' => ['nullable', 'required_if:location_type,project_site', new ExistsInCompany(Project::class)],
+            'location_name' => ['nullable', 'string', 'max:150'],
+            'location_notes' => ['nullable', 'string', 'max:500'],
             'ownership' => ['required', Rule::enum(EquipmentOwnership::class)],
             'owner_vendor_id' => ['nullable', 'required_if:ownership,hired', new ExistsInCompany(Vendor::class)],
             'purchase_date' => ['nullable', 'date', 'before_or_equal:today'],
@@ -101,6 +120,13 @@ class EquipmentDefinition extends MasterDefinition
         } else {
             $data['owner_vendor_id'] = null;
         }
+        $data['registration_no'] = $this->identifier($data['registration_no'] ?? null);
+        $data['serial_no'] = $this->identifier($data['serial_no'] ?? null);
+        $data['location_type'] = $data['location_type'] ?? EquipmentLocationType::CentralStore->value;
+        if (($data['location_type'] ?? null) !== EquipmentLocationType::ProjectSite->value) {
+            $data['location_project_id'] = null;
+        }
+        $this->assertUnique($data, $record);
         $data['hourly_rate'] = blank($data['hourly_rate'] ?? null) ? '0' : $data['hourly_rate'];
         $data['daily_rate'] = blank($data['daily_rate'] ?? null) ? '0' : $data['daily_rate'];
         $data['status'] = $this->status($data['status'] ?? null, $record);
@@ -140,6 +166,8 @@ class EquipmentDefinition extends MasterDefinition
             'vendors' => $this->toOptions(Vendor::query()->active()->orderBy('name')->get(['id', 'name'])),
             'ownerships' => EquipmentOwnership::options(),
             'statuses' => EquipmentStatus::options(),
+            'locations' => EquipmentLocationType::options(),
+            'projects' => $this->toOptions(Project::query()->orderBy('name')->get(['id', 'name'])),
         ];
     }
 
@@ -164,5 +192,38 @@ class EquipmentDefinition extends MasterDefinition
         }
 
         return $requested->value;
+    }
+
+    public function afterSave(Model $record, array $before): void
+    {
+        if ($record instanceof Equipment) {
+            app(EquipmentLocationService::class)->recordIfChanged($record, $before);
+        }
+    }
+
+    private function identifier(mixed $value): ?string
+    {
+        $value = strtoupper(trim((string) $value));
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function assertUnique(array $data, ?Model $record): void
+    {
+        foreach (['registration_no' => 'registration number', 'serial_no' => 'serial number'] as $column => $label) {
+            $value = $data[$column] ?? null;
+            if ($value === null) {
+                continue;
+            }
+            $taken = Equipment::query()->whereRaw('LOWER('.$column.') = ?', [strtolower($value)])
+                ->when($record, fn ($q) => $q->whereKeyNot($record->getKey()))
+                ->exists();
+            if ($taken) {
+                throw ValidationException::withMessages([$column => "This {$label} is already used in the company."]);
+            }
+        }
     }
 }

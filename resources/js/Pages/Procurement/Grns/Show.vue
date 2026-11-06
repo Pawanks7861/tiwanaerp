@@ -17,6 +17,7 @@ const props = defineProps({
     project: { type: Object, required: true },
     grn: { type: Object, required: true },
     items: { type: Array, required: true },
+    weighbridge: { type: Object, default: null },
     approval: { type: Object, default: null },
     attachments: { type: Array, required: true },
     audit: { type: Array, default: () => [] },
@@ -106,6 +107,7 @@ const statusNote = computed(() => {
                                 <th class="px-4 py-2.5 text-right">Earlier</th>
                                 <th class="px-4 py-2.5 text-right">Received</th>
                                 <th class="px-4 py-2.5 text-right">Rejected</th>
+                                <th class="px-4 py-2.5 text-right">Extra</th>
                                 <th class="px-4 py-2.5 text-right">Accepted</th>
                                 <th v-if="can.view_rates" class="px-4 py-2.5 text-right">Rate</th>
                             </tr>
@@ -114,12 +116,13 @@ const statusNote = computed(() => {
                             <tr v-for="item in items" :key="item.id" class="align-top">
                                 <td class="px-4 py-3">
                                     <div class="font-medium text-slate-900">{{ item.description }}</div>
-                                    <div class="text-xs text-slate-500"><span class="font-mono">{{ item.item_code }}</span><template v-if="item.rejection_reason"> · Rejected: {{ item.rejection_reason }}</template></div>
+                                    <div class="text-xs text-slate-500"><span class="font-mono">{{ item.item_code }}</span><template v-if="item.rejection_reason"> · Rejected: {{ item.rejection_reason }}</template><template v-if="item.extra_reason"> · Extra: {{ item.extra_reason }}</template></div>
                                 </td>
                                 <td class="px-4 py-3 text-right tabular">{{ formatQty(item.ordered_qty) }} {{ item.unit }}</td>
                                 <td class="px-4 py-3 text-right text-slate-500 tabular">{{ formatQty(item.previously_received_qty) }}</td>
                                 <td class="px-4 py-3 text-right tabular">{{ formatQty(item.received_qty) }}</td>
                                 <td class="px-4 py-3 text-right tabular" :class="item.rejected_qty !== '0.0000' ? 'text-red-700' : 'text-slate-400'">{{ formatQty(item.rejected_qty) }}</td>
+                                <td class="px-4 py-3 text-right tabular" :class="item.extra_qty && item.extra_qty !== '0.0000' ? 'font-medium text-amber-800' : 'text-slate-400'">{{ formatQty(item.extra_qty || 0) }}</td>
                                 <td class="px-4 py-3 text-right font-semibold tabular">{{ formatQty(item.accepted_qty) }}</td>
                                 <td v-if="can.view_rates" class="px-4 py-3 text-right tabular">{{ formatRate(item.rate) }}</td>
                             </tr>
@@ -133,12 +136,34 @@ const statusNote = computed(() => {
                             <dt class="text-slate-500">Ordered</dt><dd class="text-right tabular">{{ formatQty(item.ordered_qty) }} {{ item.unit }}</dd>
                             <dt class="text-slate-500">Received</dt><dd class="text-right tabular">{{ formatQty(item.received_qty) }}</dd>
                             <dt class="text-slate-500">Rejected</dt><dd class="text-right tabular">{{ formatQty(item.rejected_qty) }}</dd>
+                            <dt class="text-slate-500">Extra</dt><dd class="text-right tabular">{{ formatQty(item.extra_qty || 0) }}</dd>
                             <dt class="text-slate-500">Accepted</dt><dd class="text-right font-semibold tabular">{{ formatQty(item.accepted_qty) }}</dd>
+                            <dt v-if="item.supplier_challan_qty" class="text-slate-500">Challan</dt><dd v-if="item.supplier_challan_qty" class="text-right tabular">{{ formatQty(item.supplier_challan_qty) }}</dd>
                         </dl>
                         <p v-if="item.rejection_reason" class="mt-1 text-xs text-red-700">Rejected: {{ item.rejection_reason }}</p>
                     </li>
                 </ul>
             </AppCard>
+
+            <AppCard v-if="weighbridge" title="Truck scale / weighbridge">
+                <dl class="grid gap-2 text-sm sm:grid-cols-3">
+                    <div><dt class="text-xs text-slate-500">Slip</dt><dd>{{ weighbridge.slip_no || '—' }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Gross</dt><dd class="tabular">{{ formatQty(weighbridge.gross_weight) }} {{ weighbridge.weight_unit }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Tare</dt><dd class="tabular">{{ formatQty(weighbridge.tare_weight) }} {{ weighbridge.weight_unit }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Net</dt><dd class="font-semibold tabular">{{ formatQty(weighbridge.net_weight) }} {{ weighbridge.weight_unit }}</dd></div>
+                    <div v-if="weighbridge.manual_reason" class="sm:col-span-2"><dt class="text-xs text-slate-500">Net source</dt><dd>{{ weighbridge.manual_reason }}</dd></div>
+                </dl>
+            </AppCard>
+            <AttachmentPanel
+                v-if="weighbridge"
+                :attachments="weighbridge.attachments"
+                attachable-type="weighbridge_receipt"
+                :attachable-id="weighbridge.id"
+                :can-upload="can.attach"
+                :can-delete="can.attach"
+                title="Weighbridge slip"
+                placeholder="Photo or PDF of the weighbridge slip"
+            />
 
             <AttachmentPanel
                 :attachments="attachments"

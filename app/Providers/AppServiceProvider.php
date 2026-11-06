@@ -350,6 +350,10 @@ class AppServiceProvider extends ServiceProvider
             'equipment_assignment' => EquipmentAssignment::class,
             'equipment_usage_log' => EquipmentUsageLog::class,
             'equipment_fuel_log' => EquipmentFuelLog::class,
+            'equipment_location_history' => \App\Models\Equipment\EquipmentLocationHistory::class,
+            'gate_pass' => \App\Models\Gate\GatePass::class,
+            'gate_pass_item' => \App\Models\Gate\GatePassItem::class,
+            'weighbridge_receipt' => \App\Models\Weighbridge\WeighbridgeReceipt::class,
             'equipment_repair' => EquipmentRepair::class,
             'expense' => Expense::class,
             'petty_cash_account' => PettyCashAccount::class,
@@ -421,6 +425,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(EquipmentAssignment::class, EquipmentAssignmentPolicy::class);
         Gate::policy(EquipmentUsageLog::class, EquipmentUsageLogPolicy::class);
         Gate::policy(EquipmentFuelLog::class, EquipmentFuelLogPolicy::class);
+        Gate::policy(\App\Models\Gate\GatePass::class, \App\Policies\Gate\GatePassPolicy::class);
+        Gate::policy(\App\Models\Weighbridge\WeighbridgeReceipt::class, \App\Policies\Weighbridge\WeighbridgeReceiptPolicy::class);
         Gate::policy(EquipmentRepair::class, EquipmentRepairPolicy::class);
         Gate::policy(Expense::class, ExpensePolicy::class);
         Gate::policy(PettyCashAccount::class, PettyCashAccountPolicy::class);

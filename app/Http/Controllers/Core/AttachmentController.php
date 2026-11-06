@@ -25,6 +25,7 @@ class AttachmentController extends Controller
         'labour', 'equipment', 'work_order', 'subcontractor_bill', 'equipment_repair',
         'expense', 'client_invoice', 'vendor_bill', 'payment', 'retention_release', 'quotation',
         'quality_inspection', 'ncr',
+        'gate_pass', 'weighbridge_receipt',
         'boq_item',
     ];
 

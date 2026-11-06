@@ -24,6 +24,8 @@ const sheet = ref(0);
 const csvMode = ref('table');
 const root = ref(null);
 const closeButton = ref(null);
+const pdfFrame = ref(null);
+const printNote = ref('');
 let timer = null;
 
 const position = computed(() => props.gallery.findIndex((item) => item.source === current.value.source && item.id === current.value.id));
@@ -116,6 +118,22 @@ async function retryPreview() {
     }
 }
 
+function printPdf() {
+    printNote.value = '';
+    const win = pdfFrame.value?.contentWindow;
+    if (!win) {
+        printNote.value = 'Automatic printing was blocked. Use the print control inside the PDF.';
+
+        return;
+    }
+    try {
+        win.focus();
+        win.print();
+    } catch {
+        printNote.value = 'Automatic printing was blocked. Use the print control inside the PDF.';
+    }
+}
+
 function fullscreen() {
     if (document.fullscreenElement) {
         document.exitFullscreen();
@@ -155,7 +173,8 @@ onBeforeUnmount(() => {
             </header>
 
             <div class="flex min-w-0 max-w-full flex-wrap gap-1 border-b border-line px-3 py-2">
-                <a v-if="file" :href="file.download_url" class="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100" title="Download original">Download original</a>
+                <a v-if="file" :href="file.download_url" class="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100" :aria-label="pdf ? 'Download PDF' : 'Download original'" :title="pdf ? 'Download PDF' : 'Download original'">{{ pdf ? 'Download PDF' : 'Download original' }}</a>
+                <button v-if="pdf" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100" aria-label="Print PDF" title="Print PDF" @click="printPdf">Print</button>
                 <button v-if="visual || pdf" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Zoom out" title="Zoom out" @click="zoom(-0.25)">Zoom out</button>
                 <button v-if="visual || pdf" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Zoom in" title="Zoom in" @click="zoom(0.25)">Zoom in</button>
                 <button v-if="visual || pdf" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" aria-label="Fit" title="Fit" @click="fit">Fit</button>
@@ -164,6 +183,7 @@ onBeforeUnmount(() => {
                 <button v-if="gallery.length > 1" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40" aria-label="Previous file" title="Previous" :disabled="position <= 0" @click="step(-1)">Previous</button>
                 <button v-if="gallery.length > 1" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40" aria-label="Next file" title="Next" :disabled="position < 0 || position >= gallery.length - 1" @click="step(1)">Next</button>
                 <button v-if="body?.kind === 'csv'" type="button" class="shrink-0 rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100" @click="csvMode = csvMode === 'table' ? 'raw' : 'table'">{{ csvMode === 'table' ? 'Raw text' : 'Table' }}</button>
+                <p v-if="printNote" class="w-full text-xs text-amber-800">{{ printNote }}</p>
             </div>
 
             <div class="min-h-0 flex-1 overflow-auto bg-slate-100" :class="cad ? 'p-0' : 'p-3'">
@@ -187,7 +207,7 @@ onBeforeUnmount(() => {
                     :memory-warning="file.message || ''"
                     class="h-full"
                 />
-                <iframe v-else-if="pdf" :src="file.stream_url" :title="file.name" class="h-full min-h-[70vh] border-0 bg-white" :style="{ width: `${Math.round(scale * 100)}%` }" />
+                <iframe v-else-if="pdf" ref="pdfFrame" :src="file.stream_url" :title="file.name" class="h-full min-h-[70vh] border-0 bg-white" :style="{ width: `${Math.round(scale * 100)}%` }" />
                 <video v-else-if="file.strategy === 'video'" :src="file.stream_url" controls class="max-h-full max-w-full" :aria-label="file.name" />
                 <audio v-else-if="file.strategy === 'audio'" :src="file.stream_url" controls class="w-full" :aria-label="file.name" />
                 <div v-else-if="body?.kind === 'text' || (body?.kind === 'csv' && csvMode === 'raw')" class="rounded-lg bg-white p-4">

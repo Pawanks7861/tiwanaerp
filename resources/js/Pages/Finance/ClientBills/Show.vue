@@ -3,6 +3,7 @@ import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
 import TallyStatus from '@/Components/Integrations/TallyStatus.vue';
 import AuditTrail from '@/Components/Audit/AuditTrail.vue';
 import FinanceNav from '@/Components/Finance/FinanceNav.vue';
+import PdfActions from '@/Components/Pdf/PdfActions.vue';
 import ApprovalActions from '@/Components/Procurement/ApprovalActions.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
@@ -85,11 +86,12 @@ const statusNote = computed(() => {
                         </p>
                     </div>
                     <div class="flex flex-wrap gap-2 lg:justify-end">
-                        <a
+                        <PdfActions
                             v-if="can.export"
-                            :href="route('projects.ra-bills.pdf', [project.id, bill.id])"
-                            class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-                        ><Icon name="download" :size="14" /> PDF</a>
+                            :title="`${bill.display_number}.pdf`"
+                            :view-url="route('projects.ra-bills.pdf.view', [project.id, bill.id])"
+                            :download-url="route('projects.ra-bills.pdf', [project.id, bill.id])"
+                        />
                         <AppButton v-if="can.update" size="sm" variant="secondary" icon="pencil" :href="route('projects.ra-bills.edit', [project.id, bill.id])">Edit</AppButton>
                         <AppButton v-if="can.submit" size="sm" @click="confirming = 'submit'">Submit for certification</AppButton>
                         <ApprovalActions :approval="approval" noun="RA bill" />

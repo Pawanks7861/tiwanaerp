@@ -8,6 +8,7 @@ use App\Models\Reports\ReportExport;
 use App\Reports\ReportRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -16,7 +17,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class ReportExportController extends Controller
 {
-    public function download(Request $request, ReportExport $reportExport, ReportRegistry $registry): StreamedResponse
+    public function download(Request $request, ReportExport $reportExport, ReportRegistry $registry): StreamedResponse|BinaryFileResponse
     {
         $user = $request->user();
         abort_unless((int) $reportExport->user_id === (int) $user->id, 403);
@@ -31,6 +32,20 @@ class ReportExportController extends Controller
 
         $disk = Storage::disk(config('reports.export_disk'));
         abort_unless($disk->exists($reportExport->file_path), 404);
+
+        $inline = $request->query('disposition') === 'inline' && str_ends_with(strtolower((string) $reportExport->file_name), '.pdf');
+        if ($inline) {
+            $absolute = $disk->path($reportExport->file_path);
+            abort_unless(is_file($absolute), 404);
+            $response = response()->file($absolute, [
+                'Content-Type' => 'application/pdf',
+                'Cache-Control' => 'no-store, private',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+            $response->setContentDisposition('inline', (string) $reportExport->file_name);
+
+            return $response;
+        }
 
         return $disk->download($reportExport->file_path, $reportExport->file_name, ['Cache-Control' => 'no-store, private']);
     }

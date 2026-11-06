@@ -38,11 +38,13 @@ use App\Http\Controllers\Documents\DocumentController;
 use App\Http\Controllers\Documents\DocumentFolderController;
 use App\Http\Controllers\Documents\DrawingController;
 use App\Http\Controllers\Equipment\EquipmentAssignmentController;
+use App\Http\Controllers\Equipment\EquipmentLocationController;
 use App\Http\Controllers\Equipment\EquipmentFuelController;
 use App\Http\Controllers\Equipment\EquipmentRepairController;
 use App\Http\Controllers\Equipment\EquipmentUsageController;
 use App\Http\Controllers\Files\FileViewerController;
 use App\Http\Controllers\Finance\CashFlowController;
+use App\Http\Controllers\Gate\GatePassController;
 use App\Http\Controllers\Finance\ClientInvoiceController;
 use App\Http\Controllers\Finance\ExpenseController;
 use App\Http\Controllers\Finance\PaymentController;
@@ -327,6 +329,7 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::post('/refresh', [DprController::class, 'refresh'])->name('refresh');
             Route::post('/submit', [DprController::class, 'submit'])->name('submit');
             Route::post('/reopen', [DprController::class, 'reopen'])->name('reopen');
+            Route::get('/pdf/view', [DprController::class, 'pdf'])->name('pdf.view');
             Route::get('/pdf', [DprController::class, 'pdf'])->name('pdf');
         });
 
@@ -400,6 +403,23 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::post('/equipment-repairs/{equipmentRepair}/complete', [EquipmentRepairController::class, 'complete'])->whereNumber('equipmentRepair')->name('projects.equipment-repairs.complete');
         Route::post('/equipment-repairs/{equipmentRepair}/cancel', [EquipmentRepairController::class, 'cancel'])->whereNumber('equipmentRepair')->name('projects.equipment-repairs.cancel');
 
+        Route::get('/gate-passes', [GatePassController::class, 'index'])->name('projects.gate-passes.index');
+        Route::get('/gate-passes/create', [GatePassController::class, 'create'])->name('projects.gate-passes.create');
+        Route::post('/gate-passes', [GatePassController::class, 'store'])->name('projects.gate-passes.store');
+        Route::prefix('/gate-passes/{gatePass}')->whereNumber('gatePass')->name('projects.gate-passes.')->group(function () {
+            Route::get('/', [GatePassController::class, 'show'])->name('show');
+            Route::get('/edit', [GatePassController::class, 'edit'])->name('edit');
+            Route::get('/pdf/view', [GatePassController::class, 'pdf'])->name('pdf.view');
+            Route::get('/pdf', [GatePassController::class, 'pdf'])->name('pdf');
+            Route::put('/', [GatePassController::class, 'update'])->name('update');
+            Route::delete('/', [GatePassController::class, 'destroy'])->name('destroy');
+            Route::post('/submit', [GatePassController::class, 'submit'])->name('submit');
+            Route::post('/approve', [GatePassController::class, 'approve'])->name('approve');
+            Route::post('/reject', [GatePassController::class, 'reject'])->name('reject');
+            Route::post('/verify', [GatePassController::class, 'verify'])->name('verify');
+            Route::post('/returned', [GatePassController::class, 'returned'])->name('returned');
+        });
+
         // Procurement: material requests
         Route::get('/material-requests', [MaterialRequestController::class, 'index'])->name('projects.material-requests.index');
         Route::get('/material-requests/create', [MaterialRequestController::class, 'create'])->name('projects.material-requests.create');
@@ -457,6 +477,7 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::post('/amend', [PurchaseOrderController::class, 'amend'])->name('amend');
             Route::post('/cancel', [PurchaseOrderController::class, 'cancel'])->name('cancel');
             Route::post('/close', [PurchaseOrderController::class, 'close'])->name('close');
+            Route::get('/pdf/view', [PurchaseOrderController::class, 'pdf'])->name('pdf.view');
             Route::get('/pdf', [PurchaseOrderController::class, 'pdf'])->name('pdf');
         });
 
@@ -564,6 +585,7 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::put('/', [ClientInvoiceController::class, 'update'])->name('update');
             Route::delete('/', [ClientInvoiceController::class, 'destroy'])->name('destroy');
             Route::post('/submit', [ClientInvoiceController::class, 'submit'])->name('submit');
+            Route::get('/pdf/view', [ClientInvoiceController::class, 'pdf'])->name('pdf.view');
             Route::get('/pdf', [ClientInvoiceController::class, 'pdf'])->name('pdf');
         });
         Route::get('/vendor-bills', [VendorBillController::class, 'index'])->name('projects.vendor-bills.index');
@@ -749,6 +771,8 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::put('/{entry}', [CostingRateLibraryController::class, 'update'])->whereNumber('entry')->name('update');
         });
     });
+
+    Route::post('/equipment/{equipment}/location', [EquipmentLocationController::class, 'update'])->whereNumber('equipment')->name('equipment.location');
 
     // Masters (items, units, vendors, clients, ...) share one controller driven by MasterRegistry.
     Route::prefix('/masters/{master}')->name('masters.')

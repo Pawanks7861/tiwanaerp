@@ -22,6 +22,7 @@ use App\Services\Procurement\ProcurementQuantityService;
 use App\Services\Procurement\PurchaseOrderAmendmentService;
 use App\Services\Procurement\PurchaseOrderService;
 use App\Support\Format\IndianNumber;
+use App\Support\Pdf\PdfResponder;
 use App\Support\Procurement\ProcurementSettings;
 use App\Support\Math\Decimal;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -141,13 +142,21 @@ class PurchaseOrderController extends Controller
                 'cancelled_by' => $po->canceller?->name,
                 'cancelled_at' => $po->cancelled_at?->toIso8601String(),
             ],
-            'items' => $items->map(fn (PurchaseOrderItem $i) => [
+            'items' => $items->map(function (PurchaseOrderItem $i) {
+                $ordered = Decimal::of($i->quantity);
+                $received = Decimal::of($i->received_qty);
+                $over = $received->minus($ordered);
+
+                return [
                 ...$i->only(['id', 'item_code', 'description', 'hsn_sac', 'quantity', 'rate', 'discount_percent', 'discount_amount', 'base_amount', 'taxable_amount',
                     'cgst_rate', 'cgst_amount', 'sgst_rate', 'sgst_amount', 'igst_rate', 'igst_amount', 'amount', 'received_qty']),
                 'unit' => $i->unit?->symbol,
+                'remaining_qty' => ($over->isPositive() ? Decimal::zero() : $ordered->minus($received))->toQuantity(),
+                'over_received_qty' => ($over->isPositive() ? $over : Decimal::zero())->toQuantity(),
                 'tax_rate' => $i->taxRate?->name,
                 'material_request' => $i->materialRequestItem?->materialRequest?->request_number,
-            ])->all(),
+                ];
+            })->all(),
             'revisions' => $po->revisions()->with('creator:id,name')->get()->map(fn (PurchaseOrderRevision $r) => [
                 'id' => $r->id,
                 'revision_no' => $r->revision_no,
@@ -260,7 +269,7 @@ class PurchaseOrderController extends Controller
     /**
      * Printable PO from stored values only (no recalculation at print time).
      */
-    public function pdf(Project $project, PurchaseOrder $purchaseOrder): \Symfony\Component\HttpFoundation\Response
+    public function pdf(Request $request, Project $project, PurchaseOrder $purchaseOrder): \Symfony\Component\HttpFoundation\Response
     {
         Gate::authorize('export', $purchaseOrder);
 
@@ -282,7 +291,7 @@ class PurchaseOrderController extends Controller
 
         $name = $po->po_number.($po->revision_no > 0 ? '-R'.$po->revision_no : '').'.pdf';
 
-        return $pdf->download($name);
+        return PdfResponder::send($pdf, $name, $request->routeIs('projects.purchase-orders.pdf.view'));
     }
 
     /**

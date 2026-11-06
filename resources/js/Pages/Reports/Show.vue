@@ -1,4 +1,5 @@
 <script setup>
+import PdfActions from '@/Components/Pdf/PdfActions.vue';
 import Pagination from '@/Components/Data/Pagination.vue';
 import Chart from '@/Components/Reports/Chart.vue';
 import ReportTable from '@/Components/Reports/ReportTable.vue';
@@ -10,7 +11,7 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatDateTime, formatMoney, formatPercent, formatQty } from '@/lib/format';
 import { router } from '@inertiajs/vue3';
-import { reactive } from 'vue';
+import { computed, reactive } from 'vue';
 
 const props = defineProps({
     project: { type: Object, default: null },
@@ -55,10 +56,18 @@ function apply() {
     router.get(props.urls.self, query, { preserveState: true, preserveScroll: true, replace: true });
 }
 
-function exportReport(format) {
+function exportQuery(extra = {}) {
     const query = Object.fromEntries(Object.entries(state).filter(([, value]) => value !== '' && value !== null));
-    window.location.href = `${props.urls.export}?${new URLSearchParams({ ...query, format }).toString()}`;
+
+    return `${props.urls.export}?${new URLSearchParams({ ...query, ...extra }).toString()}`;
 }
+
+function exportReport(format) {
+    window.location.href = exportQuery({ format });
+}
+
+const pdfViewUrl = computed(() => exportQuery({ format: 'pdf', disposition: 'inline' }));
+const pdfDownloadUrl = computed(() => exportQuery({ format: 'pdf' }));
 
 function cardValue(card) {
     if (card.type === 'money') {
@@ -82,7 +91,7 @@ const selectClass = 'rounded-lg border-slate-300 py-2 text-sm shadow-sm focus:bo
         <PageHeader :title="report.title" :subtitle="`${period.label}${project ? '' : ''}`" :back="urls.index">
             <template #actions>
                 <AppButton v-if="can.export" variant="secondary" size="sm" icon="download" @click="exportReport('xlsx')">Excel</AppButton>
-                <AppButton v-if="can.export" variant="secondary" size="sm" icon="download" @click="exportReport('pdf')">PDF</AppButton>
+                <PdfActions v-if="can.export" :title="`${report.title}.pdf`" :view-url="pdfViewUrl" :download-url="pdfDownloadUrl" />
             </template>
         </PageHeader>
         <p class="mb-4 text-sm text-slate-500">{{ report.description }}</p>
@@ -170,7 +179,8 @@ const selectClass = 'rounded-lg border-slate-300 py-2 text-sm shadow-sm focus:bo
             <ul class="divide-y divide-line text-sm">
                 <li v-for="file in exports" :key="file.id" class="flex flex-wrap items-center justify-between gap-2 py-2">
                     <span>{{ file.format?.toUpperCase() }} · {{ file.status }} · {{ formatDateTime(file.created_at) }}</span>
-                    <a v-if="file.download_url" :href="file.download_url" class="font-medium text-brand-700 hover:underline">Download</a>
+                    <PdfActions v-if="file.format === 'pdf' && file.view_url && file.download_url" :title="file.file_name || 'Report.pdf'" :view-url="file.view_url" :download-url="file.download_url" />
+                    <a v-else-if="file.download_url" :href="file.download_url" class="font-medium text-brand-700 hover:underline">Download</a>
                     <span v-else-if="file.error" class="text-red-700">{{ file.error }}</span>
                 </li>
             </ul>

@@ -191,7 +191,7 @@ class MaterialRequestService
             $item->setRelation('materialRequest', $mr);
             $item->fill([
                 'material_id' => (int) $row['material_id'],
-                'boq_item_id' => $row['boq_item_id'] ?? null,
+                'boq_item_id' => $id !== null ? $existing->get($id)?->boq_item_id : null,
                 'task_id' => $row['task_id'] ?? null,
                 'unit_id' => (int) $row['unit_id'],
                 'quantity' => Decimal::of((string) $row['quantity'])->toQuantity(),

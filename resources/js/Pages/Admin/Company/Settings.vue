@@ -181,7 +181,7 @@ function removeBrand(kind) {
                         :decimals="4"
                         suffix="%"
                         required
-                        help="How much more than the ordered quantity may be accepted on goods receipts. 0 = no over-receipt."
+                        help="Kept for reference. A goods receipt may exceed the purchase order when a reason is confirmed. This percent is no longer a hard limit."
                         :error="procurementForm.errors.grn_tolerance_percent"
                     />
                 </fieldset>

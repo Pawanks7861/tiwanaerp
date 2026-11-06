@@ -2,6 +2,7 @@
 
 namespace App\Services\Procurement;
 
+use App\Enums\Procurement\GrnExtraReason;
 use App\Enums\Procurement\GrnStatus;
 use App\Events\Procurement\GrnApproved;
 use App\Models\Procurement\Grn;
@@ -11,19 +12,19 @@ use App\Models\Procurement\PurchaseOrderItem;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
+use App\Services\Audit\AuditLogger;
 use App\Services\Numbering\DocumentNumberService;
+use App\Services\Weighbridge\WeighbridgeReceiptService;
 use App\Support\Math\Decimal;
-use App\Support\Procurement\ProcurementSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Goods receipts. accepted = received − rejected is computed here; accepted quantities across
- * approved and pending GRNs may not exceed the ordered quantity plus the over-receipt tolerance.
- * Approval raises GrnApproved, on which the inventory module posts the accepted quantities into
- * the GRN's warehouse, so a warehouse is required from submission on.
+ * Goods receipts. accepted = received − rejected is computed here. A delivery may exceed the
+ * open PO quantity when a reason is recorded and the receipt is confirmed; the full accepted
+ * quantity is posted to stock. Approval raises GrnApproved. A warehouse is required from submission on.
  */
 class GrnService
 {
@@ -31,7 +32,8 @@ class GrnService
         private readonly DocumentNumberService $numbers,
         private readonly ApprovalService $approvals,
         private readonly ProcurementQuantityService $quantities,
-        private readonly ProcurementSettings $settings,
+        private readonly WeighbridgeReceiptService $weighbridge,
+        private readonly AuditLogger $audit,
     ) {}
 
     /**
@@ -58,7 +60,8 @@ class GrnService
                 'status' => GrnStatus::Draft,
             ])->save();
 
-            $this->replaceLines($grn, $po, $data['items']);
+            $this->replaceLines($grn, $po, $data['items'], (bool) ($data['confirm_extra'] ?? false));
+            $this->weighbridge->sync($grn, $data['weighbridge'] ?? null);
 
             return $grn;
         });
@@ -76,7 +79,8 @@ class GrnService
             $this->assertReceivable($po);
 
             $grn->fill($this->header($data))->save();
-            $this->replaceLines($grn, $po, $data['items']);
+            $this->replaceLines($grn, $po, $data['items'], (bool) ($data['confirm_extra'] ?? false));
+            $this->weighbridge->sync($grn, $data['weighbridge'] ?? null);
 
             return $grn;
         });
@@ -101,7 +105,6 @@ class GrnService
                 throw ValidationException::withMessages(['grn' => 'Add at least one received line before submitting.']);
             }
             $this->assertHasWarehouse($locked);
-            $this->assertWithinTolerance($po, $locked, $items->all(), includePending: true);
 
             $this->approvals->submit($locked, $user);
             $grn->setRawAttributes($locked->getAttributes(), true);
@@ -124,7 +127,6 @@ class GrnService
             if (! $po->status->isApprovedOrder()) {
                 throw ValidationException::withMessages(['purchase_order' => 'The purchase order is no longer approved, so this receipt cannot be approved.']);
             }
-            $this->assertWithinTolerance($po, $grn, $grn->items()->get()->all(), includePending: false);
             $this->assertHasWarehouse($grn);
 
             $grn->forceFill(['status' => GrnStatus::Approved, 'approved_by' => $approverId, 'approved_at' => now()])->save();
@@ -141,12 +143,10 @@ class GrnService
      */
     public function receivableLines(PurchaseOrder $po, ?Grn $except = null): array
     {
-        $tolerance = $this->settings->grnTolerancePercent(Project::query()->findOrFail($po->project_id));
         $pending = $this->acceptedElsewhere($po, $except?->id, includePending: true);
 
-        return $po->items()->with(['unit:id,symbol', 'material:id,code,name'])->get()->map(function (PurchaseOrderItem $item) use ($tolerance, $pending) {
-            $max = Decimal::of($item->quantity)->plus(Decimal::of($item->quantity)->percentOf($tolerance))->round(Decimal::QTY_SCALE);
-            $open = $max->minus($pending[$item->id] ?? '0');
+        return $po->items()->with(['unit:id,symbol', 'material:id,code,name'])->get()->map(function (PurchaseOrderItem $item) use ($pending) {
+            $open = Decimal::of($item->quantity)->minus($pending[$item->id] ?? '0');
 
             return [
                 'purchase_order_item_id' => $item->id,
@@ -157,23 +157,24 @@ class GrnService
                 'ordered_qty' => $item->quantity,
                 'received_qty' => $item->received_qty,
                 'pending_qty' => Decimal::of($pending[$item->id] ?? '0')->minus($item->received_qty)->toQuantity(),
-                'remaining_qty' => Decimal::of($item->quantity)->minus($pending[$item->id] ?? '0')->toQuantity(),
-                'max_acceptable_qty' => ($open->isNegative() ? Decimal::zero() : $open)->toQuantity(),
+                'remaining_qty' => ($open->isNegative() ? Decimal::zero() : $open)->toQuantity(),
                 'rate' => $item->rate,
             ];
         })->all();
     }
 
     /**
-     * @param  list<array<string, mixed>>  $rows  purchase_order_item_id, received_qty, rejected_qty, rejection_reason
+     * @param  list<array<string, mixed>>  $rows
      */
-    private function replaceLines(Grn $grn, PurchaseOrder $po, array $rows): void
+    private function replaceLines(Grn $grn, PurchaseOrder $po, array $rows, bool $confirmed): void
     {
         $poItems = $po->items()->get()->keyBy('id');
+        $elsewhere = $this->acceptedElsewhere($po, $grn->id, includePending: true);
         GrnItem::query()->where('grn_id', $grn->id)->get()->each->delete();
 
         $lines = [];
         $seen = [];
+        $extras = [];
         foreach (array_values($rows) as $index => $row) {
             $poItem = $poItems->get((int) $row['purchase_order_item_id'])
                 ?? throw ValidationException::withMessages(["items.{$index}.purchase_order_item_id" => 'This line is not part of the purchase order.']);
@@ -194,6 +195,19 @@ class GrnService
                 throw ValidationException::withMessages(["items.{$index}.rejection_reason" => 'Give the reason for the rejected quantity.']);
             }
 
+            $open = Decimal::of($poItem->quantity)->minus($elsewhere[$poItem->id] ?? '0');
+            $remaining = $open->isNegative() ? Decimal::zero() : $open;
+            $extra = $received->minus($remaining);
+            $extra = $extra->isNegative() ? Decimal::zero() : $extra;
+            $reason = GrnExtraReason::tryFrom((string) ($row['extra_reason'] ?? ''));
+            if ($extra->isPositive() && $reason === null) {
+                throw ValidationException::withMessages(["items.{$index}.extra_reason" => 'Give the reason for the quantity above the purchase order.']);
+            }
+            if ($reason === GrnExtraReason::Other && blank($row['extra_remarks'] ?? null)) {
+                throw ValidationException::withMessages(["items.{$index}.extra_remarks" => 'Describe the other reason for the extra quantity.']);
+            }
+
+            $challan = blank($row['supplier_challan_qty'] ?? null) ? null : Decimal::of((string) $row['supplier_challan_qty'])->toQuantity();
             $line = (new GrnItem)->forceFill([
                 'grn_id' => $grn->id,
                 'purchase_order_item_id' => $poItem->id,
@@ -201,49 +215,44 @@ class GrnService
                 'unit_id' => $poItem->unit_id,
                 'ordered_qty' => $poItem->quantity,
                 'previously_received_qty' => $poItem->received_qty,
+                'po_remaining_qty' => $remaining->toQuantity(),
                 'received_qty' => $received->toQuantity(),
                 'rejected_qty' => $rejected->toQuantity(),
                 'accepted_qty' => $received->minus($rejected)->toQuantity(),
+                'extra_qty' => $extra->toQuantity(),
+                'extra_reason' => $extra->isPositive() ? $reason->value : null,
+                'extra_remarks' => $extra->isPositive() ? ($row['extra_remarks'] ?? null) : null,
+                'supplier_challan_qty' => $challan,
                 'rejection_reason' => $rejected->isPositive() ? $row['rejection_reason'] : null,
                 'rate' => $poItem->rate,
             ]);
             $line->save();
             $lines[$index] = $line;
+            if ($extra->isPositive()) {
+                $extras[] = [
+                    'description' => $poItem->description,
+                    'ordered' => $poItem->quantity,
+                    'previously_received' => $poItem->received_qty,
+                    'po_remaining' => $remaining->toQuantity(),
+                    'received' => $received->toQuantity(),
+                    'accepted' => $line->accepted_qty,
+                    'extra' => $extra->toQuantity(),
+                    'reason' => $reason->value,
+                    'remarks' => $row['extra_remarks'] ?? null,
+                ];
+            }
         }
 
         if ($lines === []) {
             throw ValidationException::withMessages(['items' => 'Enter the received quantity for at least one line.']);
         }
+        if ($extras !== [] && ! $confirmed) {
+            throw ValidationException::withMessages(['confirm_extra' => 'Confirm that the extra quantity should be received into stock.']);
+        }
 
-        $this->assertWithinTolerance($po, $grn, $lines, includePending: true);
-    }
-
-    /**
-     * @param  array<int, GrnItem>  $lines  keyed by form row index
-     */
-    private function assertWithinTolerance(PurchaseOrder $po, Grn $grn, array $lines, bool $includePending): void
-    {
-        $tolerance = $this->settings->grnTolerancePercent(Project::query()->findOrFail($po->project_id));
-        $elsewhere = $this->acceptedElsewhere($po, $grn->id, $includePending);
-        $poItems = $po->items()->get()->keyBy('id');
-
-        foreach ($lines as $index => $line) {
-            $poItem = $poItems->get($line->purchase_order_item_id);
-            $max = Decimal::of($poItem->quantity)->plus(Decimal::of($poItem->quantity)->percentOf($tolerance));
-            $total = Decimal::of($elsewhere[$poItem->id] ?? '0')->plus($line->accepted_qty);
-
-            if ($total->greaterThan($max)) {
-                $allowed = $max->minus($elsewhere[$poItem->id] ?? '0');
-                throw ValidationException::withMessages([
-                    "items.{$index}.received_qty" => sprintf(
-                        '%s: over-receipt. At most %s more can be accepted (ordered %s, tolerance %s%%).',
-                        $poItem->description,
-                        ($allowed->isNegative() ? Decimal::zero() : $allowed)->toQuantity(),
-                        $poItem->quantity,
-                        rtrim(rtrim($tolerance, '0'), '.'),
-                    ),
-                ]);
-            }
+        $grn->forceFill(['extra_confirmed' => $extras !== []])->save();
+        if ($extras !== []) {
+            $this->audit->record($grn, 'over_receipt', null, ['lines' => $extras, 'user_id' => auth()->id(), 'at' => now()->toIso8601String()]);
         }
     }
 

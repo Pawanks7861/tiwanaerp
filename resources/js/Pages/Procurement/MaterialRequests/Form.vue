@@ -17,7 +17,6 @@ const props = defineProps({
     materials: { type: Array, required: true },
     units: { type: Array, required: true },
     sites: { type: Array, required: true },
-    boqItems: { type: Array, required: true },
     tasks: { type: Array, required: true },
     priorities: { type: Array, required: true },
     today: { type: String, required: true },
@@ -25,7 +24,7 @@ const props = defineProps({
 
 const editing = computed(() => !!props.materialRequest);
 let tempId = 0;
-const blankLine = () => ({ _key: `n${++tempId}`, id: null, material_id: null, unit_id: null, quantity: null, boq_item_id: null, task_id: null, remarks: '' });
+const blankLine = () => ({ _key: `n${++tempId}`, id: null, material_id: null, unit_id: null, quantity: null, task_id: null, remarks: '' });
 
 const form = useForm({
     site_id: props.materialRequest?.site_id ?? null,
@@ -43,13 +42,6 @@ function pickMaterial(line, id) {
     const material = props.materials.find((m) => m.value === id);
     if (material?.unit_id) {
         line.unit_id = material.unit_id;
-    }
-}
-function pickBoqItem(line, id) {
-    line.boq_item_id = id;
-    const item = props.boqItems.find((b) => b.value === id);
-    if (item?.unit_id && !line.unit_id) {
-        line.unit_id = item.unit_id;
     }
 }
 const removeLine = (index) => form.items.splice(index, 1);
@@ -91,9 +83,6 @@ function submit() {
                 <div v-if="generalErrors.length" class="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
                     <p v-for="(e, i) in generalErrors" :key="i">{{ e }}</p>
                 </div>
-                <div v-if="!boqItems.length" class="border-b border-line bg-slate-50 px-4 py-2 text-xs text-slate-600">
-                    <Icon name="info" :size="14" class="mr-1 inline align-text-bottom" />This project has no approved BOQ yet, so lines cannot be linked to BOQ items.
-                </div>
                 <ol class="divide-y divide-line">
                     <li v-for="(line, index) in form.items" :key="line._key" class="p-4">
                         <div class="mb-2 flex items-center justify-between">
@@ -114,17 +103,8 @@ function submit() {
                             />
                             <DecimalInput v-model="line.quantity" label="Quantity" required :decimals="4" class="sm:col-span-3 lg:col-span-2" :error="lineError(index, 'quantity')" />
                             <FormSelect v-model="line.unit_id" label="Unit" required :options="units" class="sm:col-span-3 lg:col-span-2" :error="lineError(index, 'unit_id')" />
-                            <SearchSelect
-                                :model-value="line.boq_item_id"
-                                label="BOQ item"
-                                :options="boqItems"
-                                :disabled="!boqItems.length"
-                                class="sm:col-span-6 lg:col-span-4"
-                                :error="lineError(index, 'boq_item_id')"
-                                @update:model-value="(id) => pickBoqItem(line, id)"
-                            />
-                            <SearchSelect v-model="line.task_id" label="Task" :options="tasks" class="sm:col-span-3 lg:col-span-4" :error="lineError(index, 'task_id')" />
-                            <FormInput v-model="line.remarks" label="Remarks / specification" maxlength="500" class="sm:col-span-3 lg:col-span-8" :error="lineError(index, 'remarks')" />
+                            <SearchSelect v-model="line.task_id" label="Task" :options="tasks" class="sm:col-span-6 lg:col-span-4" :error="lineError(index, 'task_id')" />
+                            <FormInput v-model="line.remarks" label="Description / remarks" maxlength="500" class="sm:col-span-6 lg:col-span-8" :error="lineError(index, 'remarks')" />
                         </div>
                     </li>
                 </ol>

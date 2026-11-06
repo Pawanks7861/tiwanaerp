@@ -85,13 +85,12 @@ class MaterialRequestController extends Controller
                 'site_id' => null,
                 'priority' => null,
                 'required_date' => null,
-                'remarks' => 'Prefill from BOQ Material Requirement (planning). Adjust quantities before submit.',
+                'remarks' => 'Prefill from the material requirement. Adjust quantities before submit.',
                 'items' => collect($prefill)->values()->map(fn ($line, $i) => [
                     'id' => null,
                     'material_id' => $line['material_id'] ?? null,
                     'unit_id' => $line['unit_id'] ?? null,
                     'quantity' => $line['quantity'] ?? null,
-                    'boq_item_id' => $line['boq_item_id'] ?? null,
                     'task_id' => null,
                     'remarks' => $line['remarks'] ?? null,
                     'sort_order' => $i,
@@ -136,7 +135,6 @@ class MaterialRequestController extends Controller
                 'id' => $i->id,
                 'material' => $i->material?->only(['id', 'code', 'name']),
                 'unit' => $i->unit?->symbol,
-                'boq_item' => $i->boqItem ? trim($i->boqItem->item_code.' '.$i->boqItem->name) : null,
                 'task' => $i->task ? trim($i->task->wbs_code.' '.$i->task->name) : null,
                 'quantity' => $i->quantity,
                 'ordered_qty' => $i->ordered_qty,
@@ -169,9 +167,9 @@ class MaterialRequestController extends Controller
                 ...$this->header($materialRequest),
                 'site_id' => $materialRequest->site_id,
                 'remarks' => $materialRequest->remarks,
-                'items' => $items->map(fn (MaterialRequestItem $i) => $i->only(['id', 'material_id', 'boq_item_id', 'task_id', 'unit_id', 'quantity', 'remarks']))->all(),
+                'items' => $items->map(fn (MaterialRequestItem $i) => $i->only(['id', 'material_id', 'task_id', 'unit_id', 'quantity', 'remarks']))->all(),
             ],
-            ...$this->formOptions($project, $items->pluck('boq_item_id')->filter()->all()),
+            ...$this->formOptions($project),
         ]);
     }
 
@@ -293,21 +291,12 @@ class MaterialRequestController extends Controller
      * @param  list<int>  $keepBoqItemIds  BOQ lines already linked (may belong to an older revision)
      * @return array<string, mixed>
      */
-    private function formOptions(Project $project, array $keepBoqItemIds = []): array
+    private function formOptions(Project $project): array
     {
-        $boqItems = ProcurementPresenter::boqItemOptions($project);
-        $missing = array_diff($keepBoqItemIds, array_column($boqItems, 'value'));
-        if ($missing !== []) {
-            foreach (BoqItem::query()->whereKey($missing)->get(['id', 'item_code', 'name', 'unit_id']) as $old) {
-                $boqItems[] = ['value' => $old->id, 'label' => trim($old->item_code.' '.$old->name), 'description' => 'Earlier BOQ revision', 'unit_id' => $old->unit_id];
-            }
-        }
-
         return [
             'materials' => ProcurementPresenter::materialOptions(),
             'units' => ProcurementPresenter::unitOptions(),
             'sites' => ProcurementPresenter::siteOptions($project),
-            'boqItems' => $boqItems,
             'tasks' => ProcurementPresenter::taskOptions($project),
             'priorities' => RequestPriority::options(),
             'today' => now()->toDateString(),

@@ -15,11 +15,13 @@ use App\Models\Masters\Vendor;
 use App\Models\Masters\Warehouse;
 use App\Models\Projects\Project;
 use App\Models\User;
+use App\Models\Weighbridge\WeighbridgeReceipt;
 use App\Services\Procurement\GrnService;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -48,6 +50,7 @@ class Grn extends Model implements Approvable
             'receipt_date' => 'date',
             'vendor_invoice_date' => 'date',
             'approved_at' => 'datetime',
+            'extra_confirmed' => 'boolean',
         ];
     }
 
@@ -99,6 +102,14 @@ class Grn extends Model implements Approvable
     public function items(): HasMany
     {
         return $this->hasMany(GrnItem::class)->orderBy('id');
+    }
+
+    /**
+     * @return MorphOne<WeighbridgeReceipt, $this>
+     */
+    public function weighbridgeReceipt(): MorphOne
+    {
+        return $this->morphOne(WeighbridgeReceipt::class, 'weighable');
     }
 
     /**

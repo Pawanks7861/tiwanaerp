@@ -112,7 +112,7 @@ class ReportController extends Controller
         $request->validate(['format' => ['required', 'in:pdf,xlsx']]);
         $format = (string) $request->query('format');
         $company = $this->company->require();
-        $ctx = $this->runner->context($report, $request->user(), $company, $project, Arr::except($request->query(), ['format', 'page']));
+        $ctx = $this->runner->context($report, $request->user(), $company, $project, Arr::except($request->query(), ['format', 'page', 'disposition']));
 
         if ($report->estimateRows($ctx) > (int) config('reports.sync_export_max_rows')) {
             $export = new ReportExport;
@@ -122,7 +122,7 @@ class ReportController extends Controller
                 'project_id' => $project?->id,
                 'report_key' => $report->key(),
                 'format' => $format,
-                'filters' => ['input' => Arr::except($request->query(), ['format', 'page'])],
+                'filters' => ['input' => Arr::except($request->query(), ['format', 'page', 'disposition'])],
                 'status' => ReportExport::QUEUED,
             ])->save();
             GenerateReportExport::dispatch($export->id);
@@ -132,10 +132,14 @@ class ReportController extends Controller
 
         $file = $this->exporter->render($report, $ctx, $format);
 
+        $inline = $format === 'pdf' && $request->query('disposition') === 'inline';
+        $disposition = ($inline ? 'inline' : 'attachment').'; filename="'.str_replace(['"', "\r", "\n"], '', $file['name']).'"';
+
         return response($file['content'], 200, [
             'Content-Type' => $file['mime'],
-            'Content-Disposition' => 'attachment; filename="'.$file['name'].'"',
+            'Content-Disposition' => $disposition,
             'Cache-Control' => 'no-store, private',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 
@@ -196,6 +200,9 @@ class ReportController extends Controller
                 'error' => $e->error,
                 'created_at' => $e->created_at?->toIso8601String(),
                 'download_url' => $e->status === ReportExport::READY ? route('reports.exports.download', $e->id) : null,
+                'view_url' => $e->status === ReportExport::READY && $e->format === 'pdf'
+                    ? route('reports.exports.download', ['reportExport' => $e->id, 'disposition' => 'inline'])
+                    : null,
             ])->all();
     }
 }

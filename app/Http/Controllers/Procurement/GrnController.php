@@ -2,19 +2,21 @@
 
 namespace App\Http\Controllers\Procurement;
 
+use App\Enums\Procurement\GrnExtraReason;
 use App\Enums\Procurement\GrnStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Masters\Warehouse;
 use App\Models\Procurement\Grn;
+use App\Models\Weighbridge\WeighbridgeReceipt;
 use App\Models\Procurement\GrnItem;
 use App\Models\Procurement\PurchaseOrder;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Rules\ExistsInCompany;
 use App\Services\Procurement\GrnService;
-use App\Support\Procurement\ProcurementSettings;
+use App\Services\Weighbridge\WeighbridgeReceiptService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -25,10 +27,7 @@ use Inertia\Response;
 
 class GrnController extends Controller
 {
-    public function __construct(
-        private readonly GrnService $grns,
-        private readonly ProcurementSettings $settings,
-    ) {}
+    public function __construct(private readonly GrnService $grns) {}
 
     public function index(Request $request, Project $project): Response
     {
@@ -120,11 +119,12 @@ class GrnController extends Controller
                 'item_code' => $i->purchaseOrderItem?->item_code,
                 'description' => $i->purchaseOrderItem?->description,
                 'unit' => $i->unit?->symbol,
-                ...$i->only(['ordered_qty', 'previously_received_qty', 'received_qty', 'rejected_qty', 'accepted_qty', 'rejection_reason']),
+                ...$i->only(['ordered_qty', 'previously_received_qty', 'po_remaining_qty', 'received_qty', 'rejected_qty', 'accepted_qty', 'extra_qty', 'extra_reason', 'extra_remarks', 'supplier_challan_qty', 'rejection_reason']),
                 'rate' => $seeRates ? $i->rate : null,
             ])->all(),
             'approval' => ProcurementPresenter::approval($grn, $user),
             'attachments' => ProcurementPresenter::attachments($grn),
+            'weighbridge' => $this->weighbridgePayload($grn->weighbridgeReceipt),
             'audit' => AuditPresenter::trail([$grn]),
             'can' => [...$this->abilities($user, $grn), 'attach' => $user->can('update', $grn), 'view_rates' => $seeRates],
         ]);
@@ -185,6 +185,11 @@ class GrnController extends Controller
             'items.*.received_qty' => ['nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999'],
             'items.*.rejected_qty' => ['nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999'],
             'items.*.rejection_reason' => ['nullable', 'string', 'max:500'],
+            'items.*.extra_reason' => ['nullable', Rule::enum(GrnExtraReason::class)],
+            'items.*.extra_remarks' => ['nullable', 'string', 'max:500'],
+            'items.*.supplier_challan_qty' => ['nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999'],
+            'confirm_extra' => ['sometimes', 'boolean'],
+            ...WeighbridgeReceiptService::rules(),
         ], [], [
             'warehouse_id' => 'warehouse',
             'items.*.received_qty' => 'received quantity',
@@ -218,9 +223,14 @@ class GrnController extends Controller
                 'received_qty_input' => $lines->get($line['purchase_order_item_id'])?->received_qty,
                 'rejected_qty_input' => $lines->get($line['purchase_order_item_id'])?->rejected_qty,
                 'rejection_reason' => $lines->get($line['purchase_order_item_id'])?->rejection_reason,
+                'extra_reason' => $lines->get($line['purchase_order_item_id'])?->extra_reason,
+                'extra_remarks' => $lines->get($line['purchase_order_item_id'])?->extra_remarks,
+                'supplier_challan_qty' => $lines->get($line['purchase_order_item_id'])?->supplier_challan_qty,
             ], $this->grns->receivableLines($po, $grn)),
             'warehouses' => ProcurementPresenter::warehouseOptions($project),
-            'tolerance' => $this->settings->grnTolerancePercent($project),
+            'extraReasons' => GrnExtraReason::options(),
+            'weighbridge' => $grn ? $this->weighbridgePayload($grn->weighbridgeReceipt) : null,
+            'confirmExtra' => (bool) $grn?->extra_confirmed,
             'today' => now()->toDateString(),
         ]);
     }
@@ -261,6 +271,24 @@ class GrnController extends Controller
             'update' => $editable && $user->can('update', $grn),
             'delete' => $editable && $user->can('delete', $grn),
             'submit' => $editable && $user->can('submit', $grn),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function weighbridgePayload(?WeighbridgeReceipt $receipt): ?array
+    {
+        if ($receipt === null) {
+            return null;
+        }
+
+        return [
+            'id' => $receipt->id,
+            ...$receipt->only(['name', 'slip_no', 'vehicle_no', 'gross_weight', 'tare_weight', 'net_weight', 'weight_unit', 'manual_reason', 'operator_name', 'remarks']),
+            'source' => $receipt->source->value,
+            'weighed_at' => $receipt->weighed_at?->format('Y-m-d\TH:i'),
+            'attachments' => ProcurementPresenter::attachments($receipt),
         ];
     }
 }

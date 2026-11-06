@@ -32,6 +32,9 @@ class GrnItem extends Model
             'received_qty' => 'decimal:4',
             'rejected_qty' => 'decimal:4',
             'accepted_qty' => 'decimal:4',
+            'po_remaining_qty' => 'decimal:4',
+            'extra_qty' => 'decimal:4',
+            'supplier_challan_qty' => 'decimal:4',
             'rate' => 'decimal:4',
         ];
     }

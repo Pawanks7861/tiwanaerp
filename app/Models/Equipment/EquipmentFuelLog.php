@@ -5,6 +5,10 @@ namespace App\Models\Equipment;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
+use App\Models\Inventory\MaterialIssue;
+use App\Models\Masters\Material;
+use App\Models\Masters\Unit;
+use App\Models\Masters\Warehouse;
 use App\Models\Projects\Project;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -31,6 +35,7 @@ class EquipmentFuelLog extends Model
             'closing_fuel' => 'decimal:2',
             'fuel_rate' => 'decimal:4',
             'cost' => 'decimal:2',
+            'meter_reading' => 'decimal:2',
         ];
     }
 
@@ -48,5 +53,37 @@ class EquipmentFuelLog extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class);
+    }
+
+    /**
+     * @return BelongsTo<Material, $this>
+     */
+    public function material(): BelongsTo
+    {
+        return $this->belongsTo(Material::class);
+    }
+
+    /**
+     * @return BelongsTo<Unit, $this>
+     */
+    public function unit(): BelongsTo
+    {
+        return $this->belongsTo(Unit::class);
+    }
+
+    /**
+     * @return BelongsTo<Warehouse, $this>
+     */
+    public function warehouse(): BelongsTo
+    {
+        return $this->belongsTo(Warehouse::class);
+    }
+
+    /**
+     * @return BelongsTo<MaterialIssue, $this>
+     */
+    public function materialIssue(): BelongsTo
+    {
+        return $this->belongsTo(MaterialIssue::class);
     }
 }

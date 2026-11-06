@@ -28,6 +28,7 @@ class MasterService
             /** @var MasterModel $record */
             $record = new $modelClass;
             $record->fill($data)->save();
+            $definition->afterSave($record, []);
 
             return $record;
         });
@@ -39,7 +40,9 @@ class MasterService
     public function update(MasterDefinition $definition, MasterModel $record, array $data): MasterModel
     {
         return DB::transaction(function () use ($definition, $record, $data) {
+            $before = $record->getOriginal();
             $record->fill($definition->prepare($data, $record))->save();
+            $definition->afterSave($record, $before);
 
             return $record;
         });

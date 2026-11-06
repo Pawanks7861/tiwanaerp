@@ -58,22 +58,6 @@ class MaterialRequestImportService
             $unitId = (int) $unit->id;
         }
 
-        $boqItemId = null;
-        $boqCode = $this->str($mapped['boq_item_code'] ?? null);
-        if ($boqCode !== null) {
-            $boqId = Boq::query()->where('project_id', $project->id)->where('is_current', true)->where('status', BoqStatus::Approved)->value('id');
-            $boqItem = $boqId !== null
-                ? BoqItem::query()->where('boq_id', $boqId)->whereRaw('LOWER(item_code) = ?', [strtolower($boqCode)])->first()
-                : null;
-            if (! $boqItem) {
-                $this->fail(['boq_item_code' => ["BOQ line \"{$boqCode}\" was not found on the current approved BOQ."]]);
-            }
-            $boqItemId = (int) $boqItem->id;
-            if ($boqItem->unit_id) {
-                $unitId = (int) $boqItem->unit_id;
-            }
-        }
-
         $taskId = null;
         $wbs = $this->str($mapped['task_wbs'] ?? null);
         if ($wbs !== null) {
@@ -88,7 +72,7 @@ class MaterialRequestImportService
             'material_id' => (int) $material->id,
             'unit_id' => $unitId,
             'quantity' => Decimal::of($qtyText)->toQuantity(),
-            'boq_item_id' => $boqItemId,
+            'boq_item_id' => null,
             'task_id' => $taskId,
             'remarks' => $this->str($mapped['remarks'] ?? null),
         ];

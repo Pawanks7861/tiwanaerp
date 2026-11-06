@@ -52,32 +52,9 @@ class MaterialRequestRequest extends FormRequest
         ];
     }
 
-    /**
-     * BOQ links must point at the project's current approved BOQ (or keep the link a line already had).
-     */
     public function after(): array
     {
-        return [function (Validator $validator) {
-            $ids = collect($this->input('items', []))->pluck('boq_item_id')->filter()->map(fn ($id) => (int) $id)->unique();
-            if ($ids->isEmpty()) {
-                return;
-            }
-
-            $allowed = BoqItem::query()->whereKey($ids)
-                ->whereHas('boq', fn (Builder $q) => $q->where('project_id', $this->project()->id)->where('is_current', true)->where('status', 'approved'))
-                ->pluck('id');
-
-            $mr = $this->route('materialRequest');
-            if ($mr instanceof MaterialRequest) {
-                $allowed = $allowed->merge($mr->items()->whereNotNull('boq_item_id')->pluck('boq_item_id'));
-            }
-
-            foreach ($this->input('items', []) as $index => $row) {
-                if (! empty($row['boq_item_id']) && ! $allowed->contains((int) $row['boq_item_id'])) {
-                    $validator->errors()->add("items.{$index}.boq_item_id", 'Select a line of the current approved BOQ of this project.');
-                }
-            }
-        }];
+        return [];
     }
 
     public function attributes(): array

@@ -2,6 +2,7 @@
 
 namespace App\Models\Equipment;
 
+use App\Enums\Equipment\EquipmentLocationType;
 use App\Enums\Equipment\EquipmentOwnership;
 use App\Enums\Equipment\EquipmentStatus;
 use App\Models\Concerns\HasAttachments;
@@ -17,8 +18,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * register itself only toggles available ↔ disposed.
  */
 #[Fillable([
-    'code', 'name', 'equipment_type_id', 'ownership', 'owner_vendor_id', 'registration_no', 'purchase_date',
-    'purchase_value', 'hourly_rate', 'daily_rate', 'status', 'is_active', 'remarks',
+    'code', 'name', 'equipment_type_id', 'ownership', 'owner_vendor_id', 'registration_no', 'serial_no',
+    'make', 'model', 'manufacture_year', 'purchase_date', 'purchase_value', 'hourly_rate', 'daily_rate',
+    'status', 'location_type', 'location_project_id', 'location_name', 'location_notes', 'is_active', 'remarks',
 ])]
 class Equipment extends MasterModel
 {
@@ -26,13 +28,16 @@ class Equipment extends MasterModel
 
     protected $table = 'equipment';
 
-    protected array $searchable = ['name', 'code', 'registration_no'];
+    protected array $searchable = ['name', 'code', 'registration_no', 'serial_no'];
 
     protected function casts(): array
     {
         return [
             'ownership' => EquipmentOwnership::class,
             'status' => EquipmentStatus::class,
+            'location_type' => EquipmentLocationType::class,
+            'location_updated_at' => 'datetime',
+            'manufacture_year' => 'integer',
             'purchase_date' => 'date',
             'purchase_value' => 'decimal:2',
             'hourly_rate' => 'decimal:4',
@@ -71,6 +76,14 @@ class Equipment extends MasterModel
     public function repairs(): HasMany
     {
         return $this->hasMany(EquipmentRepair::class);
+    }
+
+    /**
+     * @return HasMany<EquipmentLocationHistory, $this>
+     */
+    public function locationHistory(): HasMany
+    {
+        return $this->hasMany(EquipmentLocationHistory::class)->orderByDesc('changed_at')->orderByDesc('id');
     }
 
     public function isInUse(): bool

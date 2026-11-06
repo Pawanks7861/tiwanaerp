@@ -115,7 +115,7 @@ const lockedReason = computed(() => {
                             <tr>
                                 <th class="px-4 py-2.5 text-left">#</th>
                                 <th class="px-4 py-2.5 text-left">Material</th>
-                                <th class="px-4 py-2.5 text-left">BOQ item / task</th>
+                                <th class="px-4 py-2.5 text-left">Task</th>
                                 <th class="px-4 py-2.5 text-right">Requested</th>
                                 <th class="px-4 py-2.5 text-right">Ordered</th>
                                 <th class="px-4 py-2.5 text-right">Received</th>
@@ -129,10 +129,7 @@ const lockedReason = computed(() => {
                                     <div class="font-medium text-slate-900">{{ item.material?.name }}</div>
                                     <div class="text-xs text-slate-500"><span class="font-mono">{{ item.material?.code }}</span><template v-if="item.remarks"> · {{ item.remarks }}</template></div>
                                 </td>
-                                <td class="px-4 py-3 text-xs text-slate-600">
-                                    <div>{{ item.boq_item ?? '—' }}</div>
-                                    <div v-if="item.task" class="text-slate-400">{{ item.task }}</div>
-                                </td>
+                                <td class="px-4 py-3 text-xs text-slate-600">{{ item.task ?? '—' }}</td>
                                 <td class="px-4 py-3 text-right tabular">{{ formatQty(item.quantity) }} {{ item.unit }}</td>
                                 <td class="px-4 py-3 text-right tabular">{{ formatQty(item.ordered_qty) }}</td>
                                 <td class="px-4 py-3 text-right tabular">{{ formatQty(item.received_qty) }}</td>
@@ -144,7 +141,7 @@ const lockedReason = computed(() => {
                 <ul class="divide-y divide-line md:hidden">
                     <li v-for="item in items" :key="item.id" class="px-4 py-3">
                         <p class="font-medium text-slate-900">{{ item.material?.name }}</p>
-                        <p class="text-xs text-slate-500">{{ item.boq_item ?? 'No BOQ link' }}<template v-if="item.task"> · {{ item.task }}</template></p>
+                        <p v-if="item.task" class="text-xs text-slate-500">{{ item.task }}</p>
                         <dl class="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
                             <dt class="text-slate-500">Requested</dt><dd class="text-right tabular">{{ formatQty(item.quantity) }} {{ item.unit }}</dd>
                             <dt class="text-slate-500">Ordered</dt><dd class="text-right tabular">{{ formatQty(item.ordered_qty) }}</dd>

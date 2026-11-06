@@ -53,6 +53,7 @@ export function buildProjectTabs({ projectId, can, procurementHome = null, finan
         can('labour.view') && { key: 'labour', label: 'Labour', icon: 'users', href: route('projects.attendance.index', projectId) },
         can('subcontract.view') && { key: 'subcontract', label: 'Subcontract', icon: 'briefcase', href: route('projects.work-orders.index', projectId) },
         can('equipment.view') && { key: 'equipment', label: 'Equipment', icon: 'wrench', href: route('projects.equipment-assignments.index', projectId) },
+        can('gate_pass.view') && { key: 'gate', label: 'Gate Pass', icon: 'truck', href: route('projects.gate-passes.index', projectId) },
         financeHome && { key: 'finance', label: 'Finance', icon: 'banknotes', href: financeHome },
         can('quality.view') && { key: 'quality', label: 'Quality', icon: 'check-circle', href: route('projects.inspections.index', projectId) },
         can('documents.view') && { key: 'documents', label: 'Documents', icon: 'folder', href: route('projects.documents.index', projectId) },

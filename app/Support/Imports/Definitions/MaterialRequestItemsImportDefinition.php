@@ -77,7 +77,6 @@ class MaterialRequestItemsImportDefinition extends ImportDefinition
             new ImportField('material_code', 'Material code', true, ['item_code', 'code', 'material']),
             new ImportField('quantity', 'Quantity', true, ['qty'], 'number'),
             new ImportField('unit', 'Unit', false, ['uom'], help: 'Optional; defaults to the material unit.'),
-            new ImportField('boq_item_code', 'BOQ item code', false, ['boq_code', 'boq_line']),
             new ImportField('task_wbs', 'Task WBS', false, ['wbs', 'wbs_code']),
             new ImportField('remarks', 'Remarks', false),
         ];
@@ -89,7 +88,6 @@ class MaterialRequestItemsImportDefinition extends ImportDefinition
             'material_code' => 'EXAMPLE-CEMENT',
             'quantity' => '10',
             'unit' => '',
-            'boq_item_code' => '',
             'task_wbs' => '',
             'remarks' => 'EXAMPLE ROW — ignored',
         ]];
