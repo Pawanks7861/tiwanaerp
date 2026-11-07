@@ -4,8 +4,10 @@ import tailwindcss from '@tailwindcss/vite';
 import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
+    
     build: {
         sourcemap: false,
+        chunkSizeWarningLimit: 700,
     },
     plugins: [
         laravel({
