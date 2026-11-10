@@ -11,6 +11,7 @@ use App\Models\Projects\Project;
 use App\Services\Core\CompanyDirectory;
 use App\Services\Projects\ProjectService;
 use App\Services\Reports\DashboardService;
+use App\Support\Crm\DefaultClientResolver;
 use App\Support\Reports\ReportPeriod;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\RedirectResponse;
@@ -136,9 +137,12 @@ class ProjectController extends Controller
      */
     private function formOptions(): array
     {
+        $defaultClient = app(DefaultClientResolver::class)->payload();
+
         return [
             'clients' => Client::query()->active()->orderBy('company_name')->get(['id', 'code', 'company_name'])
                 ->map(fn ($c) => ['value' => $c->id, 'label' => "{$c->company_name} ({$c->code})"])->all(),
+            'defaultClient' => $defaultClient,
             'managers' => $this->directory->memberOptions(),
             'states' => IndianState::options(),
             'projectTypes' => [

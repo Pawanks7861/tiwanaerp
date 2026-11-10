@@ -24,6 +24,7 @@ use App\Services\Boq\EffectiveBoqQuantityService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Services\Resources\Concerns\ResolvesProjectRefs;
 use App\Services\Tax\GstCalculator;
+use App\Support\Crm\DefaultClientResolver;
 use App\Support\Math\Decimal;
 use App\Support\Permissions\CompanyPermission;
 use Illuminate\Support\Collection;
@@ -66,7 +67,8 @@ class ClientInvoiceService
         return DB::transaction(function () use ($project, $data, $user) {
             $lockedProject = Project::query()->whereKey($project->id)->lockForUpdate()->firstOrFail();
             if ($lockedProject->client_id === null) {
-                throw ValidationException::withMessages(['project' => 'Link a client to the project before raising RA bills.']);
+                $defaultClient = app(DefaultClientResolver::class)->ensure($lockedProject->company);
+                $lockedProject->forceFill(['client_id' => $defaultClient->id])->save();
             }
             $open = ClientInvoice::query()->where('project_id', $project->id)->whereIn('status', ClientInvoiceStatus::openStates())->first();
             if ($open !== null) {

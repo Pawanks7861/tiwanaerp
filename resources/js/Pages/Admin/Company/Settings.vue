@@ -15,6 +15,7 @@ const props = defineProps({
     states: { type: Array, required: true },
     procurement: { type: Object, default: null },
     boq: { type: Object, default: null },
+    crm: { type: Object, default: null },
     can: { type: Object, required: true },
     branding: { type: Object, default: () => ({ logo_url: null, favicon_url: null, max_kb: 2048 }) },
     cadPreview: { type: Object, default: () => ({ available: false, driver: 'none', configured: 'auto', version: null, last_success_at: null, error: null }) },
@@ -48,6 +49,15 @@ function saveProcurement() {
 const boqForm = useForm({ advanced_calculations_enabled: props.boq?.advanced_calculations_enabled === true });
 function saveBoq() {
     boqForm.post(route('admin.company.boq'), { preserveScroll: true });
+}
+
+const ensuringClient = ref(false);
+function ensureDefaultClient() {
+    ensuringClient.value = true;
+    router.post(route('admin.company.default-client'), {}, {
+        preserveScroll: true,
+        onFinish: () => (ensuringClient.value = false),
+    });
 }
 
 const logoInput = ref(null);
@@ -152,6 +162,29 @@ function removeBrand(kind) {
                     </div>
                 </div>
             </div>
+        </AppCard>
+
+        <AppCard class="mt-4" title="Default Client" subtitle="Used automatically for projects and billing when a client is required.">
+            <dl class="grid gap-2 text-sm sm:grid-cols-2">
+                <div>
+                    <dt class="text-xs text-slate-500">Client</dt>
+                    <dd class="font-medium text-slate-900">{{ crm?.default_client?.company_name || 'Not configured' }}</dd>
+                </div>
+                <div>
+                    <dt class="text-xs text-slate-500">Code</dt>
+                    <dd>{{ crm?.default_client?.code || '—' }}</dd>
+                </div>
+            </dl>
+            <p class="mt-3 text-xs text-slate-500">
+                Current Tiwana mode uses one client: Tiwana Nutrition Global Private Limited. Client relationships remain for future multi-client use.
+            </p>
+            <template v-if="can.update" #footer>
+                <div class="flex justify-end">
+                    <AppButton type="button" size="sm" :loading="ensuringClient" @click="ensureDefaultClient">
+                        {{ crm?.default_client ? 'Refresh default client' : 'Set default client' }}
+                    </AppButton>
+                </div>
+            </template>
         </AppCard>
 
         <form class="mt-4" @submit.prevent="saveBoq">

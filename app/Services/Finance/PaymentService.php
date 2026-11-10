@@ -17,6 +17,7 @@ use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Numbering\DocumentNumberService;
 use App\Services\Resources\Concerns\ResolvesProjectRefs;
+use App\Support\Crm\DefaultClientResolver;
 use App\Support\Math\Decimal;
 use App\Support\Permissions\CompanyPermission;
 use Illuminate\Database\Eloquent\Model;
@@ -220,17 +221,34 @@ class PaymentService
     private function party(Project $project, PaymentPartyType $party, mixed $id): int
     {
         $id = is_numeric($id) ? (int) $id : 0;
+
+        if ($party === PaymentPartyType::Client) {
+            if ($project->client_id === null) {
+                $defaultClient = app(DefaultClientResolver::class)->ensure($project->company);
+                $project->forceFill(['client_id' => $defaultClient->id])->save();
+            }
+
+            if ($id === 0) {
+                $id = (int) $project->client_id;
+            }
+
+            if ((int) $project->client_id !== $id || ! Client::query()->whereKey($id)->exists()) {
+                throw ValidationException::withMessages([
+                    'party_id' => 'Receipts are taken from the client linked to this project.',
+                ]);
+            }
+
+            return $id;
+        }
+
         $found = match ($party) {
-            PaymentPartyType::Client => $project->client_id !== null && (int) $project->client_id === $id
-                && Client::query()->whereKey($id)->exists(),
             PaymentPartyType::Vendor => Vendor::query()->whereKey($id)->exists(),
             PaymentPartyType::Subcontractor => Subcontractor::query()->whereKey($id)->exists(),
             PaymentPartyType::LabourPayment => LabourPayment::query()->where('project_id', $project->id)->whereKey($id)->exists(),
+            default => false,
         };
         if (! $found) {
-            throw ValidationException::withMessages(['party_id' => $party === PaymentPartyType::Client
-                ? 'Receipts are taken from the client linked to this project.'
-                : 'Choose a valid party.']);
+            throw ValidationException::withMessages(['party_id' => 'Choose a valid party.']);
         }
 
         return $id;

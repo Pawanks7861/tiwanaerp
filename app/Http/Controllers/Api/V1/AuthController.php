@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\Auth\TwoFactorService;
 use App\Support\Boq\BoqCompanySettings;
+use App\Support\Crm\DefaultClientResolver;
 use App\Support\Permissions\PermissionCatalog;
 use App\Support\Procurement\ProcurementSettings;
 use App\Support\Tenancy\CurrentCompany;
@@ -77,6 +78,7 @@ class AuthController extends Controller
                 'advanced_boq_calculations' => BoqCompanySettings::enabled(),
                 'procurement_rfq' => ProcurementSettings::rfqEnabled(),
             ],
+            'default_client' => app(DefaultClientResolver::class)->payload($tenancy->require()),
         ]);
     }
 }

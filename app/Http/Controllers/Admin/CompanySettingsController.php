@@ -8,6 +8,7 @@ use App\Http\Requests\Admin\CompanyRequest;
 use App\Services\Files\Cad\CadPreviewManager;
 use App\Support\Math\Decimal;
 use App\Support\Boq\BoqCompanySettings;
+use App\Support\Crm\DefaultClientResolver;
 use App\Support\Procurement\ProcurementSettings;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\RedirectResponse;
@@ -42,6 +43,9 @@ class CompanySettingsController extends Controller
             ],
             'boq' => [
                 'advanced_calculations_enabled' => BoqCompanySettings::enabled($company),
+            ],
+            'crm' => [
+                'default_client' => app(DefaultClientResolver::class)->payload($company),
             ],
             'can' => ['update' => $request->user()->can('manageSettings', $company)],
             'cadPreview' => $this->cad->health(),
@@ -84,6 +88,16 @@ class CompanySettingsController extends Controller
         BoqCompanySettings::set($company, (bool) $data['advanced_calculations_enabled']);
 
         return back()->with('success', 'BOQ settings updated.');
+    }
+
+    public function ensureDefaultClient(): RedirectResponse
+    {
+        $company = $this->tenancy->require();
+        Gate::authorize('manageSettings', $company);
+
+        $client = app(DefaultClientResolver::class)->ensure($company);
+
+        return back()->with('success', "Default client set to {$client->company_name}.");
     }
 
     public function update(CompanyRequest $request): RedirectResponse

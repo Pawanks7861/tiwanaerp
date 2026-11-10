@@ -8,6 +8,7 @@ use App\Models\Crm\Client;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Projects\ProjectService;
+use App\Support\Crm\DefaultClientResolver;
 use App\Support\Imports\Concerns\NormalizesImportValues;
 use App\Support\Imports\ImportContext;
 use App\Support\Imports\ImportDefinition;
@@ -114,7 +115,7 @@ class ProjectImportDefinition extends ImportDefinition
         $data = [
             'code' => $code,
             'name' => $this->str($mapped['name'] ?? null),
-            'client_id' => $this->resolveClient($this->str($mapped['client'] ?? null)),
+            'client_id' => $this->resolveClient($this->str($mapped['client'] ?? null), $context),
             'project_type' => $this->str($mapped['project_type'] ?? null),
             'city' => $this->str($mapped['city'] ?? null),
             'state_code' => ($state = $this->str($mapped['state_code'] ?? null)) ? strtoupper($state) : null,
@@ -183,13 +184,16 @@ class ProjectImportDefinition extends ImportDefinition
         return 'created';
     }
 
-    private function resolveClient(?string $text): ?int
+    private function resolveClient(?string $text, ImportContext $context): ?int
     {
+        $resolver = app(DefaultClientResolver::class);
+
         if ($text === null) {
-            return null;
+            return $resolver->ensure($context->company)->id;
         }
 
         $client = Client::query()
+            ->where('company_id', $context->company->id)
             ->where(function ($q) use ($text) {
                 $q->whereRaw('LOWER(code) = ?', [strtolower($text)])
                     ->orWhereRaw('LOWER(company_name) = ?', [strtolower($text)]);
@@ -198,6 +202,11 @@ class ProjectImportDefinition extends ImportDefinition
 
         if (! $client) {
             $this->fail(['client' => ["Unknown client \"{$text}\". Create the client first."]]);
+        }
+
+        $defaultId = $resolver->id($context->company);
+        if ($defaultId !== null && (int) $client->id !== $defaultId) {
+            $this->fail(['client' => ['Client must be '.$resolver->require($context->company)->company_name.'.']]);
         }
 
         return (int) $client->id;

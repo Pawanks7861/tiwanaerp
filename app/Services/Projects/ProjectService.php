@@ -8,12 +8,17 @@ use App\Models\Projects\Project;
 use App\Models\Projects\ProjectUser;
 use App\Models\Projects\Site;
 use App\Services\Numbering\DocumentNumberService;
+use App\Support\Crm\DefaultClientResolver;
+use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ProjectService
 {
-    public function __construct(private readonly DocumentNumberService $numbers) {}
+    public function __construct(
+        private readonly DocumentNumberService $numbers,
+        private readonly DefaultClientResolver $defaultClient,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $data  validated input (code optional)
@@ -21,6 +26,7 @@ class ProjectService
     public function create(array $data): Project
     {
         return DB::transaction(function () use ($data) {
+            $data = $this->withDefaultClient($data);
             $code = trim((string) ($data['code'] ?? ''));
 
             $project = new Project;
@@ -44,6 +50,7 @@ class ProjectService
     public function update(Project $project, array $data): Project
     {
         return DB::transaction(function () use ($project, $data) {
+            $data = $this->withDefaultClient($data);
             if (isset($data['code'])) {
                 $data['code'] = strtoupper(trim($data['code']));
             }
@@ -56,6 +63,24 @@ class ProjectService
 
             return $project;
         });
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function withDefaultClient(array $data): array
+    {
+        $default = $this->defaultClient->ensure(app(CurrentCompany::class)->require());
+        $clientId = $data['client_id'] ?? null;
+        if ($clientId === null || $clientId === '') {
+            $data['client_id'] = $default->id;
+        } else {
+            $this->defaultClient->assertMatchesDefault((int) $clientId);
+            $data['client_id'] = (int) $clientId;
+        }
+
+        return $data;
     }
 
     public function changeStatus(Project $project, ProjectStatus $target): Project

@@ -13,6 +13,7 @@ import { useForm } from '@inertiajs/vue3';
 const props = defineProps({
     project: { type: Object, default: null },
     clients: { type: Array, required: true },
+    defaultClient: { type: Object, default: null },
     managers: { type: Array, required: true },
     states: { type: Array, required: true },
     projectTypes: { type: Array, required: true },
@@ -20,11 +21,17 @@ const props = defineProps({
 
 const editing = !!props.project;
 const p = props.project ?? {};
+const lockedClient = props.defaultClient ?? (p.client_id ? props.clients.find((c) => c.value === p.client_id) : null);
+const lockedClientLabel = lockedClient
+    ? (lockedClient.company_name
+        ? `${lockedClient.company_name}${lockedClient.code ? ` (${lockedClient.code})` : ''}`
+        : lockedClient.label)
+    : 'Default client not configured';
 
 const form = useForm({
     code: p.code ?? '',
     name: p.name ?? '',
-    client_id: p.client_id ?? null,
+    client_id: p.client_id ?? props.defaultClient?.id ?? null,
     project_type: p.project_type ?? null,
     project_manager_id: p.project_manager_id ?? null,
     description: p.description ?? '',
@@ -68,7 +75,14 @@ function submit() {
                         :error="form.errors.code"
                         :help="editing ? 'Used on document numbers.' : 'Leave blank to generate (e.g. PRJ004).'"
                     />
-                    <SearchSelect v-model="form.client_id" label="Client" :options="clients" :error="form.errors.client_id" placeholder="Select client" />
+                    <div>
+                        <label class="mb-1 block text-sm font-medium text-slate-700">Client</label>
+                        <div class="rounded-md border border-line bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                            {{ lockedClientLabel }}
+                        </div>
+                        <p class="mt-1 text-xs text-slate-500">Company default client. Set under Admin → Company settings.</p>
+                        <p v-if="form.errors.client_id" class="mt-1 text-xs text-rose-600">{{ form.errors.client_id }}</p>
+                    </div>
                     <FormSelect v-model="form.project_type" label="Project type" :options="projectTypes" :error="form.errors.project_type" />
                     <SearchSelect
                         v-model="form.project_manager_id"

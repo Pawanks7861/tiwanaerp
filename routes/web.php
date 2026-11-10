@@ -857,6 +857,7 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::put('/company', [CompanySettingsController::class, 'update'])->name('company.update');
         Route::put('/company/procurement', [CompanySettingsController::class, 'updateProcurement'])->name('company.procurement');
         Route::post('/company/boq', [CompanySettingsController::class, 'updateBoq'])->name('company.boq');
+        Route::post('/company/default-client', [CompanySettingsController::class, 'ensureDefaultClient'])->name('company.default-client');
         Route::post('/company/logo', [BrandingController::class, 'storeLogo'])->name('company.logo.store');
         Route::delete('/company/logo', [BrandingController::class, 'destroyLogo'])->name('company.logo.destroy');
         Route::post('/company/favicon', [BrandingController::class, 'storeFavicon'])->name('company.favicon.store');
