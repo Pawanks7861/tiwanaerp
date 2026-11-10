@@ -96,6 +96,7 @@ class GatePassController extends Controller
             'weighbridge' => $this->weighbridge($gatePass),
             'attachments' => ProcurementPresenter::attachments($gatePass),
             'audit' => AuditPresenter::trail([$gatePass]),
+            'approval' => ProcurementPresenter::approval($gatePass, $user),
             'can' => [
                 'update' => $user->can('update', $gatePass),
                 'submit' => $gatePass->isEditable() && $user->can('update', $gatePass),
@@ -130,10 +131,10 @@ class GatePassController extends Controller
         return redirect()->route('projects.gate-passes.index', $project)->with('success', 'Gate pass deleted.');
     }
 
-    public function submit(Project $project, GatePass $gatePass): RedirectResponse
+    public function submit(Request $request, Project $project, GatePass $gatePass): RedirectResponse
     {
         Gate::authorize('update', $gatePass);
-        $this->passes->submit($gatePass);
+        $this->passes->submit($gatePass, $request->user());
 
         return back()->with('success', 'Gate pass submitted.');
     }
@@ -150,7 +151,7 @@ class GatePassController extends Controller
     {
         Gate::authorize('approve', $gatePass);
         $reason = $request->validate(['reason' => ['required', 'string', 'max:500']])['reason'];
-        $this->passes->reject($gatePass, $reason);
+        $this->passes->reject($gatePass, $request->user(), $reason);
 
         return back()->with('success', 'Gate pass rejected.');
     }

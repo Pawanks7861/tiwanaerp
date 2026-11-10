@@ -262,6 +262,7 @@ class CompanyProvisioner
             'vendor_bill' => ['Vendor Bill', [$pm, $role(DefaultRoles::DIRECTOR)]],
             'retention_release' => ['Retention Release', [$pm, $role(DefaultRoles::DIRECTOR)]],
             'boq' => ['BOQ', [$pm, $role(DefaultRoles::DIRECTOR)]],
+            'gate_pass' => ['Gate Pass', [$pm]],
         ];
 
         foreach ($workflows as $type => [$name, $steps]) {

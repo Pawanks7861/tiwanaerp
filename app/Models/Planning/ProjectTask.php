@@ -105,6 +105,14 @@ class ProjectTask extends Model
     }
 
     /**
+     * @return HasMany<ProgressEntry, $this>
+     */
+    public function progressEntries(): HasMany
+    {
+        return $this->hasMany(ProgressEntry::class, 'task_id')->orderByDesc('entry_date')->orderByDesc('id');
+    }
+
+    /**
      * Links where this task is the successor (i.e. its predecessors).
      *
      * @return HasMany<TaskDependency, $this>

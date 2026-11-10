@@ -92,7 +92,6 @@ class BoqIntelligenceService
             'contract' => $contract,
             'cards' => $cards,
             'health' => $this->healthCounts($project, $estimate, $canCosts),
-            'variation_widget' => $this->variationWidget($project, $canCosts),
         ];
     }
 

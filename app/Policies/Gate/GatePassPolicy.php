@@ -2,14 +2,19 @@
 
 namespace App\Policies\Gate;
 
+use App\Enums\Gate\GatePassStatus;
 use App\Models\Gate\GatePass;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Policies\ProjectPolicy;
+use App\Services\Approval\ApprovalService;
 
 class GatePassPolicy
 {
-    public function __construct(private readonly ProjectPolicy $projects) {}
+    public function __construct(
+        private readonly ProjectPolicy $projects,
+        private readonly ApprovalService $approvals,
+    ) {}
 
     public function viewAny(User $user, Project $project): bool
     {
@@ -38,7 +43,16 @@ class GatePassPolicy
 
     public function approve(User $user, GatePass $pass): bool
     {
-        return $user->can('gate_pass.approve') && $this->projects->view($user, $pass->project);
+        if (! $this->projects->view($user, $pass->project) || $pass->status !== GatePassStatus::Submitted) {
+            return false;
+        }
+
+        $pending = $pass->pendingApprovalRequest();
+        if ($pending !== null) {
+            return $this->approvals->canAct($pending, $user);
+        }
+
+        return $user->can('gate_pass.approve');
     }
 
     public function verify(User $user, GatePass $pass): bool

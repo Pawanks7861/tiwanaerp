@@ -304,6 +304,10 @@ class LargeFileUploadService
             'uploaded_chunks' => count($received),
             'received' => $received,
             'checksum' => $session->checksum,
+            // Optional SHA-256 (64 hex). Server always hashes; client values are verified when sent.
+            'checksum_required' => false,
+            'chunk_checksum_accepted' => true,
+            'final_checksum_accepted' => true,
             'scan_status' => $session->scan_status,
             'expires_at' => $session->expires_at?->toIso8601String(),
         ];

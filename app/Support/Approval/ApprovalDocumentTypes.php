@@ -19,6 +19,7 @@ final class ApprovalDocumentTypes
             'material_issue' => ['label' => 'Material Issue', 'group' => 'Inventory'],
             'material_return' => ['label' => 'Material Return', 'group' => 'Inventory'],
             'dpr' => ['label' => 'DPR', 'group' => 'Site'],
+            'gate_pass' => ['label' => 'Gate Pass', 'group' => 'Site'],
             'boq' => ['label' => 'BOQ', 'group' => 'Projects'],
             'work_order' => ['label' => 'Work Order', 'group' => 'Subcontract'],
             'subcontractor_bill' => ['label' => 'Subcontractor Bill', 'group' => 'Subcontract'],

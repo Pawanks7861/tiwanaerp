@@ -250,6 +250,66 @@ class LabourPaymentService
     }
 
     /**
+     * Read-only batch preview for a period (no payment row created).
+     *
+     * @return array{period_from: string, period_to: string, attendance_count: int, lines: list<array<string, mixed>>, totals: array<string, string>}
+     */
+    public function prefill(Project $project, string $periodFrom, string $periodTo): array
+    {
+        $from = CarbonImmutable::parse($periodFrom)->toDateString();
+        $to = CarbonImmutable::parse($periodTo)->toDateString();
+        if ($to < $from) {
+            throw ValidationException::withMessages(['period_to' => 'The period must end on or after its start.']);
+        }
+
+        $rows = LabourAttendance::query()
+            ->where('project_id', $project->id)
+            ->where('approval_status', AttendanceApproval::Approved)
+            ->whereNull('labour_payment_id')
+            ->whereDate('attendance_date', '>=', $from)
+            ->whereDate('attendance_date', '<=', $to)
+            ->with(['labour:id,code,name,labour_trade_id', 'labour.trade:id,name'])
+            ->orderBy('labour_id')->orderBy('attendance_date')
+            ->get();
+
+        $lines = [];
+        $gross = [];
+        $ot = [];
+        foreach ($rows->groupBy('labour_id') as $labourId => $days) {
+            $totals = $this->lineTotals($days);
+            $line = [
+                'labour_id' => (int) $labourId,
+                'labour' => $days->first()?->labour ? [
+                    'id' => $days->first()->labour->id,
+                    'code' => $days->first()->labour->code,
+                    'name' => $days->first()->labour->name,
+                    'trade' => $days->first()->labour->trade?->name,
+                ] : null,
+                ...$totals,
+                'advance_recovery' => '0.00',
+                'other_deductions' => '0.00',
+                'net_amount' => Decimal::of($totals['gross_wage'])->plus($totals['ot_amount'])->toMoney(),
+            ];
+            $lines[] = $line;
+            $gross[] = $totals['gross_wage'];
+            $ot[] = $totals['ot_amount'];
+        }
+
+        return [
+            'period_from' => $from,
+            'period_to' => $to,
+            'attendance_count' => $rows->count(),
+            'lines' => $lines,
+            'totals' => [
+                'total_gross' => Decimal::sum($gross)->toMoney(),
+                'total_ot' => Decimal::sum($ot)->toMoney(),
+                'total_deductions' => '0.00',
+                'total_net' => Decimal::sum(array_column($lines, 'net_amount'))->toMoney(),
+            ],
+        ];
+    }
+
+    /**
      * @param  Collection<int, LabourAttendance>  $days
      * @return array<string, string>
      */

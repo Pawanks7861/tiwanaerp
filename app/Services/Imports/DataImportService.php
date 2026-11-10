@@ -366,6 +366,16 @@ class DataImportService
         if (! $definition->authorize($user, $import->project)) {
             abort(403);
         }
+
+        // Double-tap / retry after a successful confirm must not import again.
+        if (in_array($import->status, [
+            ImportStatus::Processing,
+            ImportStatus::Completed,
+            ImportStatus::CompletedWithErrors,
+        ], true)) {
+            return $import->fresh();
+        }
+
         if ($import->status !== ImportStatus::Ready) {
             throw ValidationException::withMessages(['import' => 'Validate the file before confirming the import.']);
         }

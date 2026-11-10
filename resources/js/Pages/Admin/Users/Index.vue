@@ -85,7 +85,10 @@ function toggle() {
                                 {{ row.name }}
                                 <span v-if="row.id === page.props.auth.user.id" class="ml-1 text-xs font-normal text-slate-500">(you)</span>
                             </div>
-                            <div class="truncate text-xs text-slate-500">{{ row.email }}</div>
+                            <div class="flex flex-wrap items-center gap-1 truncate text-xs text-slate-500">
+                                <span class="truncate">{{ row.email }}</span>
+                                <AppBadge v-if="row.is_placeholder_email" color="amber">Placeholder</AppBadge>
+                            </div>
                         </div>
                     </div>
                 </template>

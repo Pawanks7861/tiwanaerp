@@ -29,7 +29,15 @@ class AttachmentResource extends JsonResource
             'line_uid' => $lineUid,
             'uploaded_by' => $this->whenLoaded('uploader', fn () => $this->uploader?->name),
             'created_at' => $this->created_at?->toIso8601String(),
-            'download_url' => route('attachments.download', $this->id),
+            'download_url' => $request->is('api/*')
+                ? route('api.v1.files.download', ['source' => 'attachment', 'id' => $this->id])
+                : route('attachments.download', $this->id),
+            'preview_url' => $request->is('api/*')
+                ? route('api.v1.files.preview', ['source' => 'attachment', 'id' => $this->id])
+                : route('files.preview', ['source' => 'attachment', 'id' => $this->id]),
+            'stream_url' => $request->is('api/*')
+                ? route('api.v1.files.stream', ['source' => 'attachment', 'id' => $this->id])
+                : route('files.stream', ['source' => 'attachment', 'id' => $this->id]),
             'preview' => app(FilePreviewService::class)->card('attachment', (int) $this->id, (string) $this->extension),
         ];
     }

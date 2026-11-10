@@ -18,6 +18,11 @@ class ProjectTaskPolicy
         return $user->can('planning.view') && $this->projects->view($user, $project);
     }
 
+    public function view(User $user, ProjectTask $task): bool
+    {
+        return $user->can('planning.view') && $this->projects->view($user, $task->project);
+    }
+
     public function create(User $user, Project $project): bool
     {
         return $user->can('planning.create') && $this->projects->view($user, $project);

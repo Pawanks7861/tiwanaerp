@@ -26,10 +26,25 @@ class StoreSiteDiaryRequest extends FormRequest
             'uuid' => ['required', 'string', 'uuid'],
             'diary_date' => ['required', 'date', 'before_or_equal:today'],
             'weather' => ['nullable', 'string', 'max:50'],
+            'temperature' => ['nullable', 'numeric', 'decimal:0,2', 'between:-60,70'],
+            'work_location' => ['nullable', 'string', 'max:150'],
             'work_performed' => ['nullable', 'string', 'max:5000'],
             'issues' => ['nullable', 'string', 'max:5000'],
+            'safety_incidents' => ['nullable', 'string', 'max:5000'],
             'remarks' => ['nullable', 'string', 'max:5000'],
             'site_id' => ['nullable', 'integer'],
+            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'captured_at' => ['nullable', 'date'],
+            'submit' => ['sometimes', 'boolean'],
+
+            'work_items' => ['nullable', 'array', 'max:100'],
+            'work_items.*.task_id' => ['nullable', 'integer'],
+            'work_items.*.boq_item_id' => ['nullable', 'integer'],
+            'work_items.*.subcontractor_id' => ['nullable', 'integer'],
+            'work_items.*.description' => ['nullable', 'string', 'max:500'],
+            'work_items.*.quantity' => $qty,
+            'work_items.*.unit_id' => ['nullable', 'integer'],
 
             'labour' => ['nullable', 'array', 'max:100'],
             'labour.*.labour_trade_id' => ['required', 'integer'],
@@ -59,6 +74,8 @@ class StoreSiteDiaryRequest extends FormRequest
 
             'photos' => ['nullable', 'array', 'max:30'],
             'photos.*' => ['file', 'max:'.(int) config('uploads.photo_max_kb'), 'extensions:'.implode(',', config('uploads.image_extensions'))],
+            'photo_uuids' => ['nullable', 'array', 'max:30'],
+            'photo_uuids.*' => ['nullable', 'uuid'],
         ];
     }
 
@@ -71,7 +88,13 @@ class StoreSiteDiaryRequest extends FormRequest
         if (array_key_exists('labour', $data) || array_key_exists('labours', $data)) {
             $data['labours'] = $data['labour'] ?? $data['labours'] ?? [];
         }
-        unset($data['labour'], $data['photos']);
+        unset($data['labour'], $data['photos'], $data['photo_uuids'], $data['submit']);
+
+        foreach (['latitude', 'longitude'] as $field) {
+            if (isset($data[$field]) && is_numeric($data[$field])) {
+                $data[$field] = round((float) $data[$field], 7);
+            }
+        }
 
         return $data;
     }

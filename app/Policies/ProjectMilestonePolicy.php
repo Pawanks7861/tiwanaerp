@@ -15,6 +15,11 @@ class ProjectMilestonePolicy
         return $user->can('planning.view') && $this->projects->view($user, $project);
     }
 
+    public function view(User $user, ProjectMilestone $milestone): bool
+    {
+        return $user->can('planning.view') && $this->projects->view($user, $milestone->project);
+    }
+
     public function create(User $user, Project $project): bool
     {
         return $user->can('planning.create') && $this->projects->view($user, $project);

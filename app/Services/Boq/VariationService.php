@@ -120,7 +120,7 @@ class VariationService
             ]);
 
             $this->notifyWorkflow($locked, 'boq.variation_submitted', 'Variation submitted',
-                "{$locked->variation_number} was submitted for approval.", 'boq.approve_variations', excludeUserId: (int) $user->id);
+                "{$locked->variation_number} was submitted for approval.", 'boq.approve', excludeUserId: (int) $user->id);
 
             return $locked->fresh(['items']);
         });
@@ -161,7 +161,7 @@ class VariationService
             ]);
 
             $this->notifyWorkflow($locked, 'boq.variation_approved', 'Variation approved',
-                "{$locked->variation_number} was approved.", 'boq.view_variations',
+                "{$locked->variation_number} was approved.", 'boq.view',
                 includeUserId: $locked->submitted_by ? (int) $locked->submitted_by : null,
                 excludeUserId: (int) $user->id);
 
@@ -197,7 +197,7 @@ class VariationService
             ]);
 
             $this->notifyWorkflow($locked, 'boq.variation_rejected', 'Variation rejected',
-                "{$locked->variation_number} was rejected.", 'boq.manage_variations',
+                "{$locked->variation_number} was rejected.", 'boq.view',
                 includeUserId: $locked->submitted_by ? (int) $locked->submitted_by : null,
                 excludeUserId: (int) $user->id);
 
@@ -629,7 +629,7 @@ class VariationService
             $kind,
             $title,
             $body,
-            route('projects.variations.show', [$variation->project_id, $variation->id], absolute: false),
+            route('projects.boqs.index', $variation->project_id, absolute: false),
             ['project_id' => (int) $variation->project_id, 'variation_id' => (int) $variation->id],
         ));
     }

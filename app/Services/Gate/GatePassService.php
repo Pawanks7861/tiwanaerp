@@ -12,6 +12,7 @@ use App\Models\Gate\GatePassItem;
 use App\Models\Masters\Material;
 use App\Models\Projects\Project;
 use App\Models\User;
+use App\Services\Approval\ApprovalService;
 use App\Services\Equipment\EquipmentLocationService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Services\Weighbridge\WeighbridgeReceiptService;
@@ -29,6 +30,7 @@ class GatePassService
         private readonly DocumentNumberService $numbers,
         private readonly WeighbridgeReceiptService $weighbridge,
         private readonly EquipmentLocationService $locations,
+        private readonly ApprovalService $approvals,
     ) {}
 
     /**
@@ -75,24 +77,68 @@ class GatePassService
         $pass->delete();
     }
 
-    public function submit(GatePass $pass): void
+    public function submit(GatePass $pass, User $user): void
     {
-        $this->transition($pass, [GatePassStatus::Draft, GatePassStatus::Rejected], GatePassStatus::Submitted);
+        DB::transaction(function () use ($pass, $user) {
+            $locked = GatePass::query()->whereKey($pass->id)->lockForUpdate()->firstOrFail();
+            $locked->assertEditable();
+
+            if ($locked->items()->doesntExist()) {
+                throw ValidationException::withMessages(['items' => 'Add at least one line.']);
+            }
+
+            if ($this->approvals->resolveWorkflow($locked) !== null) {
+                $this->approvals->submit($locked, $user);
+            } else {
+                $this->transition($locked, [GatePassStatus::Draft, GatePassStatus::Rejected], GatePassStatus::Submitted);
+            }
+        });
     }
 
-    public function approve(GatePass $pass, User $user): void
+    public function approve(GatePass $pass, User $user, ?string $comments = null): void
     {
+        $pending = $pass->pendingApprovalRequest();
+        if ($pending !== null) {
+            $this->approvals->approve($pending, $user, $comments ?? 'Approved.');
+
+            return;
+        }
+
         $this->transition($pass, [GatePassStatus::Submitted], GatePassStatus::Approved, [
             'approved_by' => $user->id,
             'approved_at' => now(),
         ]);
     }
 
-    public function reject(GatePass $pass, string $reason): void
+    public function reject(GatePass $pass, User $user, string $reason): void
     {
+        $pending = $pass->pendingApprovalRequest();
+        if ($pending !== null) {
+            $this->approvals->reject($pending, $user, $reason);
+
+            return;
+        }
+
         $this->transition($pass, [GatePassStatus::Submitted], GatePassStatus::Rejected, [
             'rejected_reason' => $reason,
         ]);
+    }
+
+    /** Final approval (inside the approval engine's transaction). */
+    public function markApproved(GatePass $pass, ?int $approverId): void
+    {
+        DB::transaction(function () use ($pass, $approverId) {
+            $pass = GatePass::query()->whereKey($pass->id)->lockForUpdate()->firstOrFail();
+            if ($pass->status === GatePassStatus::Approved) {
+                return;
+            }
+
+            $pass->forceFill([
+                'status' => GatePassStatus::Approved,
+                'approved_by' => $approverId,
+                'approved_at' => now(),
+            ])->save();
+        });
     }
 
     public function verify(GatePass $pass, User $user): void

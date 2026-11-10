@@ -72,6 +72,12 @@ const details = computed(() => {
             <AppButton v-if="can.update" :href="route('projects.edit', project.id)" variant="secondary" size="sm" icon="pencil">Edit</AppButton>
         </template>
 
+        <AppCard v-if="project.workflow_categories?.length" title="Workflow categories" class="mb-4">
+            <ul class="flex flex-wrap gap-2 text-sm text-slate-700">
+                <li v-for="cat in project.workflow_categories" :key="cat" class="rounded-md bg-slate-100 px-2 py-1">{{ cat }}</li>
+            </ul>
+        </AppCard>
+
         <div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             <StatCard label="Sites" :value="project.sites_count ?? 0" icon="map-pin" tone="brand" :href="route('projects.sites.index', project.id)" />
             <StatCard label="Team members" :value="project.members_count ?? 0" icon="users" tone="green" :href="route('projects.team.index', project.id)" />
@@ -92,40 +98,7 @@ const details = computed(() => {
             <StatCard label="Open NCRs" :value="ops.open_ncrs" icon="clipboard" tone="amber" />
             <StatCard label="Inspections pending" :value="ops.pending_inspections" icon="check-circle" />
             <StatCard label="Low stock items" :value="ops.low_stock" icon="archive" />
-            <StatCard
-                v-if="ops.variations"
-                label="Variations"
-                :value="ops.variations.count"
-                icon="document"
-                tone="slate"
-                :hint="ops.variations.pending_count ? `${ops.variations.pending_count} pending` : null"
-                :href="route('projects.variations.index', project.id)"
-            />
         </div>
-
-        <AppCard v-if="ops?.variations && (ops.variations.approved_value != null || ops.variations.pending_value != null)" title="Variations" class="mt-4">
-            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div>
-                    <p class="text-xs text-slate-500">Approved value</p>
-                    <p class="mt-1 text-lg font-semibold tabular">{{ formatMoney(ops.variations.approved_value) }}</p>
-                </div>
-                <div>
-                    <p class="text-xs text-slate-500">Pending value</p>
-                    <p class="mt-1 text-lg font-semibold tabular text-amber-800">{{ formatMoney(ops.variations.pending_value) }}</p>
-                </div>
-                <div>
-                    <p class="text-xs text-slate-500">Approved count</p>
-                    <p class="mt-1 text-lg font-semibold tabular">{{ ops.variations.approved_count }}</p>
-                </div>
-                <div>
-                    <p class="text-xs text-slate-500">Pending count</p>
-                    <p class="mt-1 text-lg font-semibold tabular">{{ ops.variations.pending_count }}</p>
-                </div>
-            </div>
-            <Link :href="route('projects.boq-dashboard', project.id)" class="mt-3 inline-block text-sm font-medium text-brand-700 hover:underline">
-                Open BOQ Dashboard →
-            </Link>
-        </AppCard>
 
         <div v-if="fin" class="mt-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             <StatCard label="Budget" :value="formatMoney(fin.budget)" icon="banknotes" tone="brand" />

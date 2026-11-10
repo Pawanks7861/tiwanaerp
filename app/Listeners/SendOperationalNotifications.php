@@ -54,6 +54,8 @@ class SendOperationalNotifications
             "{$invoice->invoice_number} was certified.",
             route('projects.ra-bills.show', [$invoice->project_id, $invoice->id], absolute: false),
             (int) $invoice->project_id,
+            'client_invoice',
+            (int) $invoice->id,
         );
     }
 
@@ -68,6 +70,8 @@ class SendOperationalNotifications
             "Receipt {$payment->payment_number} for {$payment->amount} was approved.",
             route('projects.payments.show', [$payment->project_id, $payment->id], absolute: false),
             (int) $payment->project_id,
+            'payment',
+            (int) $payment->id,
         );
     }
 
@@ -83,20 +87,40 @@ class SendOperationalNotifications
             "{$ncr->ncr_number}: ".Str::limit($ncr->issue, 140),
             route('projects.ncrs.show', [$ncr->project_id, $ncr->id], absolute: false),
             (int) $ncr->project_id,
+            'ncr',
+            (int) $ncr->id,
         );
     }
 
     /**
      * @param  Collection<int, User>  $users
      */
-    private function send(Collection $users, int $companyId, string $kind, string $title, string $body, string $url, int $projectId): void
-    {
+    private function send(
+        Collection $users,
+        int $companyId,
+        string $kind,
+        string $title,
+        string $body,
+        string $url,
+        int $projectId,
+        ?string $targetType = null,
+        ?int $targetId = null,
+    ): void {
         if ($users->isEmpty()) {
             return;
         }
 
         Notification::send($users, new GeneralNotification(
-            $companyId, $kind, $title, $body, $url, ['project_id' => $projectId],
+            $companyId,
+            $kind,
+            $title,
+            $body,
+            $url,
+            array_filter([
+                'project_id' => $projectId,
+                'target_type' => $targetType,
+                'target_id' => $targetId,
+            ], fn ($v) => $v !== null),
         ));
     }
 }

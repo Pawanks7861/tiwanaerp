@@ -180,11 +180,14 @@ class ProjectController extends Controller
      */
     private function detail(Project $project): array
     {
+        $workflowCategories = $project->settings()->where('key', 'workflow_categories')->value('value');
+
         return [
             ...$project->only([
                 'id', 'project_number', 'code', 'name', 'description', 'project_type', 'address', 'city',
                 'state_code', 'latitude', 'longitude', 'client_id', 'project_manager_id', 'contract_value',
             ]),
+            'workflow_categories' => is_array($workflowCategories) ? $workflowCategories : null,
             'status' => $project->status->value,
             'status_label' => $project->status->label(),
             'start_date' => $project->start_date?->toDateString(),

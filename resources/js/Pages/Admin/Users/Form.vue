@@ -58,6 +58,7 @@ function submit() {
                         autocomplete="off"
                         :disabled="editing && !canEditProfile"
                         :error="form.errors.email"
+                        :hint="user?.is_placeholder_email ? 'Placeholder email — outbound mail is disabled for this address.' : undefined"
                     />
                     <FormInput
                         v-model="form.mobile"

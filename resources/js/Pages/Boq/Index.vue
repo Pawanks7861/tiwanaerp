@@ -81,7 +81,7 @@ function confirmAction() {
             </div>
         </AppCard>
 
-        <AppCard v-else title="BOQ" subtitle="Each BOQ is versioned. Approved versions are locked; later changes use Variations." :padded="false">
+        <AppCard v-else title="BOQ" subtitle="Each BOQ is versioned. Approved versions are locked; use Revise on an approved BOQ to draft a new version." :padded="false">
             <template #actions>
                 <AppButton v-if="can.create" size="sm" icon="plus" @click="openCreate">New BOQ</AppButton>
             </template>

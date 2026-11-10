@@ -31,7 +31,12 @@ class SendProcurementNotifications
         Notification::send($recipients, new ProcurementNotification(
             $mr->company_id, 'procurement.mr_submitted', 'Material request submitted',
             "{$mr->request_number} was submitted for approval.", route('projects.material-requests.show', [$mr->project_id, $mr->id]),
-            ['project_id' => (int) $mr->project_id],
+            [
+                'project_id' => (int) $mr->project_id,
+                'target_type' => 'material_request',
+                'target_id' => (int) $mr->id,
+                'mobile_route' => 'MaterialRequisitionDetail',
+            ],
         ));
     }
 
@@ -42,7 +47,12 @@ class SendProcurementNotifications
         Notification::send($this->withPermission($po->company_id, ['purchase.create', 'grn.create']), new ProcurementNotification(
             $po->company_id, 'procurement.po_approved', 'Purchase order approved',
             "{$po->po_number} was approved.", route('projects.purchase-orders.show', [$po->project_id, $po->id]),
-            ['project_id' => (int) $po->project_id],
+            [
+                'project_id' => (int) $po->project_id,
+                'target_type' => 'purchase_order',
+                'target_id' => (int) $po->id,
+                'mobile_route' => 'PurchaseOrderDetail',
+            ],
         ));
     }
 
@@ -62,7 +72,12 @@ class SendProcurementNotifications
         Notification::send($recipients, new ProcurementNotification(
             $grn->company_id, 'procurement.grn_approved', 'Goods received',
             "{$grn->grn_number} was approved.", route('projects.grns.show', [$grn->project_id, $grn->id]),
-            ['project_id' => (int) $grn->project_id],
+            [
+                'project_id' => (int) $grn->project_id,
+                'target_type' => 'grn',
+                'target_id' => (int) $grn->id,
+                'mobile_route' => 'GrnDetail',
+            ],
         ));
     }
 

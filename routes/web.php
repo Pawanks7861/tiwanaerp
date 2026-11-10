@@ -9,7 +9,6 @@ use App\Http\Controllers\Boq\Coefficient\SteelUnitWeightProfileController;
 use App\Http\Controllers\Boq\Coefficient\UnitConversionController;
 use App\Http\Controllers\Boq\MaterialRequirementController;
 use App\Http\Controllers\Boq\MaterialReconciliationController;
-use App\Http\Controllers\Boq\BoqVariationController;
 use App\Http\Controllers\Tutorial\TutorialController;
 use App\Http\Controllers\Imports\DataImportController;
 use App\Http\Controllers\Admin\AuditLogController;
@@ -18,7 +17,6 @@ use App\Http\Controllers\Admin\CompanySettingsController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Boq\BoqController;
-use App\Http\Controllers\Boq\BoqDashboardController;
 use App\Http\Controllers\Boq\BoqExcelController;
 use App\Http\Controllers\Boq\BoqSectionController;
 use App\Http\Controllers\Boq\ProjectBudgetController;
@@ -171,7 +169,6 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::delete('/team/{member}', [ProjectTeamController::class, 'destroy'])->name('projects.team.destroy');
 
         // BOQ
-        Route::get('/boq-dashboard', BoqDashboardController::class)->name('projects.boq-dashboard');
         Route::get('/boqs', [BoqController::class, 'index'])->name('projects.boqs.index');
         Route::post('/boqs', [BoqController::class, 'store'])->name('projects.boqs.store');
         Route::get('/boqs/import-template', [BoqExcelController::class, 'template'])->name('projects.boqs.template');
@@ -239,21 +236,6 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/steel-reconciliation', [MaterialReconciliationController::class, 'steelIndex'])->name('projects.steel-reconciliation.index');
         Route::get('/steel-reconciliation/export', [MaterialReconciliationController::class, 'steelExport'])->name('projects.steel-reconciliation.export');
         Route::get('/steel-reconciliation/diameter', [MaterialReconciliationController::class, 'steelShow'])->name('projects.steel-reconciliation.show');
-
-        // Advanced BOQ Stage 8 — Variation / Extra Items
-        Route::get('/variations', [BoqVariationController::class, 'index'])->name('projects.variations.index');
-        Route::get('/variations/export', [BoqVariationController::class, 'export'])->name('projects.variations.export');
-        Route::get('/variations/create', [BoqVariationController::class, 'create'])->name('projects.variations.create');
-        Route::post('/variations', [BoqVariationController::class, 'store'])->name('projects.variations.store');
-        Route::prefix('/variations/{variation}')->whereNumber('variation')->name('projects.variations.')->group(function () {
-            Route::get('/', [BoqVariationController::class, 'show'])->name('show');
-            Route::get('/edit', [BoqVariationController::class, 'edit'])->name('edit');
-            Route::put('/', [BoqVariationController::class, 'update'])->name('update');
-            Route::delete('/', [BoqVariationController::class, 'destroy'])->name('destroy');
-            Route::post('/submit', [BoqVariationController::class, 'submit'])->name('submit');
-            Route::post('/approve', [BoqVariationController::class, 'approve'])->name('approve');
-            Route::post('/reject', [BoqVariationController::class, 'reject'])->name('reject');
-        });
 
         // Rate analysis
         Route::get('/rate-analyses', [RateAnalysisController::class, 'index'])->name('projects.rate-analyses.index');

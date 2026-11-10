@@ -170,4 +170,17 @@ class User extends Authenticatable
             ->where('is_active', true)
             ->exists();
     }
+
+    public function isPlaceholderEmail(): bool
+    {
+        return str_ends_with(strtolower($this->email), '@users.tiwana.test');
+    }
+
+    /**
+     * Placeholder accounts must not receive outbound email.
+     */
+    public function routeNotificationForMail(): ?string
+    {
+        return $this->isPlaceholderEmail() ? null : $this->email;
+    }
 }

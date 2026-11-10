@@ -86,6 +86,7 @@ class UserController extends Controller
         return Inertia::render('Admin/Users/Form', [
             'user' => [
                 ...$user->only(['id', 'name', 'email', 'mobile']),
+                'is_placeholder_email' => $user->isPlaceholderEmail(),
                 'roles' => $user->roles->pluck('id')->all(),
             ],
             'roles' => $this->roleOptions(),
@@ -130,6 +131,7 @@ class UserController extends Controller
 
         return [
             ...$user->only(['id', 'name', 'email', 'mobile']),
+            'is_placeholder_email' => $user->isPlaceholderEmail(),
             'roles' => $user->roles->pluck('name')->all(),
             'is_active' => (bool) $membership?->is_active && $user->is_active,
             'account_disabled' => ! $user->is_active,

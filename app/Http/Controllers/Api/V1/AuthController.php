@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\Auth\TwoFactorService;
+use App\Support\Boq\BoqCompanySettings;
 use App\Support\Permissions\PermissionCatalog;
+use App\Support\Procurement\ProcurementSettings;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -70,6 +72,11 @@ class AuthController extends Controller
             'permissions' => $user->isSuperAdmin()
                 ? PermissionCatalog::all()
                 : $user->getAllPermissions()->pluck('name')->values(),
+            'features' => [
+                'multi_company' => (bool) config('features.multi_company'),
+                'advanced_boq_calculations' => BoqCompanySettings::enabled(),
+                'procurement_rfq' => ProcurementSettings::rfqEnabled(),
+            ],
         ]);
     }
 }

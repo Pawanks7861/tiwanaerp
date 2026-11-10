@@ -6,10 +6,14 @@ use App\Reports\ReportContext;
 use App\Reports\ReportDefinition;
 use App\Reports\ReportResult;
 use App\Services\Boq\BoqIntelligenceService;
+use App\Services\Boq\EffectiveBoqQuantityService;
 
 final class BoqItemAnalysisReport extends ReportDefinition
 {
-    public function __construct(private readonly BoqIntelligenceService $intel) {}
+    public function __construct(
+        private readonly BoqIntelligenceService $intel,
+        private readonly EffectiveBoqQuantityService $effectiveQty,
+    ) {}
 
     public function key(): string
     {
@@ -106,7 +110,7 @@ final class BoqItemAnalysisReport extends ReportDefinition
             ];
         }
 
-        $contract = $this->intel->dashboard($ctx->project, $canCosts)['contract'];
+        $contract = $this->effectiveQty->contractValueSummary($ctx->project);
 
         return new ReportResult(
             columns: $columns,
