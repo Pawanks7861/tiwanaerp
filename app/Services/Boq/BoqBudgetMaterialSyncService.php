@@ -6,6 +6,7 @@ use App\Enums\Boq\BudgetLineSource;
 use App\Enums\Boq\BudgetStatus;
 use App\Enums\CostHead;
 use App\Models\Boq\Boq;
+use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqItemMaterialCost;
 use App\Models\Boq\ProjectBudget;
 use App\Models\Boq\ProjectBudgetLine;
@@ -15,7 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Syncs simplified BOQ material requirements into draft project budget material lines.
+ * Syncs simplified BOQ material requirements and labour rates into draft project budget lines.
  * Approved budgets are never mutated; a pending flag signals that a revision is required.
  */
 class BoqBudgetMaterialSyncService
@@ -106,9 +107,13 @@ class BoqBudgetMaterialSyncService
             $locked->assertEditable();
 
             $groups = $this->aggregateMaterials($boq);
+            $labourLines = $this->labourLines($boq);
 
             $locked->lines()
-                ->where('source_type', BudgetLineSource::BoqMaterial->value)
+                ->whereIn('source_type', [
+                    BudgetLineSource::BoqMaterial->value,
+                    BudgetLineSource::BoqLabour->value,
+                ])
                 ->get()
                 ->each->delete();
 
@@ -122,6 +127,27 @@ class BoqBudgetMaterialSyncService
                     'material_id' => $group['material_id'],
                     'material_code' => $group['material_code'],
                     'material_name' => $group['material_name'],
+                    'unit' => $group['unit'],
+                    'quantity' => $group['quantity'],
+                    'rate' => $group['rate'],
+                    'description' => $group['description'],
+                    'amount' => $group['amount'],
+                    'sources' => $group['sources'],
+                ]);
+                $line->budget()->associate($locked);
+                $line->save();
+            }
+
+            foreach ($labourLines as $group) {
+                $line = new ProjectBudgetLine;
+                $line->forceFill([
+                    'cost_head' => CostHead::Labour->value,
+                    'boq_item_id' => $group['boq_item_id'],
+                    'source_type' => BudgetLineSource::BoqLabour->value,
+                    'source_key' => $group['source_key'],
+                    'material_id' => null,
+                    'material_code' => null,
+                    'material_name' => null,
                     'unit' => $group['unit'],
                     'quantity' => $group['quantity'],
                     'rate' => $group['rate'],
@@ -300,6 +326,70 @@ class BoqBudgetMaterialSyncService
         }
 
         usort($result, fn (array $a, array $b) => strcasecmp($a['material_name'], $b['material_name']));
+
+        return $result;
+    }
+
+    /**
+     * One labour budget line per BOQ item with labour_rate > 0 (keeps unit isolation).
+     *
+     * @return list<array{
+     *   source_key: string,
+     *   boq_item_id: int,
+     *   unit: ?string,
+     *   quantity: string,
+     *   rate: string,
+     *   amount: string,
+     *   description: string,
+     *   sources: list<array<string, mixed>>
+     * }>
+     */
+    public function labourLines(Boq $boq): array
+    {
+        $items = BoqItem::query()
+            ->where('boq_id', $boq->id)
+            ->with('unit:id,symbol,name')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        $result = [];
+        foreach ($items as $item) {
+            $rate = Decimal::of((string) ($item->labour_rate ?? '0'));
+            if (! $rate->isPositive()) {
+                continue;
+            }
+
+            $boqQty = Decimal::of((string) $item->quantity)->toQuantity();
+            $labourRate = $rate->toRate();
+            $amount = Decimal::of($boqQty)->times($labourRate)->toMoney();
+            $unit = $item->unit?->symbol ?: $item->unit?->name;
+            $label = trim(($item->item_code ? $item->item_code.' ' : '').$item->name);
+
+            $result[] = [
+                'source_key' => 'labour:'.($item->line_uid ?: (string) $item->id),
+                'boq_item_id' => $item->id,
+                'unit' => $unit,
+                'quantity' => $boqQty,
+                'rate' => $labourRate,
+                'amount' => $amount,
+                'description' => mb_substr($label !== '' ? $label : 'Labour', 0, 255),
+                'sources' => [[
+                    'boq_id' => $boq->id,
+                    'boq_number' => $boq->boq_number,
+                    'boq_version' => $boq->version,
+                    'boq_item_id' => $item->id,
+                    'boq_line_uid' => $item->line_uid,
+                    'item_code' => $item->item_code,
+                    'item_name' => $item->name,
+                    'boq_quantity' => $boqQty,
+                    'labour_rate' => $labourRate,
+                    'unit' => $unit,
+                    'amount' => $amount,
+                    'source' => 'boq',
+                ]],
+            ];
+        }
 
         return $result;
     }

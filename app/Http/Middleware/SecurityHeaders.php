@@ -54,8 +54,9 @@ class SecurityHeaders
             'img-src '.implode(' ', $img),
             'font-src '.implode(' ', $font),
             'connect-src '.implode(' ', $connect),
-            "worker-src 'self'",
-            "frame-src 'self'",
+            "worker-src 'self' blob:",
+            // PdfViewer embeds authorized PDFs via blob: object URLs (same for print preview).
+            "frame-src 'self' blob:",
             "frame-ancestors 'self'",
             "object-src 'none'",
             "base-uri 'self'",

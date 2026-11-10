@@ -54,7 +54,8 @@ class ProjectBudgetController extends Controller
             ->orderBy('boq_number')->get(['id', 'boq_number', 'version', 'title', 'total_cost_amount']);
 
         $materialLines = $lines->filter(fn (ProjectBudgetLine $l) => $l->source_type === BudgetLineSource::BoqMaterial)->values();
-        $otherLines = $lines->reject(fn (ProjectBudgetLine $l) => $l->source_type === BudgetLineSource::BoqMaterial)->values();
+        $labourLines = $lines->filter(fn (ProjectBudgetLine $l) => $l->source_type === BudgetLineSource::BoqLabour)->values();
+        $otherLines = $lines->reject(fn (ProjectBudgetLine $l) => in_array($l->source_type, [BudgetLineSource::BoqMaterial, BudgetLineSource::BoqLabour], true))->values();
 
         $pendingRevision = $project->budgets()
             ->where('status', BudgetStatus::Approved)
@@ -88,6 +89,7 @@ class ProjectBudgetController extends Controller
             'heads' => $byHead,
             'lines' => $otherLines->map(fn (ProjectBudgetLine $l) => $this->linePayload($l))->all(),
             'materialLines' => $materialLines->map(fn (ProjectBudgetLine $l) => $this->materialLinePayload($l))->all(),
+            'labourLines' => $labourLines->map(fn (ProjectBudgetLine $l) => $this->labourLinePayload($l))->all(),
             'pendingRevision' => $pendingRevision,
             'boqs' => $currentBoqs->map(fn (Boq $b) => [
                 'value' => $b->id,
@@ -224,6 +226,24 @@ class ProjectBudgetController extends Controller
             'quantity' => $l->quantity !== null ? (string) $l->quantity : null,
             'rate' => $l->rate !== null ? (string) $l->rate : null,
             'amount' => (string) $l->amount,
+            'source_count' => is_array($l->sources) ? count($l->sources) : 0,
+            'sources' => $l->sources ?? [],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function labourLinePayload(ProjectBudgetLine $l): array
+    {
+        return [
+            'id' => $l->id,
+            'description' => $l->description,
+            'unit' => $l->unit,
+            'quantity' => $l->quantity !== null ? (string) $l->quantity : null,
+            'rate' => $l->rate !== null ? (string) $l->rate : null,
+            'amount' => (string) $l->amount,
+            'boq_item_id' => $l->boq_item_id,
             'source_count' => is_array($l->sources) ? count($l->sources) : 0,
             'sources' => $l->sources ?? [],
         ];

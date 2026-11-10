@@ -7,6 +7,7 @@ use App\Http\Middleware\EnsureTwoFactor;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\SetCurrentCompany;
+use App\Http\Middleware\SyncUrlRootFromRequest;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withEvents(discover: false)
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->web(append: [
+            SyncUrlRootFromRequest::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
             EnsureTwoFactor::class,

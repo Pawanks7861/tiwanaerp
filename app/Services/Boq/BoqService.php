@@ -239,16 +239,32 @@ class BoqService
                 $item->boq()->associate($boq);
                 $item->save();
 
-                if ($canEditCosts && array_key_exists('simple_materials', $row) && is_array($row['simple_materials'])) {
+                if ($canEditCosts) {
                     $materials = app(SimpleBoqMaterialCostService::class);
-                    $materials->syncForItem(
-                        $boq,
-                        $item,
-                        $row['simple_materials'],
-                        auth()->user(),
-                        "rows.{$i}.simple_materials",
-                    );
-                    $this->applySimplifiedMaterialRate($boq, $item, $materials);
+                    if (array_key_exists('simple_materials', $row) && is_array($row['simple_materials'])) {
+                        $materials->syncForItem(
+                            $boq,
+                            $item,
+                            $row['simple_materials'],
+                            auth()->user(),
+                            "rows.{$i}.simple_materials",
+                        );
+                        $this->applySimplifiedMaterialRate($boq, $item, $materials);
+                    } elseif (
+                        ! BoqCompanySettings::enabled($boq->company)
+                        && ! $item->simple_materials_initialized
+                        && $materials->isPccWork($item)
+                    ) {
+                        // Save-without-edit: persist PCC defaults shown in the drawer.
+                        $materials->syncForItem(
+                            $boq,
+                            $item,
+                            $materials->defaultRowsFor($item),
+                            auth()->user(),
+                            "rows.{$i}.simple_materials",
+                        );
+                        $this->applySimplifiedMaterialRate($boq, $item, $materials);
+                    }
                 }
             }
 

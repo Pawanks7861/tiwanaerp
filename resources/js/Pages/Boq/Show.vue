@@ -43,10 +43,15 @@ const props = defineProps({
 });
 
 const COST_FIELDS = ['material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent'];
-const DEFAULT_SIMPLE_MATERIALS = [
+const GENERIC_SIMPLE_MATERIALS = [
     { material_name: 'Cement', quantity: '', unit: 'Bag', rate: '' },
     { material_name: 'Sand', quantity: '', unit: 'Cum', rate: '' },
     { material_name: 'Aggregate', quantity: '', unit: 'Cum', rate: '' },
+];
+const PCC_SIMPLE_MATERIALS = [
+    { material_name: 'Cement', quantity: '3.4100', unit: 'Bag', rate: '380.0000' },
+    { material_name: 'Sand', quantity: '0.4740', unit: 'Cum', rate: '1690.8680' },
+    { material_name: 'Aggregate', quantity: '0.9480', unit: 'Cum', rate: '3191.9190' },
 ];
 const page = usePage();
 const advanced = computed(() => page.props.features?.advanced_boq_calculations === true);
@@ -79,6 +84,19 @@ const showSimpleMaterials = computed(() => costs.value && !advanced.value);
 
 let tempId = 0;
 
+/** Mirror of server BoqItemDefaultCostResolver::isPccWork — RCC never matches. */
+function isPccWork(item) {
+    const text = String(`${item?.name || ''} ${item?.description || ''} ${item?.item_code || ''}`)
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text) return false;
+    if (/\brcc\b/.test(text) || text.includes('reinforced cement concrete') || text.includes('reinforced concrete')) {
+        return false;
+    }
+    return /\bpcc\b/.test(text) || text.includes('plain cement concrete');
+}
+
 function blankSimpleMaterial(overrides = {}) {
     return {
         _key: `m${++tempId}`,
@@ -102,7 +120,8 @@ function mapSimpleMaterials(item) {
         }));
     }
 
-    return DEFAULT_SIMPLE_MATERIALS.map((m) => blankSimpleMaterial({ ...m }));
+    const defaults = isPccWork(item) ? PCC_SIMPLE_MATERIALS : GENERIC_SIMPLE_MATERIALS;
+    return defaults.map((m) => blankSimpleMaterial({ ...m }));
 }
 
 function materialAmount(row) {
@@ -199,6 +218,7 @@ function toRow(item) {
         unit_id: item.unit_id ?? null,
         quantity: item.quantity ?? null,
         client_rate: item.client_rate ?? null,
+        labour_rate: item.labour_rate ?? null,
         rate_analysis_id: item.rate_analysis_id ?? null,
         simple_materials_initialized: !!item.simple_materials_initialized,
         simple_materials_dirty: false,
@@ -215,6 +235,21 @@ function toRow(item) {
     }
 
     return row;
+}
+
+function labourEstimatedCost(row) {
+    const qty = Number(row?.quantity);
+    const rate = Number(row?.labour_rate);
+    if (!Number.isFinite(qty) || !Number.isFinite(rate)) return 0;
+    return qty * rate;
+}
+
+function refreshMaterialsForNameChange(row) {
+    if (!showSimpleMaterials.value || row.simple_materials_initialized || row.simple_materials_dirty) {
+        return;
+    }
+    row.simple_materials = mapSimpleMaterials(row);
+    applyMaterialDerivedRate(row);
 }
 
 const rows = ref([]);
@@ -360,9 +395,17 @@ function save() {
             } = r;
             if (!detailedCosts.value) {
                 delete data.rate_analysis_id;
-                COST_FIELDS.forEach((f) => delete data[f]);
+                COST_FIELDS.forEach((f) => {
+                    if (f !== 'labour_rate') {
+                        delete data[f];
+                    }
+                });
+                if (data.labour_rate === '' || data.labour_rate == null) {
+                    data.labour_rate = '0';
+                }
             }
-            if (showSimpleMaterials.value && (simple_materials_dirty || simple_materials_initialized)) {
+            // Persist shown defaults on first save (incl. untouched PCC defaults).
+            if (showSimpleMaterials.value && (simple_materials_dirty || simple_materials_initialized || isPccWork(r))) {
                 data.simple_materials = (simple_materials || []).map((m) => ({
                     material_id: m.material_id || null,
                     material_name: m.material_name,
@@ -520,7 +563,8 @@ const lockedReason = computed(() => {
         revised: 'Superseded by a later revision. This version is kept for history.',
     }[props.boq.status] ?? null;
 });
-const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
+/** Base 8 (# Code Item Unit Qty Rate Amount Actions) + Labour Rate when costs visible + 7 advanced cost cols. */
+const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value ? 7 : 0));
 </script>
 
 <template>
@@ -774,6 +818,7 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                                     <th class="px-2 py-2 text-right">Margin %</th>
                                 </template>
                                 <th class="px-2 py-2 text-right">Rate</th>
+                                <th v-if="costs" class="px-2 py-2 text-right whitespace-nowrap">Labour Rate</th>
                                 <th class="px-2 py-2 text-right">Amount</th>
                                 <th class="px-2 py-2"><span class="sr-only">Actions</span></th>
                             </tr>
@@ -824,6 +869,7 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                                                 <span v-if="materialAutoActive(row)" class="block px-1.5 py-1 text-right text-xs tabular text-slate-800" title="Auto-calculated from materials">{{ formatMoney(calc[row._key].client_rate) }}</span>
                                                 <CellDecimal v-else v-model="row.client_rate" :placeholder="detailedCosts ? calc[row._key].selling_rate : null" :error="!!cellError(row, 'client_rate')" />
                                             </td>
+                                            <td v-if="costs" class="px-2 py-1.5 text-right tabular text-slate-700" title="Labour rate / BOQ unit (edit in item details)">{{ formatMoney(row.labour_rate || 0) }}</td>
                                         </template>
                                         <template v-else>
                                             <td class="px-2 py-1.5 font-mono text-slate-600">{{ row.item_code || '—' }}</td>
@@ -843,6 +889,7 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                                                 <td class="px-2 py-1.5 text-right tabular">{{ formatPercent(row.margin_percent) }}</td>
                                             </template>
                                             <td class="px-2 py-1.5 text-right tabular">{{ formatRate(calc[row._key].client_rate) }}</td>
+                                            <td v-if="costs" class="px-2 py-1.5 text-right tabular text-slate-700">{{ formatMoney(row.labour_rate || 0) }}</td>
                                         </template>
                                         <td class="px-2 py-1.5 text-right font-medium text-slate-900 tabular">{{ formatMoney(calc[row._key].client_amount) }}</td>
                                         <td class="px-1 py-1 text-right whitespace-nowrap">
@@ -861,10 +908,10 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                         </tbody>
                         <tfoot class="sticky bottom-0 bg-white shadow-[0_-1px_0_0_rgb(226_232_240)]">
                             <tr class="font-semibold text-slate-900">
-                                <td :colspan="detailedCosts ? 10 : 6" class="px-2 py-2 text-right text-[11px] uppercase">Total</td>
+                                <td :colspan="detailedCosts ? 10 : (costs ? 7 : 6)" class="px-2 py-2 text-right text-[11px] uppercase">Total</td>
                                 <template v-if="detailedCosts">
                                     <td class="px-2 py-2 text-right tabular">{{ formatMoney(totals.cost) }}</td>
-                                    <td colspan="2"></td>
+                                    <td :colspan="3"></td>
                                 </template>
                                 <td class="px-2 py-2 text-right tabular">{{ formatMoney(totals.client) }}</td>
                                 <td></td>
@@ -896,6 +943,7 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                                     <div class="min-w-0">
                                         <p class="truncate text-sm font-medium text-slate-900">{{ row.name || 'New item' }}</p>
                                         <p class="text-xs text-slate-500"><span v-if="row.item_code" class="font-mono">{{ row.item_code }} · </span>{{ formatQty(row.quantity) }} {{ unitLabel(row.unit_id) }} × {{ formatRate(calc[row._key].client_rate) }}</p>
+                                        <p v-if="costs" class="text-xs text-slate-500">Labour Rate {{ formatMoney(row.labour_rate || 0) }}</p>
                                     </div>
                                     <p class="shrink-0 text-sm font-semibold text-slate-900 tabular">{{ formatMoney(calc[row._key].client_amount) }}</p>
                                 </div>
@@ -924,8 +972,22 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                         <FormInput v-model="editingRow.item_code" label="Code" maxlength="30" :error="cellError(editingRow, 'item_code')" />
                         <FormInput v-model="editingRow.hsn_sac" label="HSN/SAC" maxlength="10" class="col-span-2" :error="cellError(editingRow, 'hsn_sac')" />
                     </div>
-                    <FormInput v-model="editingRow.name" label="Item" required maxlength="255" :error="cellError(editingRow, 'name')" />
-                    <FormInput v-model="editingRow.description" label="Specification / description" multiline :rows="3" :error="cellError(editingRow, 'description')" />
+                    <FormInput
+                        v-model="editingRow.name"
+                        label="Item"
+                        required
+                        maxlength="255"
+                        :error="cellError(editingRow, 'name')"
+                        @update:model-value="refreshMaterialsForNameChange(editingRow)"
+                    />
+                    <FormInput
+                        v-model="editingRow.description"
+                        label="Specification / description"
+                        multiline
+                        :rows="3"
+                        :error="cellError(editingRow, 'description')"
+                        @update:model-value="refreshMaterialsForNameChange(editingRow)"
+                    />
                     <div class="grid grid-cols-2 gap-3">
                         <SearchSelect v-model="editingRow.unit_id" label="Unit" required :options="unitOptions" :error="cellError(editingRow, 'unit_id')" />
                         <DecimalInput v-model="editingRow.quantity" label="Quantity" required :decimals="4" :error="cellError(editingRow, 'quantity')" />
@@ -1086,6 +1148,37 @@ const colCount = computed(() => 8 + (detailedCosts.value ? 7 : 0));
                                     <span class="tabular">{{ formatQty(group.total_quantity) }} {{ group.unit }}</span>
                                 </li>
                             </ul>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3 rounded-xl border border-dashed border-line p-3">
+                        <div>
+                            <h3 class="text-sm font-semibold text-slate-900">Labour</h3>
+                            <p class="mt-0.5 text-xs text-slate-500">
+                                Labour rate for 1 {{ unitLabel(editingRow.unit_id) || 'BOQ unit' }}. Estimated labour syncs to Budget Labour when saved.
+                            </p>
+                        </div>
+                        <DecimalInput
+                            v-if="editable"
+                            v-model="editingRow.labour_rate"
+                            :label="`Labour Rate / ${unitLabel(editingRow.unit_id) || 'unit'}`"
+                            :decimals="4"
+                            prefix="₹"
+                            :error="cellError(editingRow, 'labour_rate')"
+                        />
+                        <div v-else>
+                            <p class="text-xs font-medium text-slate-500">Labour Rate / {{ unitLabel(editingRow.unit_id) || 'unit' }}</p>
+                            <p class="mt-1 text-sm font-semibold tabular">{{ formatMoney(editingRow.labour_rate || 0) }}</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div class="rounded bg-slate-50 px-2 py-1.5">
+                                <p class="text-[11px] text-slate-500">Labour Cost / {{ unitLabel(editingRow.unit_id) || 'unit' }}</p>
+                                <p class="font-medium tabular">{{ formatMoney(editingRow.labour_rate || 0) }}</p>
+                            </div>
+                            <div class="rounded bg-slate-50 px-2 py-1.5">
+                                <p class="text-[11px] text-slate-500">Estimated Labour Cost</p>
+                                <p class="font-medium tabular">{{ formatMoney(labourEstimatedCost(editingRow)) }}</p>
+                            </div>
                         </div>
                     </div>
                 </div>

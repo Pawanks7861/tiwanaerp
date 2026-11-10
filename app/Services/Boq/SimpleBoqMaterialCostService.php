@@ -7,6 +7,7 @@ use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqItemMaterialCost;
 use App\Models\Masters\Material;
 use App\Models\User;
+use App\Support\Boq\BoqItemDefaultCostResolver;
 use App\Support\Math\Decimal;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -16,14 +17,36 @@ use Illuminate\Validation\ValidationException;
  */
 class SimpleBoqMaterialCostService
 {
+    public function __construct(private readonly BoqItemDefaultCostResolver $defaults) {}
+
     /** @return list<array{material_name: string, quantity: string, unit: string, rate: string}> */
-    public static function defaultRows(): array
+    public static function genericDefaultRows(): array
     {
         return [
             ['material_name' => 'Cement', 'quantity' => '0', 'unit' => 'Bag', 'rate' => '0'],
             ['material_name' => 'Sand', 'quantity' => '0', 'unit' => 'Cum', 'rate' => '0'],
             ['material_name' => 'Aggregate', 'quantity' => '0', 'unit' => 'Cum', 'rate' => '0'],
         ];
+    }
+
+    /** @return list<array{material_name: string, quantity: string, unit: string, rate: string}> */
+    public static function defaultRows(): array
+    {
+        return self::genericDefaultRows();
+    }
+
+    /**
+     * @param  BoqItem|array{name?: mixed, description?: mixed, item_code?: mixed}|null  $item
+     * @return list<array{material_name: string, quantity: string, unit: string, rate: string}>
+     */
+    public function defaultRowsFor(BoqItem|array|null $item): array
+    {
+        return $this->defaults->materialDefaultsFor($item);
+    }
+
+    public function isPccWork(BoqItem|array|null $item): bool
+    {
+        return $this->defaults->isPccWork($item);
     }
 
     /**

@@ -90,6 +90,13 @@ final class BoqPresenter
             $data['simple_material_cost_per_unit'] = $totals['per_unit'];
             $data['simple_material_cost_total'] = $totals['estimated_total'];
             $data['simple_material_quantity_summary'] = $totals['quantity_summary'];
+            $labourRate = (string) ($item->labour_rate ?? '0');
+            $data['labour_rate'] = $labourRate;
+            $data['simple_labour_cost_per_unit'] = \App\Support\Math\Decimal::of($labourRate)->toMoney();
+            $data['simple_labour_cost_total'] = \App\Support\Math\Decimal::of((string) $item->quantity)
+                ->times($labourRate)
+                ->toMoney();
+            $data['is_pcc_work'] = $materialService->isPccWork($item);
         }
 
         return $data;

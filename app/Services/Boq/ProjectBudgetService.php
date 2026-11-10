@@ -53,8 +53,12 @@ class ProjectBudgetService
             $boq->items()->with('simpleMaterialCosts')->orderBy('sort_order')->orderBy('id')->get()
                 ->each(function (BoqItem $item) use ($budget, $materials) {
                     $skipMaterialHead = $materials->drivesItemRate($item->simpleMaterialCosts);
+                    $skipLabourHead = Decimal::of((string) ($item->labour_rate ?? '0'))->isPositive();
                     foreach ($this->headAmounts($item) as $head => $amount) {
                         if ($skipMaterialHead && $head === CostHead::Material->value) {
+                            continue;
+                        }
+                        if ($skipLabourHead && $head === CostHead::Labour->value) {
                             continue;
                         }
                         $line = new ProjectBudgetLine([
@@ -111,9 +115,9 @@ class ProjectBudgetService
             $budget->assertEditable();
 
             $line ??= new ProjectBudgetLine;
-            if ($line->exists && $line->source_type === BudgetLineSource::BoqMaterial) {
+            if ($line->exists && in_array($line->source_type, [BudgetLineSource::BoqMaterial, BudgetLineSource::BoqLabour], true)) {
                 throw ValidationException::withMessages([
-                    'line' => 'BOQ-generated material lines are updated by Sync from BOQ, not manual edit.',
+                    'line' => 'BOQ-generated budget lines are updated by Sync from BOQ, not manual edit.',
                 ]);
             }
             $line->fill([

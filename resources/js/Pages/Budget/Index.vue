@@ -22,6 +22,7 @@ const props = defineProps({
     heads: { type: Array, required: true },
     lines: { type: Array, required: true },
     materialLines: { type: Array, default: () => [] },
+    labourLines: { type: Array, default: () => [] },
     pendingRevision: { type: Boolean, default: false },
     boqs: { type: Array, required: true },
     costHeads: { type: Array, required: true },
@@ -45,6 +46,15 @@ const materialColumns = [
     { key: 'quantity', label: 'Required qty' },
     { key: 'rate', label: 'Budget rate', type: 'money' },
     { key: 'amount', label: 'Budget amount', type: 'money' },
+    { key: 'source_count', label: 'BOQ sources' },
+];
+
+const labourColumns = [
+    { key: 'description', label: 'BOQ item' },
+    { key: 'unit', label: 'Unit' },
+    { key: 'quantity', label: 'BOQ qty' },
+    { key: 'rate', label: 'Labour rate', type: 'money' },
+    { key: 'amount', label: 'Labour amount', type: 'money' },
     { key: 'source_count', label: 'BOQ sources' },
 ];
 
@@ -185,6 +195,26 @@ function confirmAction() {
                                 {{ row.material_name || row.description }}
                             </div>
                         </template>
+                        <template #cell-quantity="{ value }">{{ value != null ? formatNumber(value, 4) : '—' }}</template>
+                        <template #cell-rate="{ value }">{{ value != null ? formatMoney(value) : '—' }}</template>
+                        <template #cell-source_count="{ row }">
+                            <AppButton variant="ghost" size="sm" @click="sourcesModal = row">View sources ({{ row.source_count }})</AppButton>
+                        </template>
+                    </DataTable>
+                </div>
+
+                <div v-if="budget" class="border-t border-line px-4 py-4 sm:px-5">
+                    <div class="mb-3">
+                        <h3 class="text-sm font-semibold text-slate-900">Labour from BOQ</h3>
+                        <p class="mt-0.5 text-xs text-slate-500">BOQ Qty × Labour Rate per BOQ unit. Source: BOQ.</p>
+                    </div>
+                    <DataTable
+                        :columns="labourColumns"
+                        :rows="labourLines"
+                        empty-icon="users"
+                        empty-title="No BOQ labour"
+                        empty-description="Enter a labour rate on BOQ items, then generate or sync the budget."
+                    >
                         <template #cell-quantity="{ value }">{{ value != null ? formatNumber(value, 4) : '—' }}</template>
                         <template #cell-rate="{ value }">{{ value != null ? formatMoney(value) : '—' }}</template>
                         <template #cell-source_count="{ row }">
