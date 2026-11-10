@@ -252,7 +252,10 @@ class BoqService
                 }
             }
 
-            return $this->recalculateTotals($boq);
+            $boq = $this->recalculateTotals($boq);
+            app(BoqBudgetMaterialSyncService::class)->syncAfterBoqMaterialsChanged($boq);
+
+            return $boq;
         });
     }
 

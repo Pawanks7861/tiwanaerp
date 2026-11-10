@@ -251,6 +251,7 @@ Route::middleware(['auth', 'company'])->group(function () {
         // Budget
         Route::get('/budget', [ProjectBudgetController::class, 'index'])->name('projects.budget.index');
         Route::post('/budget/generate', [ProjectBudgetController::class, 'generate'])->name('projects.budget.generate');
+        Route::post('/budget/sync-materials', [ProjectBudgetController::class, 'syncMaterials'])->name('projects.budget.sync-materials');
         Route::post('/budget/new-version', [ProjectBudgetController::class, 'newVersion'])->name('projects.budget.new-version');
         Route::post('/budget/lines', [ProjectBudgetController::class, 'storeLine'])->name('projects.budget.lines.store');
         Route::put('/budget/lines/{budgetLine}', [ProjectBudgetController::class, 'updateLine'])->whereNumber('budgetLine')->name('projects.budget.lines.update');

@@ -31,7 +31,7 @@ class ProjectBudget extends Model
             if ($budget->getRawOriginal('status') === BudgetStatus::Draft->value) {
                 return;
             }
-            $allowed = ['status', 'updated_by', 'updated_at'];
+            $allowed = ['status', 'updated_by', 'updated_at', 'materials_sync_pending'];
             if (array_diff(array_keys($budget->getDirty()), $allowed) !== []) {
                 throw self::lockedException();
             }
@@ -66,6 +66,8 @@ class ProjectBudget extends Model
             'version' => 'integer',
             'total_amount' => 'decimal:2',
             'approved_at' => 'datetime',
+            'materials_synced_at' => 'datetime',
+            'materials_sync_pending' => 'boolean',
         ];
     }
 

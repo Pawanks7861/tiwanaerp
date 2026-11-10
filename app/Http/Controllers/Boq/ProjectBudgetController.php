@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Boq;
 
 use App\Enums\Boq\BoqStatus;
+use App\Enums\Boq\BudgetLineSource;
+use App\Enums\Boq\BudgetStatus;
 use App\Enums\CostHead;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Projects\ProjectHeader;
@@ -10,6 +12,7 @@ use App\Models\Boq\Boq;
 use App\Models\Boq\ProjectBudget;
 use App\Models\Boq\ProjectBudgetLine;
 use App\Models\Projects\Project;
+use App\Services\Boq\BoqBudgetMaterialSyncService;
 use App\Services\Boq\ProjectBudgetService;
 use App\Support\Math\Decimal;
 use Illuminate\Http\RedirectResponse;
@@ -21,14 +24,17 @@ use Inertia\Response;
 
 class ProjectBudgetController extends Controller
 {
-    public function __construct(private readonly ProjectBudgetService $budgets) {}
+    public function __construct(
+        private readonly ProjectBudgetService $budgets,
+        private readonly BoqBudgetMaterialSyncService $materialSync,
+    ) {}
 
     public function index(Request $request, Project $project): Response
     {
         Gate::authorize('viewAny', [ProjectBudget::class, $project]);
 
         $user = $request->user();
-        $versions = $project->budgets()->with('approver:id,name')->orderByDesc('version')->get()
+        $versions = $project->budgets()->with(['approver:id,name', 'boq:id,boq_number,version'])->orderByDesc('version')->get()
             ->each->setRelation('project', $project);
 
         $selectedId = (int) $request->query('version_id', 0);
@@ -47,29 +53,42 @@ class ProjectBudgetController extends Controller
         $currentBoqs = $project->boqs()->where('status', BoqStatus::Approved)->where('is_current', true)
             ->orderBy('boq_number')->get(['id', 'boq_number', 'version', 'title', 'total_cost_amount']);
 
+        $materialLines = $lines->filter(fn (ProjectBudgetLine $l) => $l->source_type === BudgetLineSource::BoqMaterial)->values();
+        $otherLines = $lines->reject(fn (ProjectBudgetLine $l) => $l->source_type === BudgetLineSource::BoqMaterial)->values();
+
+        $pendingRevision = $project->budgets()
+            ->where('status', BudgetStatus::Approved)
+            ->where('materials_sync_pending', true)
+            ->exists();
+
         return Inertia::render('Budget/Index', [
             'project' => ProjectHeader::for($project),
             'versions' => $versions->map(fn (ProjectBudget $b) => [
-                ...$b->only(['id', 'version', 'total_amount', 'boq_id']),
+                ...$b->only(['id', 'version', 'total_amount', 'boq_id', 'materials_sync_pending']),
                 'status' => $b->status->value,
                 'status_label' => $b->status->label(),
                 'source' => $b->source->value,
                 'source_label' => $b->source->label(),
                 'approved_by' => $b->approver?->name,
                 'approved_at' => $b->approved_at?->toIso8601String(),
+                'materials_synced_at' => $b->materials_synced_at?->toIso8601String(),
+                'boq_label' => $b->boq ? "{$b->boq->boq_number} v{$b->boq->version}" : null,
             ])->all(),
             'budget' => $budget ? [
-                ...$budget->only(['id', 'version', 'total_amount']),
+                ...$budget->only(['id', 'version', 'total_amount', 'boq_id']),
                 'status' => $budget->status->value,
-                'editable' => $budget->status->value === 'draft',
-                'can_approve' => $budget->status->value === 'draft' && $user->can('approve', $budget),
+                'editable' => $budget->status === BudgetStatus::Draft,
+                'can_approve' => $budget->status === BudgetStatus::Draft && $user->can('approve', $budget),
+                'materials_synced_at' => $budget->materials_synced_at?->toIso8601String(),
+                'materials_sync_pending' => (bool) $budget->materials_sync_pending,
+                'boq_label' => $budget->boq
+                    ? "{$budget->boq->boq_number} v{$budget->boq->version}"
+                    : ($versions->firstWhere('id', $budget->id)?->boq_label),
             ] : null,
             'heads' => $byHead,
-            'lines' => $lines->map(fn (ProjectBudgetLine $l) => [
-                ...$l->only(['id', 'description', 'amount', 'boq_item_id']),
-                'cost_head' => $l->cost_head->value,
-                'boq_item' => $l->boqItem ? trim(($l->boqItem->item_code ?? '').' '.$l->boqItem->name) : null,
-            ])->all(),
+            'lines' => $otherLines->map(fn (ProjectBudgetLine $l) => $this->linePayload($l))->all(),
+            'materialLines' => $materialLines->map(fn (ProjectBudgetLine $l) => $this->materialLinePayload($l))->all(),
+            'pendingRevision' => $pendingRevision,
             'boqs' => $currentBoqs->map(fn (Boq $b) => [
                 'value' => $b->id,
                 'label' => "{$b->boq_number} v{$b->version} - {$b->title}",
@@ -92,6 +111,27 @@ class ProjectBudgetController extends Controller
 
         return redirect()->route('projects.budget.index', [$project, 'version_id' => $budget->id])
             ->with('success', "Budget v{$budget->version} generated from {$boq->boq_number} v{$boq->version}.");
+    }
+
+    public function syncMaterials(Request $request, Project $project): RedirectResponse
+    {
+        Gate::authorize('update', [ProjectBudget::class, $project]);
+
+        $data = $request->validate([
+            'boq_id' => ['nullable', 'integer'],
+        ]);
+
+        $draft = $project->budgets()->where('status', BudgetStatus::Draft)->orderByDesc('version')->first();
+        $boqId = $data['boq_id'] ?? $draft?->boq_id;
+        if ($boqId === null) {
+            $boqId = $project->boqs()->where('status', BoqStatus::Approved)->where('is_current', true)->value('id');
+        }
+
+        $boq = $project->boqs()->findOrFail($boqId);
+        $budget = $this->materialSync->syncDraftFromBoq($project, $boq);
+
+        return redirect()->route('projects.budget.index', [$project, 'version_id' => $budget->id])
+            ->with('success', "Materials synced from {$boq->boq_number} v{$boq->version}.");
     }
 
     public function newVersion(Project $project): RedirectResponse
@@ -155,5 +195,37 @@ class ProjectBudgetController extends Controller
             'description' => ['required', 'string', 'max:255'],
             'amount' => ['required', 'numeric', 'min:0', 'max:9999999999999999', 'decimal:0,2'],
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function linePayload(ProjectBudgetLine $l): array
+    {
+        return [
+            ...$l->only(['id', 'description', 'amount', 'boq_item_id']),
+            'cost_head' => $l->cost_head->value,
+            'source_type' => $l->source_type?->value,
+            'boq_item' => $l->boqItem ? trim(($l->boqItem->item_code ?? '').' '.$l->boqItem->name) : null,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function materialLinePayload(ProjectBudgetLine $l): array
+    {
+        return [
+            'id' => $l->id,
+            'material_code' => $l->material_code,
+            'material_name' => $l->material_name,
+            'description' => $l->description,
+            'unit' => $l->unit,
+            'quantity' => $l->quantity !== null ? (string) $l->quantity : null,
+            'rate' => $l->rate !== null ? (string) $l->rate : null,
+            'amount' => (string) $l->amount,
+            'source_count' => is_array($l->sources) ? count($l->sources) : 0,
+            'sources' => $l->sources ?? [],
+        ];
     }
 }

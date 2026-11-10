@@ -3,6 +3,7 @@
 namespace App\Services\Boq;
 
 use App\Enums\Boq\BoqStatus;
+use App\Enums\Boq\BudgetLineSource;
 use App\Enums\Boq\BudgetSource;
 use App\Enums\Boq\BudgetStatus;
 use App\Enums\CostHead;
@@ -40,16 +41,26 @@ class ProjectBudgetService
 
         return DB::transaction(function () use ($project, $boq) {
             $budget = $this->draftFor($project);
-            $budget->forceFill(['source' => BudgetSource::Boq, 'boq_id' => $boq->id])->save();
+            $budget->forceFill([
+                'source' => BudgetSource::Boq,
+                'boq_id' => $boq->id,
+                'materials_sync_pending' => false,
+            ])->save();
 
             $budget->lines()->get()->each->delete();
 
-            $boq->items()->orderBy('sort_order')->orderBy('id')->get()
-                ->each(function (BoqItem $item) use ($budget) {
+            $materials = app(SimpleBoqMaterialCostService::class);
+            $boq->items()->with('simpleMaterialCosts')->orderBy('sort_order')->orderBy('id')->get()
+                ->each(function (BoqItem $item) use ($budget, $materials) {
+                    $skipMaterialHead = $materials->drivesItemRate($item->simpleMaterialCosts);
                     foreach ($this->headAmounts($item) as $head => $amount) {
+                        if ($skipMaterialHead && $head === CostHead::Material->value) {
+                            continue;
+                        }
                         $line = new ProjectBudgetLine([
                             'cost_head' => $head,
                             'boq_item_id' => $item->id,
+                            'source_type' => BudgetLineSource::BoqCostHead->value,
                             'description' => mb_substr(trim(($item->item_code ? $item->item_code.' ' : '').$item->name), 0, 255),
                             'amount' => $amount,
                         ]);
@@ -58,7 +69,9 @@ class ProjectBudgetService
                     }
                 });
 
-            return $this->recalculate($budget);
+            $budget = $this->recalculate($budget);
+
+            return app(BoqBudgetMaterialSyncService::class)->applyToDraft($budget, $boq);
         });
     }
 
@@ -98,10 +111,25 @@ class ProjectBudgetService
             $budget->assertEditable();
 
             $line ??= new ProjectBudgetLine;
+            if ($line->exists && $line->source_type === BudgetLineSource::BoqMaterial) {
+                throw ValidationException::withMessages([
+                    'line' => 'BOQ-generated material lines are updated by Sync from BOQ, not manual edit.',
+                ]);
+            }
             $line->fill([
                 'cost_head' => $data['cost_head'],
                 'description' => $data['description'],
                 'amount' => Decimal::of($data['amount'])->toMoney(),
+                'source_type' => BudgetLineSource::Manual->value,
+                'source_key' => null,
+                'material_id' => null,
+                'material_code' => null,
+                'material_name' => null,
+                'unit' => null,
+                'quantity' => null,
+                'rate' => null,
+                'sources' => null,
+                'boq_item_id' => $line->exists ? $line->boq_item_id : null,
             ]);
             $line->budget()->associate($budget);
             $line->save();
@@ -200,6 +228,31 @@ class ProjectBudgetService
      * Start a new draft version explicitly (copy of the approved budget, if any).
      */
     public function newVersion(Project $project): ProjectBudget
+    {
+        return DB::transaction(function () use ($project) {
+            $budget = $this->draftFor($project);
+
+            $approvedPending = ProjectBudget::query()
+                ->where('project_id', $project->id)
+                ->where('status', BudgetStatus::Approved)
+                ->where('materials_sync_pending', true)
+                ->exists();
+
+            if ($approvedPending && $budget->boq_id) {
+                $boq = Boq::query()->find($budget->boq_id);
+                if ($boq !== null) {
+                    return app(BoqBudgetMaterialSyncService::class)->applyToDraft($budget, $boq);
+                }
+            }
+
+            return $budget;
+        });
+    }
+
+    /**
+     * Open draft budget for the project (creates a new version when the latest is approved).
+     */
+    public function ensureDraft(Project $project): ProjectBudget
     {
         return DB::transaction(fn () => $this->draftFor($project));
     }

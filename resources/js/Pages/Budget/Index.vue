@@ -11,7 +11,7 @@ import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
 import EmptyState from '@/Components/UI/EmptyState.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
-import { formatDate, formatMoney } from '@/lib/format';
+import { formatDate, formatMoney, formatNumber } from '@/lib/format';
 import { Link, router, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
@@ -21,6 +21,8 @@ const props = defineProps({
     budget: { type: Object, default: null },
     heads: { type: Array, required: true },
     lines: { type: Array, required: true },
+    materialLines: { type: Array, default: () => [] },
+    pendingRevision: { type: Boolean, default: false },
     boqs: { type: Array, required: true },
     costHeads: { type: Array, required: true },
     can: { type: Object, required: true },
@@ -37,10 +39,29 @@ const columns = [
     { key: 'amount', label: 'Amount', type: 'money' },
 ];
 
+const materialColumns = [
+    { key: 'material_name', label: 'Material' },
+    { key: 'unit', label: 'Unit' },
+    { key: 'quantity', label: 'Required qty' },
+    { key: 'rate', label: 'Budget rate', type: 'money' },
+    { key: 'amount', label: 'Budget amount', type: 'money' },
+    { key: 'source_count', label: 'BOQ sources' },
+];
+
 const showGenerate = ref(false);
 const generateForm = useForm({ boq_id: props.boqs[0]?.value ?? null });
 function generate() {
     generateForm.post(route('projects.budget.generate', props.project.id), { onSuccess: () => (showGenerate.value = false) });
+}
+
+const syncing = ref(false);
+function syncMaterials() {
+    syncing.value = true;
+    router.post(
+        route('projects.budget.sync-materials', props.project.id),
+        { boq_id: props.budget?.boq_id ?? props.boqs[0]?.value ?? null },
+        { preserveScroll: true, onFinish: () => (syncing.value = false) },
+    );
 }
 
 const lineModal = ref(null);
@@ -57,6 +78,8 @@ function saveLine() {
     const url = line ? route('projects.budget.lines.update', [props.project.id, line.id]) : route('projects.budget.lines.store', props.project.id);
     lineForm[line ? 'put' : 'post'](url, { preserveScroll: true, onSuccess: () => (lineModal.value = null) });
 }
+
+const sourcesModal = ref(null);
 
 const confirming = ref(null);
 const processing = ref(false);
@@ -86,8 +109,13 @@ function confirmAction() {
                 </template>
                 <template v-if="can.update" #actions>
                     <AppButton v-if="boqs.length" size="sm" @click="showGenerate = true">Generate from BOQ</AppButton>
+                    <AppButton v-if="budget?.editable" size="sm" variant="secondary" :loading="syncing" @click="syncMaterials">Sync from BOQ</AppButton>
                     <AppButton v-if="budget && !budget.editable" size="sm" variant="secondary" @click="confirming = { action: 'new' }">New version</AppButton>
                 </template>
+
+                <div v-if="pendingRevision || budget?.materials_sync_pending" class="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-5">
+                    Budget requires revision — BOQ material changes are pending a budget update. Create a new version or sync on a draft budget.
+                </div>
 
                 <div v-if="versions.length" class="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 sm:px-5">
                     <span class="text-xs text-slate-500">Versions:</span>
@@ -119,7 +147,10 @@ function confirmAction() {
                             <p class="text-2xl font-semibold text-slate-900 tabular">{{ formatMoney(budget.total_amount) }}</p>
                             <p class="text-xs text-slate-500">
                                 <template v-for="v in versions.filter((x) => x.id === budget.id)" :key="v.id">
-                                    {{ v.source_label }}<template v-if="v.approved_at"> · approved {{ formatDate(v.approved_at) }}<template v-if="v.approved_by"> by {{ v.approved_by }}</template></template>
+                                    {{ v.source_label }}
+                                    <template v-if="v.boq_label"> · {{ v.boq_label }}</template>
+                                    <template v-if="v.materials_synced_at"> · materials synced {{ formatDate(v.materials_synced_at) }}</template>
+                                    <template v-if="v.approved_at"> · approved {{ formatDate(v.approved_at) }}<template v-if="v.approved_by"> by {{ v.approved_by }}</template></template>
                                 </template>
                             </p>
                         </div>
@@ -134,6 +165,32 @@ function confirmAction() {
                             <StatCard :label="head.label" :value="formatMoney(head.amount)" :tone="headFilter === head.value ? 'orange' : 'slate'" />
                         </button>
                     </div>
+                </div>
+
+                <div v-if="budget" class="border-t border-line px-4 py-4 sm:px-5">
+                    <div class="mb-3">
+                        <h3 class="text-sm font-semibold text-slate-900">Materials from BOQ</h3>
+                        <p class="mt-0.5 text-xs text-slate-500">Calculated from the material requirements saved against BOQ items.</p>
+                    </div>
+                    <DataTable
+                        :columns="materialColumns"
+                        :rows="materialLines"
+                        empty-icon="cube"
+                        empty-title="No BOQ materials"
+                        empty-description="Save materials on BOQ items, then generate or sync the budget."
+                    >
+                        <template #cell-material_name="{ row }">
+                            <div class="text-slate-900">
+                                <span v-if="row.material_code" class="mr-1 text-xs text-slate-500">{{ row.material_code }}</span>
+                                {{ row.material_name || row.description }}
+                            </div>
+                        </template>
+                        <template #cell-quantity="{ value }">{{ value != null ? formatNumber(value, 4) : '—' }}</template>
+                        <template #cell-rate="{ value }">{{ value != null ? formatMoney(value) : '—' }}</template>
+                        <template #cell-source_count="{ row }">
+                            <AppButton variant="ghost" size="sm" @click="sourcesModal = row">View sources ({{ row.source_count }})</AppButton>
+                        </template>
+                    </DataTable>
                 </div>
 
                 <DataTable v-if="budget" :columns="columns" :rows="visibleLines" empty-icon="banknotes" empty-title="No lines" :empty-description="headFilter !== 'all' ? 'No lines for this cost head.' : null">
@@ -154,7 +211,7 @@ function confirmAction() {
             <form id="generate-form" class="space-y-3" @submit.prevent="generate">
                 <FormSelect v-model="generateForm.boq_id" label="Approved BOQ" required :options="boqs" :error="generateForm.errors.boq_id" />
                 <p class="text-xs text-slate-500">
-                    One budget line is created per BOQ line and cost head (material, labour, equipment, subcontract). A draft budget is rebuilt; an approved budget is kept and a new draft version is created.
+                    Cost-head lines are created from BOQ rates. Material requirements saved on BOQ items are aggregated into Materials from BOQ. A draft budget is rebuilt; an approved budget is kept and a new draft version is created.
                 </p>
             </form>
             <template #footer>
@@ -176,10 +233,51 @@ function confirmAction() {
             </template>
         </AppModal>
 
+        <AppModal :show="!!sourcesModal" title="BOQ material sources" max-width="2xl" @close="sourcesModal = null">
+            <div v-if="sourcesModal" class="space-y-3">
+                <p class="text-sm text-slate-700">
+                    <span class="font-medium">{{ sourcesModal.material_name }}</span>
+                    <span v-if="sourcesModal.unit" class="text-slate-500"> · {{ sourcesModal.unit }}</span>
+                </p>
+                <div class="overflow-x-auto rounded-md border border-line">
+                    <table class="min-w-full text-left text-xs">
+                        <thead class="bg-slate-50 text-slate-500">
+                            <tr>
+                                <th class="px-3 py-2 font-medium">BOQ</th>
+                                <th class="px-3 py-2 font-medium">Item</th>
+                                <th class="px-3 py-2 font-medium">BOQ qty</th>
+                                <th class="px-3 py-2 font-medium">Per unit</th>
+                                <th class="px-3 py-2 font-medium">Calc qty</th>
+                                <th class="px-3 py-2 font-medium">Rate</th>
+                                <th class="px-3 py-2 font-medium">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(src, idx) in sourcesModal.sources" :key="idx" class="border-t border-line">
+                                <td class="px-3 py-2">{{ src.boq_number }} v{{ src.boq_version }}</td>
+                                <td class="px-3 py-2">
+                                    <div>{{ src.item_code }} {{ src.item_name }}</div>
+                                    <div class="text-slate-400">{{ src.boq_line_uid }}</div>
+                                </td>
+                                <td class="px-3 py-2 tabular">{{ formatNumber(src.boq_quantity, 4) }}</td>
+                                <td class="px-3 py-2 tabular">{{ formatNumber(src.per_unit_quantity, 4) }}</td>
+                                <td class="px-3 py-2 tabular">{{ formatNumber(src.calculated_quantity, 4) }}</td>
+                                <td class="px-3 py-2 tabular">{{ formatMoney(src.rate) }}</td>
+                                <td class="px-3 py-2 tabular">{{ formatMoney(src.amount) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <template #footer>
+                <AppButton variant="secondary" @click="sourcesModal = null">Close</AppButton>
+            </template>
+        </AppModal>
+
         <ConfirmDialog
             :show="!!confirming"
             :title="{ approve: 'Approve this budget?', new: 'Start a new budget version?', delete: 'Delete this line?' }[confirming?.action] ?? ''"
-            :message="{ approve: 'The approved budget is locked. Any previously approved version is marked superseded.', new: 'A draft copy of the approved budget is created for editing.', delete: null }[confirming?.action] ?? null"
+            :message="{ approve: 'The approved budget is locked. Any previously approved version is marked superseded.', new: 'A draft copy of the approved budget is created for editing. Pending BOQ material changes are synced when present.', delete: null }[confirming?.action] ?? null"
             :confirm-label="{ approve: 'Approve', new: 'Create draft', delete: 'Delete' }[confirming?.action] ?? 'Confirm'"
             :danger="confirming?.action === 'delete'"
             :processing="processing"
