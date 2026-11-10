@@ -18,8 +18,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * register itself only toggles available ↔ disposed.
  */
 #[Fillable([
-    'code', 'name', 'equipment_type_id', 'ownership', 'owner_vendor_id', 'registration_no', 'serial_no',
-    'make', 'model', 'manufacture_year', 'purchase_date', 'purchase_value', 'hourly_rate', 'daily_rate',
+    'code', 'name', 'equipment_type_id', 'ownership', 'owner_vendor_id', 'source_purchase_order_id', 'source_grn_id',
+    'registration_no', 'serial_no', 'make', 'model', 'capacity_rating', 'manufacture_year', 'purchase_date',
+    'warranty_start', 'warranty_end', 'purchase_value', 'hourly_rate', 'daily_rate',
     'status', 'location_type', 'location_project_id', 'location_name', 'location_notes', 'is_active', 'remarks',
 ])]
 class Equipment extends MasterModel
@@ -39,6 +40,8 @@ class Equipment extends MasterModel
             'location_updated_at' => 'datetime',
             'manufacture_year' => 'integer',
             'purchase_date' => 'date',
+            'warranty_start' => 'date',
+            'warranty_end' => 'date',
             'purchase_value' => 'decimal:2',
             'hourly_rate' => 'decimal:4',
             'daily_rate' => 'decimal:4',

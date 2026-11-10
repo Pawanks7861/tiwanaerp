@@ -40,6 +40,8 @@ class ApprovalWorkflowRequest extends FormRequest
         $this->merge([
             'name' => is_string($this->input('name')) ? trim($this->input('name')) : $this->input('name'),
             'is_active' => $this->boolean('is_active'),
+            'min_amount' => filled($this->input('min_amount')) ? $this->input('min_amount') : null,
+            'max_amount' => filled($this->input('max_amount')) ? $this->input('max_amount') : null,
             'steps' => $steps,
         ]);
     }
@@ -51,6 +53,8 @@ class ApprovalWorkflowRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:150'],
             'is_active' => ['required', 'boolean'],
+            'min_amount' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:999999999999'],
+            'max_amount' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:999999999999'],
             'steps' => ['required', 'array', 'min:1', 'max:10'],
             'steps.*.name' => ['required', 'string', 'max:100'],
             'steps.*.approver_type' => ['required', Rule::enum(ApproverType::class)],

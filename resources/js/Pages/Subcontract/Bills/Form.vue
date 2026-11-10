@@ -36,6 +36,10 @@ const form = useForm({
     period_from: props.bill?.period_from ?? null,
     period_to: props.bill?.period_to ?? props.today,
     remarks: props.bill?.remarks ?? '',
+    mb_number: props.bill?.mb_number ?? '',
+    mb_date: props.bill?.mb_date ?? null,
+    mb_reference: props.bill?.mb_reference ?? '',
+    mb_notes: props.bill?.mb_notes ?? '',
     advance_recovery: props.bill && props.bill.advance_recovery !== '0.00' ? props.bill.advance_recovery : null,
     other_deductions: props.bill && props.bill.other_deductions !== '0.00' ? props.bill.other_deductions : null,
     items: (props.workOrder?.lines ?? []).map((l) => ({ work_order_item_id: l.id, claimed_qty: dec(l.claimed_qty).isZero() ? null : l.claimed_qty })),
@@ -61,7 +65,14 @@ const overBalance = (line, i) => dec(form.items[i]?.claimed_qty).greaterThan(dec
 
 function submit() {
     const transform = (d) => {
-        const data = { ...d, subcontractor_invoice_no: d.subcontractor_invoice_no || null, remarks: d.remarks || null };
+        const data = {
+            ...d,
+            subcontractor_invoice_no: d.subcontractor_invoice_no || null,
+            mb_number: d.mb_number || null,
+            mb_reference: d.mb_reference || null,
+            mb_notes: d.mb_notes || null,
+            remarks: d.remarks || null,
+        };
         if (editing.value) {
             delete data.work_order_id;
         }
@@ -99,6 +110,13 @@ function submit() {
                     <FormInput v-model="form.subcontractor_invoice_no" label="Subcontractor invoice no." maxlength="60" :error="form.errors.subcontractor_invoice_no" />
                     <FormInput v-model="form.period_from" type="date" label="Work from" required :error="form.errors.period_from" />
                     <FormInput v-model="form.period_to" type="date" label="Work to" required :min="form.period_from" :error="form.errors.period_to" />
+                </div>
+                <div class="grid gap-4 border-t border-line p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-4">
+                    <p class="sm:col-span-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Measurement book (optional)</p>
+                    <FormInput v-model="form.mb_number" label="MB number" maxlength="50" :error="form.errors.mb_number" />
+                    <FormInput v-model="form.mb_date" type="date" label="MB date" :max="today" :error="form.errors.mb_date" />
+                    <FormInput v-model="form.mb_reference" label="MB reference" maxlength="100" class="sm:col-span-2" :error="form.errors.mb_reference" />
+                    <FormInput v-model="form.mb_notes" label="MB notes" class="sm:col-span-2 lg:col-span-4" :error="form.errors.mb_notes" />
                 </div>
             </AppCard>
 

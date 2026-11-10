@@ -10,7 +10,7 @@ import SkeletonList from '@/Components/UI/Skeleton/SkeletonList.vue';
 import { useContentSkeleton } from '@/composables/useContentSkeleton';
 import { formatDateTime } from '@/lib/format';
 import { router, useForm } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 /**
  * Files attached to a record. Files are stored privately and downloaded through an
@@ -25,9 +25,18 @@ const props = defineProps({
     title: { type: String, default: 'Documents' },
     embedded: { type: Boolean, default: false },
     placeholder: { type: String, default: 'GST certificate, PAN, cancelled cheque…' },
+    fixedCategory: { type: String, default: '' },
 });
 
-const form = useForm({ attachable_type: props.attachableType, attachable_id: props.attachableId, category: '' });
+const form = useForm({ attachable_type: props.attachableType, attachable_id: props.attachableId, category: props.fixedCategory || '' });
+
+const visibleAttachments = computed(() => {
+    if (!props.fixedCategory) {
+        return props.attachments;
+    }
+
+    return props.attachments.filter((file) => (file.category || '').toLowerCase() === props.fixedCategory.toLowerCase());
+});
 const sectionLoading = useContentSkeleton();
 const viewing = ref(null);
 const removing = ref(null);
@@ -59,24 +68,24 @@ function size(bytes) {
 </script>
 
 <template>
-    <component :is="embedded ? 'div' : AppCard" v-bind="embedded ? { class: 'rounded-xl border border-line' } : { title, subtitle: `${attachments.length} file${attachments.length === 1 ? '' : 's'}`, padded: false }">
+    <component :is="embedded ? 'div' : AppCard" v-bind="embedded ? { class: 'rounded-xl border border-line' } : { title, subtitle: `${visibleAttachments.length} file${visibleAttachments.length === 1 ? '' : 's'}`, padded: false }">
         <div v-if="canUpload" class="space-y-3 border-b border-line p-3 sm:p-4">
-            <FormInput v-model="form.category" label="Document type (optional)" :placeholder="placeholder" maxlength="50" :error="form.errors.category" />
+            <FormInput v-if="!fixedCategory" v-model="form.category" label="Document type (optional)" :placeholder="placeholder" maxlength="50" :error="form.errors.category" />
             <LargeFileUploader
                 module="attachment"
                 :source-type="attachableType"
                 :source-id="attachableId"
-                :category="form.category"
+                :category="fixedCategory || form.category"
                 @completed="uploaded"
             />
         </div>
 
-        <div v-if="sectionLoading && !attachments.length" aria-busy="true">
+        <div v-if="sectionLoading && !visibleAttachments.length" aria-busy="true">
             <span class="sr-only">Loading content…</span>
             <SkeletonList :rows="3" />
         </div>
-        <ul v-else-if="attachments.length" class="divide-y divide-line">
-            <li v-for="file in attachments" :key="file.id" class="flex items-center gap-3 px-3 py-3 sm:px-4">
+        <ul v-else-if="visibleAttachments.length" class="divide-y divide-line">
+            <li v-for="file in visibleAttachments" :key="file.id" class="flex items-center gap-3 px-3 py-3 sm:px-4">
                 <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-[10px] font-bold text-slate-500 uppercase">
                     {{ file.extension }}
                 </div>

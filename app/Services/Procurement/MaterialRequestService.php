@@ -137,6 +137,8 @@ class MaterialRequestService
             'request_date' => $data['request_date'],
             'required_date' => $data['required_date'] ?? null,
             'priority' => $data['priority'],
+            'procurement_category' => $data['procurement_category'] ?? 'material',
+            'equipment_meta' => $data['equipment_meta'] ?? null,
             'remarks' => $data['remarks'] ?? null,
         ];
     }

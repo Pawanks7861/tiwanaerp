@@ -13,6 +13,7 @@ use App\Models\Finance\VendorBillItem;
 use App\Models\Procurement\PurchaseOrder;
 use App\Models\Projects\Project;
 use App\Services\Finance\VendorBillService;
+use App\Services\Finance\VendorInvoiceMatchingService;
 use App\Support\Math\Decimal;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,7 +23,10 @@ use Illuminate\Validation\Rule;
 
 class VendorBillApiController extends Controller
 {
-    public function __construct(private readonly VendorBillService $bills) {}
+    public function __construct(
+        private readonly VendorBillService $bills,
+        private readonly VendorInvoiceMatchingService $matching,
+    ) {}
 
     public function index(Request $request, Project $project): AnonymousResourceCollection
     {
@@ -96,7 +100,10 @@ class VendorBillApiController extends Controller
         $this->assertOnProject($project, $vendorBill);
         Gate::authorize('view', $vendorBill);
 
-        return new VendorBillResource($this->detail($vendorBill));
+        $bill = $this->detail($vendorBill);
+        $bill->offsetSet('matching', $this->matching->analyze($bill));
+
+        return new VendorBillResource($bill);
     }
 
     public function update(Request $request, Project $project, VendorBill $vendorBill): VendorBillResource

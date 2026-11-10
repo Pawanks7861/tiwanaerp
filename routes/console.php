@@ -11,3 +11,7 @@ Artisan::command('inspire', function () {
 Schedule::command('inventory:scan-low-stock')->dailyAt('07:00')->withoutOverlapping();
 Schedule::command('planning:flag-delays')->dailyAt('06:30')->withoutOverlapping();
 Schedule::command('uploads:cleanup')->hourly()->withoutOverlapping();
+Schedule::command('gate-passes:notify-overdue')->dailyAt('07:15')->withoutOverlapping();
+Schedule::command('procurement:notify-pending-receipts')->dailyAt('07:20')->withoutOverlapping();
+Schedule::command('finance:notify-unprocessed-invoices')->dailyAt('07:25')->withoutOverlapping();
+Schedule::command('finance:notify-payment-due')->dailyAt('07:30')->withoutOverlapping();

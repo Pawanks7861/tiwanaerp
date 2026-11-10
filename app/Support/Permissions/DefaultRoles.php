@@ -127,7 +127,7 @@ final class DefaultRoles
                 'permissions' => [
                     'dashboard.view', 'dashboard.view_financials', 'approvals.view', 'projects.view', 'projects.view_all',
                     'expenses.*', 'petty_cash.*', 'billing.view', 'vendor_bills.*', 'payments.view', 'payments.record',
-                    'subcontract.view', 'labour.view', 'labour.manage_payments', 'equipment.view', 'purchase.view', 'grn.view',
+                    'subcontract.view', 'subcontract.process', 'labour.view', 'labour.manage_payments', 'equipment.view', 'purchase.view', 'grn.view',
                     'reports.*', 'inventory.view', 'inventory.view_valuation',
                     'tally.view', 'tally.sync', 'tally.retry', 'tally.mapping',
                     'masters.vendors.view', 'masters.subcontractors.view', 'masters.expense_categories.*',

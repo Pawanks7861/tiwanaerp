@@ -60,7 +60,7 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
-    'client_id', 'code', 'name', 'description', 'project_type', 'address', 'city', 'state_code',
+    'client_id', 'department_id', 'code', 'name', 'description', 'project_type', 'address', 'city', 'state_code',
     'latitude', 'longitude', 'project_manager_id', 'start_date', 'expected_end_date',
     'actual_end_date', 'contract_value',
 ])]

@@ -12,6 +12,7 @@ import Icon from '@/Components/UI/Icon.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatDate, formatDateTime, formatMoney, formatPercent, formatQty, formatRate } from '@/lib/format';
+import FormInput from '@/Components/Form/FormInput.vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
@@ -46,6 +47,10 @@ function saveAdjust() {
 const confirming = ref(null);
 const reversing = ref(false);
 const processing = ref(false);
+const processForm = useForm({ processing_reference: '', processing_notes: '' });
+function markProcessed() {
+    processForm.post(route('projects.subcontractor-bills.process', [props.project.id, props.bill.id]), { preserveScroll: true });
+}
 const ACTIONS = {
     submit: { title: 'Submit for certification?', message: 'Quantities are checked against the work order balance, including other bills awaiting certification.', label: 'Submit', danger: false, method: 'post', route: 'projects.subcontractor-bills.submit' },
     delete: { title: 'Delete this bill?', message: 'This draft will be removed.', label: 'Delete', danger: true, method: 'delete', route: 'projects.subcontractor-bills.destroy' },
@@ -94,7 +99,10 @@ const statusNote = computed(() => {
                             <div><dt class="text-slate-500">Bill date</dt><dd>{{ formatDate(bill.bill_date) }}</dd></div>
                             <div><dt class="text-slate-500">Work period</dt><dd>{{ formatDate(bill.period_from) }} – {{ formatDate(bill.period_to) }}</dd></div>
                             <div v-if="bill.subcontractor_invoice_no"><dt class="text-slate-500">Invoice no.</dt><dd>{{ bill.subcontractor_invoice_no }}</dd></div>
+                            <div v-if="bill.mb_number"><dt class="text-slate-500">MB no.</dt><dd>{{ bill.mb_number }}</dd></div>
+                            <div v-if="bill.mb_date"><dt class="text-slate-500">MB date</dt><dd>{{ formatDate(bill.mb_date) }}</dd></div>
                         </dl>
+                        <p v-if="bill.processed_at" class="mt-2 text-xs font-medium text-emerald-800">Processed {{ formatDateTime(bill.processed_at) }}<template v-if="bill.processed_by"> by {{ bill.processed_by }}</template><template v-if="bill.processing_reference"> · {{ bill.processing_reference }}</template></p>
                         <p class="mt-2 text-xs text-slate-500">
                             Created by {{ bill.created_by ?? '—' }}
                             <template v-if="bill.certified_at"> · Certified {{ formatDateTime(bill.certified_at) }} by {{ bill.certified_by }}</template>
@@ -105,6 +113,7 @@ const statusNote = computed(() => {
                         <AppButton v-if="can.update" size="sm" variant="secondary" icon="pencil" :href="route('projects.subcontractor-bills.edit', [project.id, bill.id])">Edit</AppButton>
                         <AppButton v-if="can.submit" size="sm" @click="confirming = 'submit'">Submit for certification</AppButton>
                         <ApprovalActions :approval="approval" noun="bill" />
+                        <AppButton v-if="can.process" size="sm" variant="secondary" :loading="processForm.processing" @click="markProcessed">Mark processed</AppButton>
                         <AppButton v-if="can.reverse" size="sm" variant="danger" @click="reversing = true">Reverse certification</AppButton>
                         <AppButton v-if="can.delete" size="sm" variant="ghost" icon="trash" aria-label="Delete bill" @click="confirming = 'delete'" />
                     </div>
@@ -166,6 +175,19 @@ const statusNote = computed(() => {
                 </AppCard>
             </div>
 
+            <AppCard v-if="bill.mb_reference || bill.mb_notes" title="Measurement book">
+                <dl class="grid gap-2 text-sm sm:grid-cols-2">
+                    <div v-if="bill.mb_reference"><dt class="text-slate-500">Reference</dt><dd>{{ bill.mb_reference }}</dd></div>
+                    <div v-if="bill.mb_notes" class="sm:col-span-2"><dt class="text-slate-500">Notes</dt><dd class="whitespace-pre-line">{{ bill.mb_notes }}</dd></div>
+                </dl>
+            </AppCard>
+            <AttachmentPanel title="Measurement book files" fixed-category="measurement_book" :attachments="attachments" attachable-type="subcontractor_bill" :attachable-id="bill.id" :can-upload="can.attach" :can-delete="can.attach" placeholder="Signed measurement book…" />
+            <AppCard v-if="can.process" title="Accounts processing" subtitle="Separate from certification; does not mark the bill paid.">
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <FormInput v-model="processForm.processing_reference" label="Processing reference" maxlength="100" :error="processForm.errors.processing_reference" />
+                    <FormInput v-model="processForm.processing_notes" label="Notes" class="sm:col-span-2" :error="processForm.errors.processing_notes" />
+                </div>
+            </AppCard>
             <AttachmentPanel :attachments="attachments" attachable-type="subcontractor_bill" :attachable-id="bill.id" :can-upload="can.attach" :can-delete="can.attach" placeholder="Measurement sheet, invoice copy…" />
         </div>
 

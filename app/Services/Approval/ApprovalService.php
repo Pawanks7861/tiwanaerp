@@ -25,7 +25,10 @@ use Illuminate\Support\Facades\DB;
  */
 class ApprovalService
 {
-    public function __construct(private readonly ApproverResolver $resolver) {}
+    public function __construct(
+        private readonly ApproverResolver $resolver,
+        private readonly ApprovalDelegationService $delegations,
+    ) {}
 
     public function submit(Approvable&Model $document, User $submitter): ApprovalRequest
     {
@@ -81,7 +84,7 @@ class ApprovalService
             $this->assertCanAct($request, $approver);
 
             $level = $request->current_level;
-            $this->recordAction($request, $approver, ApprovalActionType::Approved, $comments);
+            $this->recordAction($request, $approver, ApprovalActionType::Approved, $this->delegationComments($request, $approver, $comments));
 
             if (! $this->isLevelComplete($request, $level)) {
                 return $request;
@@ -156,7 +159,11 @@ class ApprovalService
             ->where('action', ApprovalActionType::Approved)
             ->exists();
 
-        return ! $alreadyActed && $this->resolver->forLevel($request, $request->current_level)->contains('id', $user->id);
+        $approvers = $this->resolver->forLevel($request, $request->current_level);
+        $canDirect = $approvers->contains('id', $user->id);
+        $canDelegate = $this->delegations->delegatorCovering($user, $request) !== null;
+
+        return ! $alreadyActed && ($canDirect || $canDelegate);
     }
 
     /**
@@ -284,5 +291,18 @@ class ApprovalService
             'comments' => $comments,
             'acted_at' => now(),
         ]);
+    }
+
+    private function delegationComments(ApprovalRequest $request, User $actor, ?string $comments): ?string
+    {
+        $delegatorId = $this->delegations->delegatorCovering($actor, $request);
+        if ($delegatorId === null) {
+            return $comments;
+        }
+
+        $name = User::query()->whereKey($delegatorId)->value('name') ?? 'approver';
+        $prefix = "Delegated from {$name}";
+
+        return filled($comments) ? "{$prefix}: {$comments}" : $prefix;
     }
 }

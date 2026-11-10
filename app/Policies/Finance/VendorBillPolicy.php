@@ -44,4 +44,12 @@ class VendorBillPolicy
     {
         return $this->update($user, $bill);
     }
+
+    public function process(User $user, VendorBill $bill): bool
+    {
+        return $user->can('vendor_bills.process')
+            && $bill->status->isApproved()
+            && $bill->processed_at === null
+            && $this->projects->view($user, $bill->project);
+    }
 }

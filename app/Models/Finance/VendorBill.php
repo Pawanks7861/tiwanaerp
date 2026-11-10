@@ -34,7 +34,10 @@ class VendorBill extends Model implements Approvable
 {
     use Auditable, BelongsToCompany, Blameable, HasApprovals, HasAttachments, LocksWhenNotEditable, SoftDeletes;
 
-    public const LIFECYCLE_COLUMNS = ['status', 'approved_by', 'approved_at', 'paid_amount', 'updated_by', 'updated_at'];
+    public const LIFECYCLE_COLUMNS = [
+        'status', 'approved_by', 'approved_at', 'processed_by', 'processed_at', 'processing_reference', 'processing_notes',
+        'paid_amount', 'updated_by', 'updated_at',
+    ];
 
     protected $guarded = ['*'];
 
@@ -57,6 +60,7 @@ class VendorBill extends Model implements Approvable
             'net_payable' => 'decimal:2',
             'paid_amount' => 'decimal:2',
             'approved_at' => 'datetime',
+            'processed_at' => 'datetime',
         ];
     }
 
@@ -121,6 +125,14 @@ class VendorBill extends Model implements Approvable
     public function approver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function processor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'processed_by');
     }
 
     public function approvalDocumentType(): string

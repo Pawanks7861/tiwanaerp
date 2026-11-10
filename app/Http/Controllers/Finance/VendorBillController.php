@@ -18,6 +18,7 @@ use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Finance\PayableService;
 use App\Services\Finance\VendorBillService;
+use App\Services\Finance\VendorInvoiceMatchingService;
 use App\Support\Math\Decimal;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -29,7 +30,11 @@ use Inertia\Response;
 
 class VendorBillController extends Controller
 {
-    public function __construct(private readonly VendorBillService $bills, private readonly PayableService $payables) {}
+    public function __construct(
+        private readonly VendorBillService $bills,
+        private readonly PayableService $payables,
+        private readonly VendorInvoiceMatchingService $matching,
+    ) {}
 
     public function index(Request $request, Project $project): Response
     {
@@ -75,7 +80,7 @@ class VendorBillController extends Controller
     {
         Gate::authorize('view', $vendorBill);
         $user = $request->user();
-        $bill = $vendorBill->load(['vendor:id,code,name,gstin,state_code', 'purchaseOrder:id,po_number', 'task:id,wbs_code,name', 'approver:id,name', 'creator:id,name']);
+        $bill = $vendorBill->load(['vendor:id,code,name,gstin,state_code', 'purchaseOrder:id,po_number', 'task:id,wbs_code,name', 'approver:id,name', 'processor:id,name', 'creator:id,name']);
         $items = $bill->items()->with(['unit:id,symbol', 'grnItem:id,grn_id,received_qty,accepted_qty', 'grnItem.grn:id,grn_number', 'purchaseOrderItem:id,quantity'])->get();
         $billed = $this->billedElsewhere($bill, $items);
 
@@ -95,7 +100,12 @@ class VendorBillController extends Controller
                 'created_by' => $bill->creator?->name,
                 'approved_by' => $bill->approver?->name,
                 'approved_at' => $bill->approved_at?->toIso8601String(),
+                'processed_at' => $bill->processed_at?->toIso8601String(),
+                'processed_by' => $bill->processor?->name,
+                'processing_reference' => $bill->processing_reference,
+                'processing_notes' => $bill->processing_notes,
             ],
+            'matching' => $this->matching->analyze($bill),
             'items' => $items->map(fn (VendorBillItem $i) => [
                 'id' => $i->id,
                 ...$i->only(['description', 'hsn_sac', 'quantity', 'rate', 'discount_percent', 'taxable_amount', 'cgst_amount', 'sgst_amount', 'igst_amount', 'amount']),
@@ -146,6 +156,18 @@ class VendorBillController extends Controller
         $this->bills->submit($vendorBill, $request->user());
 
         return back()->with('success', 'Vendor bill submitted for approval.');
+    }
+
+    public function process(Request $request, Project $project, VendorBill $vendorBill): RedirectResponse
+    {
+        Gate::authorize('process', $vendorBill);
+
+        $this->bills->process($vendorBill, $request->user(), $request->validate([
+            'processing_reference' => ['nullable', 'string', 'max:100'],
+            'processing_notes' => ['nullable', 'string', 'max:2000'],
+        ]));
+
+        return back()->with('success', 'Vendor bill marked as processed for accounts.');
     }
 
     /**
@@ -286,6 +308,7 @@ class VendorBillController extends Controller
             'update' => $editable && $user->can('update', $bill),
             'delete' => $editable && $user->can('delete', $bill),
             'submit' => $editable && $user->can('submit', $bill),
+            'process' => $user->can('process', $bill),
             'attach' => $editable && $user->can('update', $bill),
         ];
     }

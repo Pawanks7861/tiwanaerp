@@ -1,4 +1,5 @@
 <script setup>
+import DecimalInput from '@/Components/Form/DecimalInput.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import FormSelect from '@/Components/Form/FormSelect.vue';
 import FormSwitch from '@/Components/Form/FormSwitch.vue';
@@ -9,6 +10,7 @@ import Icon from '@/Components/UI/Icon.vue';
 import PageHeader from '@/Components/UI/PageHeader.vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useForm } from '@inertiajs/vue3';
+import { ref } from 'vue';
 
 const props = defineProps({
     type: { type: String, required: true },
@@ -26,8 +28,33 @@ const props = defineProps({
 const form = useForm({
     name: props.workflow.name,
     is_active: !!props.workflow.is_active,
+    min_amount: props.workflow.min_amount,
+    max_amount: props.workflow.max_amount,
     steps: props.workflow.steps.map(cloneStep),
 });
+
+const previewAmount = ref('');
+const previewResult = ref(null);
+const previewLoading = ref(false);
+
+async function runPreview() {
+    previewLoading.value = true;
+    previewResult.value = null;
+    try {
+        const res = await fetch(route('admin.workflows.preview', props.type), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-XSRF-TOKEN': decodeURIComponent(document.cookie.match(/XSRF-TOKEN=([^;]+)/)?.[1] ?? ''),
+            },
+            body: JSON.stringify({ amount: previewAmount.value }),
+        });
+        previewResult.value = await res.json();
+    } finally {
+        previewLoading.value = false;
+    }
+}
 
 function cloneStep(step = {}) {
     return {
@@ -101,6 +128,21 @@ function submit() {
                             :disabled="!can.manage"
                         />
                     </div>
+                </div>
+                <div class="mt-4 grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
+                    <DecimalInput v-model="form.min_amount" label="Minimum amount (optional)" prefix="₹" :disabled="!can.manage" :error="form.errors.min_amount" />
+                    <DecimalInput v-model="form.max_amount" label="Maximum amount (optional)" prefix="₹" :disabled="!can.manage" :error="form.errors.max_amount" />
+                </div>
+                <div class="mt-4 border-t border-line pt-4">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Preview</p>
+                    <div class="mt-2 flex flex-wrap items-end gap-2">
+                        <DecimalInput v-model="previewAmount" label="Document amount" prefix="₹" class="min-w-40" />
+                        <AppButton type="button" size="sm" variant="secondary" :loading="previewLoading" @click="runPreview">Resolve workflow</AppButton>
+                    </div>
+                    <p v-if="previewResult?.workflow_name" class="mt-2 text-sm text-slate-700">
+                        {{ previewResult.workflow_name }}
+                        <span v-if="previewResult.steps?.length" class="text-slate-500">· {{ previewResult.steps.map((s) => s.name).join(' → ') }}</span>
+                    </p>
                 </div>
                 <p v-if="form.errors.steps" class="mt-3 text-sm text-red-600">{{ form.errors.steps }}</p>
             </AppCard>

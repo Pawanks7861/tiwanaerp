@@ -3,6 +3,7 @@
 namespace App\Reports;
 
 use App\Models\User;
+use App\Reports\Definitions\AdvanceRegisterReport;
 use App\Reports\Definitions\BoqCostBuildUpReport;
 use App\Reports\Definitions\BoqHealthRiskReport;
 use App\Reports\Definitions\BoqItemAnalysisReport;
@@ -27,7 +28,10 @@ use App\Reports\Definitions\QualityReport;
 use App\Reports\Definitions\ReceivablesReport;
 use App\Reports\Definitions\StockLedgerReport;
 use App\Reports\Definitions\StockSummaryReport;
+use App\Reports\Definitions\RetentionRegisterReport;
+use App\Reports\Definitions\RgpOutstandingReport;
 use App\Reports\Definitions\SubcontractReport;
+use App\Reports\Definitions\WorkflowAgeingReport;
 
 /**
  * The report catalogue (architecture P, Phase 9 — the 17 standard reports plus the CRM funnel).
@@ -61,6 +65,10 @@ final class ReportRegistry
         EquipmentReport::class,
         QualityReport::class,
         CrmFunnelReport::class,
+        RgpOutstandingReport::class,
+        AdvanceRegisterReport::class,
+        RetentionRegisterReport::class,
+        WorkflowAgeingReport::class,
     ];
 
     /** @var array<string, ReportDefinition>|null */

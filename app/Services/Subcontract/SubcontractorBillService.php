@@ -313,10 +313,43 @@ class SubcontractorBillService
         return [
             'bill_date' => $data['bill_date'],
             'subcontractor_invoice_no' => $data['subcontractor_invoice_no'] ?? null,
+            'mb_number' => filled($data['mb_number'] ?? null) ? trim((string) $data['mb_number']) : null,
+            'mb_date' => $data['mb_date'] ?? null,
+            'mb_reference' => filled($data['mb_reference'] ?? null) ? trim((string) $data['mb_reference']) : null,
+            'mb_notes' => $data['mb_notes'] ?? null,
             'period_from' => $data['period_from'],
             'period_to' => $data['period_to'],
             'remarks' => $data['remarks'] ?? null,
         ];
+    }
+
+    /**
+     * Marks the bill as processed for accounts without changing payment status.
+     *
+     * @param  array{processing_reference?: string|null, processing_notes?: string|null}  $data
+     */
+    public function process(SubcontractorBill $bill, User $user, array $data = []): void
+    {
+        DB::transaction(function () use ($bill, $user, $data) {
+            $locked = SubcontractorBill::query()->whereKey($bill->id)->lockForUpdate()->firstOrFail();
+            if (! $locked->isCertified()) {
+                throw ValidationException::withMessages(['bill' => 'Only a certified subcontractor bill can be processed.']);
+            }
+            if ($locked->processed_at !== null) {
+                throw ValidationException::withMessages(['bill' => 'This bill was already processed.']);
+            }
+            if (! CompanyPermission::check($user, (int) $locked->company_id, 'subcontract.process')) {
+                throw ValidationException::withMessages(['bill' => 'Processing a subcontractor bill needs the subcontract.process permission.']);
+            }
+
+            $locked->forceFill([
+                'processed_by' => $user->id,
+                'processed_at' => now(),
+                'processing_reference' => filled($data['processing_reference'] ?? null) ? trim((string) $data['processing_reference']) : null,
+                'processing_notes' => $data['processing_notes'] ?? null,
+            ])->save();
+            $bill->setRawAttributes($locked->getAttributes(), true);
+        });
     }
 
     /**

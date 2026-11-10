@@ -12,7 +12,8 @@ import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatDate, formatDateTime, formatMoney, formatPercent, formatQty, formatRate } from '@/lib/format';
 import { usePermissions } from '@/lib/permissions';
-import { Link, router, usePage } from '@inertiajs/vue3';
+import FormInput from '@/Components/Form/FormInput.vue';
+import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 const props = defineProps({
@@ -24,6 +25,7 @@ const props = defineProps({
     audit: { type: Array, default: () => [] },
     can: { type: Object, required: true },
     tally: { type: Object, default: null },
+    matching: { type: Object, default: null },
 });
 
 const { can: canDo } = usePermissions();
@@ -33,6 +35,10 @@ const direct = computed(() => props.bill.bill_type === 'direct');
 
 const confirming = ref(null);
 const processing = ref(false);
+const processForm = useForm({ processing_reference: '', processing_notes: '' });
+function markProcessed() {
+    processForm.post(route('projects.vendor-bills.process', [props.project.id, props.bill.id]), { preserveScroll: true });
+}
 const ACTIONS = {
     submit: { title: 'Submit for approval?', message: 'Quantities are re-checked against accepted GRN quantities, including other bills awaiting approval.', label: 'Submit', danger: false, method: 'post', route: 'projects.vendor-bills.submit' },
     delete: { title: 'Delete this bill?', message: 'This draft will be removed.', label: 'Delete', danger: true, method: 'delete', route: 'projects.vendor-bills.destroy' },
@@ -92,11 +98,13 @@ const statusNote = computed(() => {
                             Created by {{ bill.created_by ?? '—' }}
                             <template v-if="bill.approved_at"> · Approved {{ formatDateTime(bill.approved_at) }} by {{ bill.approved_by }}</template>
                         </p>
+                        <p v-if="bill.processed_at" class="mt-1 text-xs font-medium text-emerald-800">Processed {{ formatDateTime(bill.processed_at) }}<template v-if="bill.processed_by"> by {{ bill.processed_by }}</template></p>
                     </div>
                     <div class="flex flex-wrap gap-2 lg:justify-end">
                         <AppButton v-if="can.update" size="sm" variant="secondary" icon="pencil" :href="route('projects.vendor-bills.edit', [project.id, bill.id])">Edit</AppButton>
                         <AppButton v-if="can.submit" size="sm" @click="confirming = 'submit'">Submit for approval</AppButton>
                         <ApprovalActions :approval="approval" noun="bill" />
+                        <AppButton v-if="can.process" size="sm" variant="secondary" :loading="processForm.processing" @click="markProcessed">Mark processed</AppButton>
                         <AppButton v-if="bill.outstanding && bill.outstanding !== '0.00' && canDo('payments.record')" size="sm" :href="route('projects.payments.create', { project: project.id, party_type: 'vendor', party_id: bill.vendor?.id })">Record payment</AppButton>
                         <AppButton v-if="can.delete" size="sm" variant="ghost" icon="trash" aria-label="Delete bill" @click="confirming = 'delete'" />
                     </div>
@@ -159,6 +167,15 @@ const statusNote = computed(() => {
                 </div>
             </AppCard>
 
+            <AppCard v-if="matching && !direct && matching.lines?.length" title="Invoice matching" :subtitle="`Overall: ${matching.match_status}`">
+                <ul class="divide-y divide-line text-sm">
+                    <li v-for="line in matching.lines" :key="line.vendor_bill_item_id" class="px-4 py-2">
+                        <p class="font-medium">{{ line.description }} <span class="text-xs text-slate-500">({{ line.line_match_status }})</span></p>
+                        <p class="text-xs text-slate-600 tabular">PO {{ formatQty(line.po_qty) }} · GRN {{ formatQty(line.accepted_grn_qty) }} · prev billed {{ formatQty(line.previously_billed) }} · this {{ formatQty(line.current_billed) }} · rate diff {{ formatRate(line.rate_diff) }}</p>
+                    </li>
+                </ul>
+            </AppCard>
+
             <AppCard title="Bill summary">
                 <dl class="max-w-md space-y-1.5 text-sm">
                     <div class="flex justify-between"><dt class="text-slate-500">Taxable value</dt><dd class="tabular">{{ formatMoney(bill.subtotal) }}</dd></div>
@@ -174,6 +191,12 @@ const statusNote = computed(() => {
                 </dl>
             </AppCard>
 
+            <AppCard v-if="can.process" title="Accounts processing" subtitle="Does not record payment or change approval.">
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <FormInput v-model="processForm.processing_reference" label="Processing reference" maxlength="100" :error="processForm.errors.processing_reference" />
+                    <FormInput v-model="processForm.processing_notes" label="Notes" class="sm:col-span-2" :error="processForm.errors.processing_notes" />
+                </div>
+            </AppCard>
             <AttachmentPanel :attachments="attachments" attachable-type="vendor_bill" :attachable-id="bill.id" :can-upload="can.attach" :can-delete="can.attach" placeholder="Vendor invoice copy…" />
             <div class="mt-4"><AuditTrail :entries="audit" title="Audit trail" /></div>
         </div>

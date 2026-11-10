@@ -169,7 +169,39 @@ class GatePassController extends Controller
         Gate::authorize('verify', $gatePass);
         $this->passes->markReturned($gatePass, $request->user());
 
-        return back()->with('success', 'Return recorded. The gate pass is closed.');
+        return back()->with('success', 'Return recorded.');
+    }
+
+    public function storeReturn(Request $request, Project $project, GatePass $gatePass): RedirectResponse
+    {
+        Gate::authorize('verify', $gatePass);
+        $data = $request->validate([
+            'return_date' => ['nullable', 'date'],
+            'remarks' => ['nullable', 'string', 'max:1000'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.gate_pass_item_id' => ['required', 'integer'],
+            'items.*.quantity' => ['required', 'numeric', 'gt:0'],
+            'items.*.condition' => ['nullable', 'string', 'max:30'],
+            'items.*.condition_notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+        app(\App\Services\Gate\GatePassReturnService::class)->record(
+            $gatePass,
+            $data['items'],
+            $request->user(),
+            $data['remarks'] ?? null,
+            $data['return_date'] ?? null,
+        );
+
+        return back()->with('success', 'Partial return recorded. Verification still required.');
+    }
+
+    public function verifyReturn(Request $request, Project $project, GatePass $gatePass, \App\Models\Gate\GatePassReturn $gatePassReturn): RedirectResponse
+    {
+        Gate::authorize('verify', $gatePass);
+        abort_unless((int) $gatePassReturn->gate_pass_id === (int) $gatePass->id, 404);
+        app(\App\Services\Gate\GatePassReturnService::class)->verify($gatePassReturn, $request->user());
+
+        return back()->with('success', 'Return verified.');
     }
 
     public function pdf(Request $request, Project $project, GatePass $gatePass): \Symfony\Component\HttpFoundation\Response
@@ -282,12 +314,20 @@ class GatePassController extends Controller
             'returnable' => ['boolean'],
             'passed_at' => ['required', 'date'],
             'expected_return_date' => ['nullable', 'date'],
+            'department_id' => ['nullable', 'integer'],
             'party_name' => ['nullable', 'string', 'max:150'],
             'vendor_id' => ['nullable', 'integer'],
             'vehicle_no' => ['nullable', 'string', 'max:30'],
             'driver_name' => ['nullable', 'string', 'max:120'],
             'driver_mobile' => ['nullable', 'string', 'max:20'],
+            'transporter_name' => ['nullable', 'string', 'max:150'],
+            'transporter_contact' => ['nullable', 'string', 'max:50'],
+            'recipient_name' => ['nullable', 'string', 'max:150'],
+            'recipient_contact' => ['nullable', 'string', 'max:50'],
             'purpose' => ['required', 'string', 'max:500'],
+            'permanent_removal_reason' => ['nullable', 'string', 'max:255'],
+            'dispatch_notes' => ['nullable', 'string', 'max:2000'],
+            'closure_notes' => ['nullable', 'string', 'max:2000'],
             'reference_type' => ['nullable', 'string', 'max:40'],
             'reference_no' => ['nullable', 'string', 'max:60'],
             'remarks' => ['nullable', 'string', 'max:1000'],

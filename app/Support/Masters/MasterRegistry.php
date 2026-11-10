@@ -4,6 +4,7 @@ namespace App\Support\Masters;
 
 use App\Support\Masters\Definitions\CategoryDefinition;
 use App\Support\Masters\Definitions\ClientDefinition;
+use App\Support\Masters\Definitions\DepartmentDefinition;
 use App\Support\Masters\Definitions\EquipmentDefinition;
 use App\Support\Masters\Definitions\EquipmentTypeDefinition;
 use App\Support\Masters\Definitions\ExpenseCategoryDefinition;
@@ -32,6 +33,7 @@ final class MasterRegistry
         EquipmentTypeDefinition::class,
         WarehouseDefinition::class,
         ExpenseCategoryDefinition::class,
+        DepartmentDefinition::class,
         LabourDefinition::class,
         EquipmentDefinition::class,
     ];

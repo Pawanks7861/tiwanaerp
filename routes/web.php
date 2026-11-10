@@ -362,6 +362,7 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::post('/submit', [SubcontractorBillController::class, 'submit'])->name('submit');
             Route::put('/certify', [SubcontractorBillController::class, 'adjust'])->name('adjust');
             Route::post('/reverse', [SubcontractorBillController::class, 'reverse'])->name('reverse');
+            Route::post('/process', [SubcontractorBillController::class, 'process'])->name('process');
         });
 
         // Equipment: assignments, usage, fuel, repairs
@@ -400,6 +401,10 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::post('/reject', [GatePassController::class, 'reject'])->name('reject');
             Route::post('/verify', [GatePassController::class, 'verify'])->name('verify');
             Route::post('/returned', [GatePassController::class, 'returned'])->name('returned');
+            Route::post('/returns', [GatePassController::class, 'storeReturn'])->name('returns.store');
+            Route::post('/returns/{gatePassReturn}/verify', [GatePassController::class, 'verifyReturn'])
+                ->whereNumber('gatePassReturn')
+                ->name('returns.verify');
         });
 
         // Procurement: material requests
@@ -579,6 +584,7 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::put('/', [VendorBillController::class, 'update'])->name('update');
             Route::delete('/', [VendorBillController::class, 'destroy'])->name('destroy');
             Route::post('/submit', [VendorBillController::class, 'submit'])->name('submit');
+            Route::post('/process', [VendorBillController::class, 'process'])->name('process');
         });
 
         // Finance: receipts / payments, retention releases, cash flow
@@ -788,6 +794,9 @@ Route::middleware(['auth', 'company'])->group(function () {
 
     // Approvals inbox
     Route::get('/approvals', [ApprovalController::class, 'index'])->name('approvals.index');
+    Route::get('/approvals/delegations', [\App\Http\Controllers\Admin\ApprovalDelegationController::class, 'index'])->name('approvals.delegations.index');
+    Route::post('/approvals/delegations', [\App\Http\Controllers\Admin\ApprovalDelegationController::class, 'store'])->name('approvals.delegations.store');
+    Route::delete('/approvals/delegations/{approvalDelegation}', [\App\Http\Controllers\Admin\ApprovalDelegationController::class, 'destroy'])->whereNumber('approvalDelegation')->name('approvals.delegations.destroy');
     Route::prefix('/approvals/{approvalRequest}')->name('approvals.')->group(function () {
         Route::post('/approve', [ApprovalController::class, 'approve'])->name('approve');
         Route::post('/reject', [ApprovalController::class, 'reject'])->name('reject');
@@ -834,6 +843,7 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/workflows', [ApprovalWorkflowController::class, 'index'])->name('workflows.index');
         Route::get('/workflows/{type}/edit', [ApprovalWorkflowController::class, 'edit'])->where('type', '[a-z_]+')->name('workflows.edit');
         Route::put('/workflows/{type}', [ApprovalWorkflowController::class, 'update'])->where('type', '[a-z_]+')->name('workflows.update');
+        Route::post('/workflows/{type}/preview', [ApprovalWorkflowController::class, 'preview'])->where('type', '[a-z_]+')->name('workflows.preview');
 
         Route::get('/roles', [RoleController::class, 'index'])->name('roles.index');
         Route::get('/roles/create', [RoleController::class, 'create'])->name('roles.create');

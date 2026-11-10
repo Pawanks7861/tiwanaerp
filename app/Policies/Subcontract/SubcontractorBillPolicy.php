@@ -67,4 +67,12 @@ class SubcontractorBillPolicy
         return $user->can('subcontract.certify_bill') && $bill->status === SubcontractorBillStatus::Certified
             && $this->projects->view($user, $bill->project);
     }
+
+    public function process(User $user, SubcontractorBill $bill): bool
+    {
+        return $user->can('subcontract.process')
+            && $bill->isCertified()
+            && $bill->processed_at === null
+            && $this->projects->view($user, $bill->project);
+    }
 }

@@ -70,11 +70,15 @@ class VendorBillResource extends JsonResource
                 fn () => ApprovalSummaryResource::make($this->latestApprovalRequest)->resolve()
             ),
             'attachments' => AttachmentResource::collection($this->whenLoaded('attachments')),
+            'matching' => $this->when($this->offsetExists('matching'), fn () => $this->offsetGet('matching')),
+            'processed_at' => $this->processed_at?->toIso8601String(),
+            'processing_reference' => $this->processing_reference,
             'can' => $user ? [
                 'view' => $user->can('view', $this->resource),
                 'update' => $editable && $user->can('update', $this->resource),
                 'delete' => $editable && $user->can('delete', $this->resource),
                 'submit' => $editable && $user->can('submit', $this->resource),
+                'process' => $user->can('process', $this->resource),
                 'view_amounts' => $amounts,
             ] : null,
         ];

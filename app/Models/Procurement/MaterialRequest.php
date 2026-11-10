@@ -26,7 +26,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * Site requirement for materials. Status changes only through MaterialRequestService, the approval
  * hooks and ProcurementQuantityService (ordered / received states).
  */
-#[Fillable(['site_id', 'request_date', 'required_date', 'priority', 'remarks'])]
+#[Fillable(['site_id', 'request_date', 'required_date', 'priority', 'procurement_category', 'equipment_meta', 'remarks'])]
 class MaterialRequest extends Model implements Approvable
 {
     use Auditable, BelongsToCompany, Blameable, HasApprovals, HasAttachments, LocksWhenNotEditable, SoftDeletes;
@@ -38,6 +38,8 @@ class MaterialRequest extends Model implements Approvable
         return [
             'status' => MaterialRequestStatus::class,
             'priority' => RequestPriority::class,
+            'procurement_category' => \App\Enums\Procurement\ProcurementCategory::class,
+            'equipment_meta' => 'array',
             'request_date' => 'date',
             'required_date' => 'date',
             'approved_at' => 'datetime',

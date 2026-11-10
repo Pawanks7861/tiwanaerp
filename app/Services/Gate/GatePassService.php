@@ -162,30 +162,9 @@ class GatePassService
 
     public function markReturned(GatePass $pass, User $user): void
     {
-        DB::transaction(function () use ($pass, $user) {
-            $pass = GatePass::query()->whereKey($pass->id)->lockForUpdate()->firstOrFail();
-            if (! $pass->returnable || $pass->direction !== GatePassDirection::Out) {
-                throw ValidationException::withMessages(['gate_pass' => 'Only a returnable outward pass can be marked returned.']);
-            }
-            if (! in_array($pass->status, [GatePassStatus::Verified, GatePassStatus::Approved], true)) {
-                throw ValidationException::withMessages(['gate_pass' => 'Verify the outward pass before recording the return.']);
-            }
-            $pass->forceFill([
-                'status' => GatePassStatus::Closed,
-                'returned_at' => now(),
-            ])->save();
-            foreach ($pass->items()->whereNotNull('equipment_id')->get() as $item) {
-                $equipment = Equipment::query()->find($item->equipment_id);
-                if ($equipment) {
-                    $this->locations->change($equipment, [
-                        'location_type' => EquipmentLocationType::ProjectSite->value,
-                        'location_project_id' => $pass->project_id,
-                        'location_name' => $pass->project?->name,
-                        'remarks' => "Returned on {$pass->pass_number}",
-                    ], $user);
-                }
-            }
-        });
+        // Compatibility path: record remaining qty as a line-wise return (and verify when allowed).
+        $pass->loadMissing('items');
+        app(GatePassReturnService::class)->markFullyReturned($pass, $user);
     }
 
     /**
@@ -236,6 +215,7 @@ class GatePassService
 
         return [
             'site_id' => $data['site_id'] ?? null,
+            'department_id' => $data['department_id'] ?? null,
             'direction' => $data['direction'],
             'returnable' => $returnable,
             'passed_at' => $data['passed_at'],
@@ -245,7 +225,14 @@ class GatePassService
             'vehicle_no' => $data['vehicle_no'] ?? null,
             'driver_name' => $data['driver_name'] ?? null,
             'driver_mobile' => $data['driver_mobile'] ?? null,
+            'transporter_name' => $data['transporter_name'] ?? null,
+            'transporter_contact' => $data['transporter_contact'] ?? null,
+            'recipient_name' => $data['recipient_name'] ?? null,
+            'recipient_contact' => $data['recipient_contact'] ?? null,
             'purpose' => $data['purpose'],
+            'permanent_removal_reason' => $returnable ? null : ($data['permanent_removal_reason'] ?? null),
+            'dispatch_notes' => $data['dispatch_notes'] ?? null,
+            'closure_notes' => $data['closure_notes'] ?? null,
             'reference_type' => $data['reference_type'] ?? null,
             'reference_no' => $data['reference_no'] ?? null,
             'remarks' => $data['remarks'] ?? null,

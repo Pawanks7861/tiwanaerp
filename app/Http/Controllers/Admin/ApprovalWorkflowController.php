@@ -13,6 +13,7 @@ use App\Models\Core\Role;
 use App\Services\Approval\ApprovalWorkflowService;
 use App\Services\Core\CompanyDirectory;
 use App\Support\Approval\ApprovalDocumentTypes;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -87,6 +88,8 @@ class ApprovalWorkflowController extends Controller
             'workflow' => [
                 'name' => $workflow?->name ?? ApprovalDocumentTypes::label($type).' approval',
                 'is_active' => $workflow?->is_active ?? true,
+                'min_amount' => $workflow?->min_amount,
+                'max_amount' => $workflow?->max_amount,
                 'steps' => $steps !== [] ? $steps : [$this->blankStep()],
             ],
             'users' => $this->directory->membersQuery()->get(['id', 'name', 'email'])
@@ -114,6 +117,26 @@ class ApprovalWorkflowController extends Controller
         return redirect()
             ->route('admin.workflows.index')
             ->with('success', ApprovalDocumentTypes::label($type).' approval steps saved. New submissions use this chain; documents already in approval keep their original steps.');
+    }
+
+    public function preview(Request $request, string $type): JsonResponse
+    {
+        $this->assertType($type);
+        Gate::authorize('viewAny', ApprovalWorkflow::class);
+
+        $data = $request->validate([
+            'amount' => ['required', 'numeric', 'decimal:0,2', 'min:0'],
+            'project_id' => ['nullable', 'integer'],
+        ]);
+
+        $result = $this->workflows->preview($type, $data['project_id'] ?? null, (string) $data['amount']);
+
+        return response()->json([
+            'workflow_name' => $result['workflow']?->name,
+            'min_amount' => $result['workflow']?->min_amount,
+            'max_amount' => $result['workflow']?->max_amount,
+            'steps' => $result['steps'],
+        ]);
     }
 
     /**

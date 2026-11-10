@@ -71,7 +71,7 @@ class SubcontractorBillController extends Controller
     {
         Gate::authorize('view', $subcontractorBill);
         $user = $request->user();
-        $bill = $subcontractorBill->load(['subcontractor:id,code,name,gstin', 'workOrder:id,wo_number,advance_amount,status', 'certifier:id,name', 'reopener:id,name', 'creator:id,name']);
+        $bill = $subcontractorBill->load(['subcontractor:id,code,name,gstin', 'workOrder:id,wo_number,advance_amount,status', 'certifier:id,name', 'reopener:id,name', 'creator:id,name', 'processor:id,name']);
 
         $items = $bill->items()->with(['workOrderItem:id,description,unit_id,boq_item_id,boq_line_uid', 'workOrderItem.unit:id,symbol', 'workOrderItem.boqItem:id,item_code,name'])->get();
 
@@ -79,8 +79,11 @@ class SubcontractorBillController extends Controller
             'project' => ProjectHeader::for($project),
             'bill' => [
                 ...$this->header($bill),
-                ...$bill->only(['subcontractor_invoice_no', 'remarks', 'tax_percent', 'retention_percent', 'tds_percent', 'tax_amount',
-                    'retention_amount', 'advance_recovery', 'tds_amount', 'other_deductions', 'revision', 'reopen_reason']),
+                ...$bill->only(['subcontractor_invoice_no', 'mb_number', 'mb_reference', 'mb_notes', 'remarks', 'tax_percent', 'retention_percent', 'tds_percent', 'tax_amount',
+                    'retention_amount', 'advance_recovery', 'tds_amount', 'other_deductions', 'revision', 'reopen_reason', 'processing_reference', 'processing_notes']),
+                'mb_date' => $bill->mb_date?->toDateString(),
+                'processed_at' => $bill->processed_at?->toIso8601String(),
+                'processed_by' => $bill->processor?->name,
                 'period_from' => $bill->period_from?->toDateString(),
                 'period_to' => $bill->period_to?->toDateString(),
                 'subcontractor' => $bill->subcontractor?->only(['id', 'code', 'name', 'gstin']),
@@ -158,6 +161,18 @@ class SubcontractorBillController extends Controller
         return back()->with('success', 'Certified quantities updated. Approve the bill to certify it.');
     }
 
+    public function process(Request $request, Project $project, SubcontractorBill $subcontractorBill): RedirectResponse
+    {
+        Gate::authorize('process', $subcontractorBill);
+
+        $this->bills->process($subcontractorBill, $request->user(), $request->validate([
+            'processing_reference' => ['nullable', 'string', 'max:100'],
+            'processing_notes' => ['nullable', 'string', 'max:2000'],
+        ]));
+
+        return back()->with('success', 'Bill marked as processed for accounts.');
+    }
+
     public function reverse(Request $request, Project $project, SubcontractorBill $subcontractorBill): RedirectResponse
     {
         Gate::authorize('reverse', $subcontractorBill);
@@ -177,6 +192,10 @@ class SubcontractorBillController extends Controller
             ...($creating ? ['work_order_id' => ['required', 'integer']] : []),
             'bill_date' => ['required', 'date', 'before_or_equal:today'],
             'subcontractor_invoice_no' => ['nullable', 'string', 'max:60'],
+            'mb_number' => ['nullable', 'string', 'max:50'],
+            'mb_date' => ['nullable', 'date', 'before_or_equal:today'],
+            'mb_reference' => ['nullable', 'string', 'max:100'],
+            'mb_notes' => ['nullable', 'string', 'max:2000'],
             'period_from' => ['required', 'date'],
             'period_to' => ['required', 'date', 'after_or_equal:period_from'],
             'remarks' => ['nullable', 'string', 'max:1000'],
@@ -207,8 +226,9 @@ class SubcontractorBillController extends Controller
                 'id' => $bill->id,
                 'bill_number' => $bill->bill_number,
                 'work_order_id' => $bill->work_order_id,
-                ...$bill->only(['subcontractor_invoice_no', 'remarks', 'advance_recovery', 'other_deductions']),
+                ...$bill->only(['subcontractor_invoice_no', 'mb_number', 'mb_reference', 'mb_notes', 'remarks', 'advance_recovery', 'other_deductions']),
                 'bill_date' => $bill->bill_date?->toDateString(),
+                'mb_date' => $bill->mb_date?->toDateString(),
                 'period_from' => $bill->period_from?->toDateString(),
                 'period_to' => $bill->period_to?->toDateString(),
             ] : null,
@@ -267,6 +287,7 @@ class SubcontractorBillController extends Controller
             'submit' => $editable && $user->can('submit', $bill),
             'certify' => $submitted && $user->can('certify', $bill),
             'reverse' => $bill->status === SubcontractorBillStatus::Certified && $user->can('reverse', $bill),
+            'process' => $user->can('process', $bill),
             'attach' => $editable && $user->can('update', $bill),
         ];
     }

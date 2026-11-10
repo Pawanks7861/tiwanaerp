@@ -26,13 +26,14 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * quantities and deductions (CERTIFICATION_COLUMNS); final approval certifies the bill and posts
  * the 'subcontract' cost per item. After certification only the lifecycle may change.
  */
-#[Fillable(['bill_date', 'subcontractor_invoice_no', 'period_from', 'period_to', 'remarks'])]
+#[Fillable(['bill_date', 'subcontractor_invoice_no', 'mb_number', 'mb_date', 'mb_reference', 'mb_notes', 'period_from', 'period_to', 'remarks'])]
 class SubcontractorBill extends Model implements Approvable
 {
     use Auditable, BelongsToCompany, Blameable, HasApprovals, HasAttachments, LocksWhenNotEditable, SoftDeletes;
 
     public const LIFECYCLE_COLUMNS = [
-        'status', 'certified_by', 'certified_at', 'revision', 'reopened_by', 'reopened_at', 'reopen_reason',
+        'status', 'certified_by', 'certified_at', 'processed_by', 'processed_at', 'processing_reference', 'processing_notes',
+        'revision', 'reopened_by', 'reopened_at', 'reopen_reason',
         'gross_amount', 'tax_amount', 'retention_amount', 'advance_recovery', 'tds_amount', 'other_deductions', 'net_payable',
         'paid_amount', 'updated_by', 'updated_at',
     ];
@@ -62,6 +63,8 @@ class SubcontractorBill extends Model implements Approvable
             'bill_date' => 'date',
             'period_from' => 'date',
             'period_to' => 'date',
+            'mb_date' => 'date',
+            'processed_at' => 'datetime',
             'tax_percent' => 'decimal:4',
             'retention_percent' => 'decimal:4',
             'tds_percent' => 'decimal:4',
@@ -132,6 +135,14 @@ class SubcontractorBill extends Model implements Approvable
     public function certifier(): BelongsTo
     {
         return $this->belongsTo(User::class, 'certified_by');
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function processor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'processed_by');
     }
 
     /**

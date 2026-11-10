@@ -20,6 +20,7 @@ use App\Services\Approval\ApprovalService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Services\Resources\Concerns\ResolvesProjectRefs;
 use App\Services\Tax\GstCalculator;
+use App\Support\Finance\VendorInvoiceNormalizer;
 use App\Support\Math\Decimal;
 use App\Support\Permissions\CompanyPermission;
 use Illuminate\Support\Collection;
@@ -205,8 +206,10 @@ class VendorBillService
      */
     private function fillAndLines(VendorBill $bill, Project $project, array $data): void
     {
+        $invoiceNo = trim((string) ($data['vendor_invoice_no'] ?? ''));
         $header = [
-            'vendor_invoice_no' => trim((string) ($data['vendor_invoice_no'] ?? '')),
+            'vendor_invoice_no' => $invoiceNo,
+            'vendor_invoice_no_normalized' => VendorInvoiceNormalizer::normalize($invoiceNo),
             'vendor_invoice_date' => $data['vendor_invoice_date'],
             'due_date' => $data['due_date'] ?? null,
             'remarks' => $data['remarks'] ?? null,
@@ -402,11 +405,43 @@ class VendorBillService
 
     private function assertInvoiceUnique(int $vendorId, string $invoiceNo, ?int $exceptId): void
     {
-        $clash = VendorBill::query()->where('vendor_id', $vendorId)->where('vendor_invoice_no', $invoiceNo)
+        $normalized = VendorInvoiceNormalizer::normalize($invoiceNo);
+        if ($normalized === null) {
+            return;
+        }
+
+        $clash = VendorBill::query()->where('vendor_id', $vendorId)->where('vendor_invoice_no_normalized', $normalized)
             ->when($exceptId, fn ($q) => $q->whereKeyNot($exceptId))->value('bill_number');
         if ($clash !== null) {
             throw ValidationException::withMessages(['vendor_invoice_no' => "This vendor invoice number is already entered as {$clash}."]);
         }
+    }
+
+    /**
+     * @param  array{processing_reference?: string|null, processing_notes?: string|null}  $data
+     */
+    public function process(VendorBill $bill, User $user, array $data = []): void
+    {
+        DB::transaction(function () use ($bill, $user, $data) {
+            $locked = VendorBill::query()->whereKey($bill->id)->lockForUpdate()->firstOrFail();
+            if (! $locked->status->isApproved()) {
+                throw ValidationException::withMessages(['bill' => 'Only an approved vendor bill can be processed.']);
+            }
+            if ($locked->processed_at !== null) {
+                throw ValidationException::withMessages(['bill' => 'This bill was already processed.']);
+            }
+            if (! CompanyPermission::check($user, (int) $locked->company_id, 'vendor_bills.process')) {
+                throw ValidationException::withMessages(['bill' => 'Processing a vendor bill needs the vendor_bills.process permission.']);
+            }
+
+            $locked->forceFill([
+                'processed_by' => $user->id,
+                'processed_at' => now(),
+                'processing_reference' => filled($data['processing_reference'] ?? null) ? trim((string) $data['processing_reference']) : null,
+                'processing_notes' => $data['processing_notes'] ?? null,
+            ])->save();
+            $bill->setRawAttributes($locked->getAttributes(), true);
+        });
     }
 
     /**

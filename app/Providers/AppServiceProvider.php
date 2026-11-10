@@ -353,6 +353,9 @@ class AppServiceProvider extends ServiceProvider
             'equipment_location_history' => \App\Models\Equipment\EquipmentLocationHistory::class,
             'gate_pass' => \App\Models\Gate\GatePass::class,
             'gate_pass_item' => \App\Models\Gate\GatePassItem::class,
+            'gate_pass_return' => \App\Models\Gate\GatePassReturn::class,
+            'gate_pass_return_item' => \App\Models\Gate\GatePassReturnItem::class,
+            'department' => \App\Models\Masters\Department::class,
             'weighbridge_receipt' => \App\Models\Weighbridge\WeighbridgeReceipt::class,
             'equipment_repair' => EquipmentRepair::class,
             'expense' => Expense::class,
@@ -395,6 +398,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(User::class, UserPolicy::class);
         Gate::policy(Role::class, RolePolicy::class);
         Gate::policy(ApprovalWorkflow::class, ApprovalWorkflowPolicy::class);
+        Gate::policy(\App\Models\Approval\ApprovalDelegation::class, \App\Policies\ApprovalDelegationPolicy::class);
         Gate::policy(DataImport::class, DataImportPolicy::class);
         Gate::policy(Project::class, ProjectPolicy::class);
         Gate::policy(Site::class, SitePolicy::class);
