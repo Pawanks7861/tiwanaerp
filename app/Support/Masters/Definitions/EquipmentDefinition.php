@@ -95,7 +95,7 @@ class EquipmentDefinition extends MasterDefinition
             'code' => $this->codeRules('equipment', $record),
             'name' => ['required', 'string', 'max:150'],
             'equipment_type_id' => ['required', new ExistsInCompany(EquipmentType::class)],
-            'tracking_mode' => ['required', Rule::enum(EquipmentTrackingMode::class)],
+            'tracking_mode' => ['nullable', Rule::enum(EquipmentTrackingMode::class)],
             'opening_quantity' => ['nullable', 'numeric', 'min:0', 'max:999999999', 'decimal:0,4'],
             'available_quantity' => ['nullable'],
             'registration_no' => ['nullable', 'string', 'max:50'],
@@ -153,8 +153,9 @@ class EquipmentDefinition extends MasterDefinition
             $data['opening_quantity'] = '0';
             $data['available_quantity'] = '0';
             if (blank($data['registration_no'] ?? null) && blank($data['serial_no'] ?? null)) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
+                throw ValidationException::withMessages([
                     'registration_no' => 'Registration number or serial number is required for individual equipment.',
+                    'serial_no' => 'Registration number or serial number is required for individual equipment.',
                 ]);
             }
         }

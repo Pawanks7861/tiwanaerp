@@ -61,11 +61,7 @@ return new class extends Migration
         });
 
         if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
-            try {
-                DB::statement('ALTER TABLE equipment_usage_logs DROP CHECK equipment_usage_logs_check');
-            } catch (\Throwable) {
-                // Constraint name may differ on older DBs.
-            }
+            $this->dropUsageLogCheckConstraint();
             DB::statement('ALTER TABLE equipment_usage_logs ADD CONSTRAINT equipment_usage_logs_check CHECK (working_hours >= 0 AND idle_hours >= 0 AND working_hours + idle_hours <= 24 AND (opening_meter IS NULL OR closing_meter IS NULL OR closing_meter >= opening_meter) AND (total_duration_hours IS NULL OR total_duration_hours >= 0))');
         }
     }
@@ -73,10 +69,7 @@ return new class extends Migration
     public function down(): void
     {
         if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
-            try {
-                DB::statement('ALTER TABLE equipment_usage_logs DROP CHECK equipment_usage_logs_check');
-            } catch (\Throwable) {
-            }
+            $this->dropUsageLogCheckConstraint();
             DB::statement('ALTER TABLE equipment_usage_logs ADD CONSTRAINT equipment_usage_logs_check CHECK (working_hours >= 0 AND idle_hours >= 0 AND working_hours + idle_hours <= 24 AND (opening_meter IS NULL OR closing_meter IS NULL OR closing_meter >= opening_meter))');
         }
 
@@ -103,5 +96,48 @@ return new class extends Migration
                 }
             }
         });
+    }
+
+    /**
+     * MySQL/MariaDB already have equipment_usage_logs_check from the create migration.
+     * Shared hosts vary: MySQL wants DROP CHECK; MariaDB often wants DROP CONSTRAINT.
+     */
+    private function dropUsageLogCheckConstraint(): void
+    {
+        if (! $this->usageLogCheckExists()) {
+            return;
+        }
+
+        $dropped = false;
+        foreach ([
+            'ALTER TABLE equipment_usage_logs DROP CONSTRAINT `equipment_usage_logs_check`',
+            'ALTER TABLE equipment_usage_logs DROP CHECK `equipment_usage_logs_check`',
+        ] as $sql) {
+            try {
+                DB::statement($sql);
+                $dropped = true;
+                break;
+            } catch (\Throwable) {
+                // Try the alternate dialect next.
+            }
+        }
+
+        if (! $dropped || $this->usageLogCheckExists()) {
+            throw new \RuntimeException(
+                'Could not drop existing CHECK constraint equipment_usage_logs_check before recreating it.'
+            );
+        }
+    }
+
+    private function usageLogCheckExists(): bool
+    {
+        return collect(DB::select(
+            "SELECT CONSTRAINT_NAME AS name
+             FROM information_schema.TABLE_CONSTRAINTS
+             WHERE CONSTRAINT_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'equipment_usage_logs'
+               AND CONSTRAINT_TYPE = 'CHECK'
+               AND CONSTRAINT_NAME = 'equipment_usage_logs_check'"
+        ))->isNotEmpty();
     }
 };
