@@ -292,6 +292,14 @@ function destroy() {
                                 <td class="px-3 py-2 text-xs whitespace-nowrap text-slate-600">
                                     <template v-if="t.planned_start">{{ formatDate(t.planned_start) }} – {{ formatDate(t.planned_finish) }}</template>
                                     <span v-else class="text-slate-400">Not scheduled</span>
+                                    <div v-if="t.actual_start || t.actual_finish" class="text-[11px] text-slate-500">
+                                        Actual:
+                                        <template v-if="t.actual_start">{{ formatDate(t.actual_start) }}</template>
+                                        <template v-else>—</template>
+                                        –
+                                        <template v-if="t.actual_finish">{{ formatDate(t.actual_finish) }}</template>
+                                        <template v-else>—</template>
+                                    </div>
                                 </td>
                                 <td class="px-3 py-2 text-right text-xs tabular">{{ t.duration_days ?? '—' }}</td>
                                 <td class="px-3 py-2 text-right text-xs tabular">{{ Number(t.planned_qty) ? `${formatQty(t.planned_qty)} ${t.unit ?? ''}` : '—' }}</td>

@@ -46,6 +46,9 @@ class EquipmentUsageLog extends Model
     {
         return [
             'log_date' => 'date',
+            'start_time' => 'string',
+            'end_time' => 'string',
+            'total_duration_hours' => 'decimal:2',
             'opening_meter' => 'decimal:2',
             'closing_meter' => 'decimal:2',
             'working_hours' => 'decimal:2',

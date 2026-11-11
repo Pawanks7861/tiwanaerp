@@ -483,13 +483,47 @@ const confirming = ref(null);
 const processing = ref(false);
 const ACTIONS = {
     submit: { title: 'Submit for approval?', message: 'The BOQ is locked while it is being approved.', label: 'Submit', danger: false, run: () => router.post(route('projects.boqs.submit', [props.project.id, props.boq.id]), {}, opts()) },
-    revise: { title: 'Create a revision?', message: 'A new draft version is created from this approved BOQ. Line identities are kept; the approved version stays current until the revision is approved.', label: 'Create revision', danger: false, run: () => router.post(route('projects.boqs.revise', [props.project.id, props.boq.id]), {}, opts()) },
     delete: { title: 'Delete this BOQ?', message: 'This draft and all its lines will be removed.', label: 'Delete', danger: true, run: () => router.delete(route('projects.boqs.destroy', [props.project.id, props.boq.id]), opts()) },
 };
 const opts = () => ({ preserveScroll: true, onFinish: () => ((processing.value = false), (confirming.value = null)) });
 function confirmAction() {
     processing.value = true;
     ACTIONS[confirming.value].run();
+}
+
+const reviseOpen = ref(false);
+const reviseForm = useForm({ revision_reason: '' });
+function openRevise() {
+    reviseForm.reset();
+    reviseForm.clearErrors();
+    reviseOpen.value = true;
+}
+function submitRevise() {
+    reviseForm.post(route('projects.boqs.revise', [props.project.id, props.boq.id]), {
+        preserveScroll: true,
+        onSuccess: () => (reviseOpen.value = false),
+    });
+}
+
+const diffOpen = ref(false);
+const diffLoading = ref(false);
+const diffError = ref('');
+const diffPayload = ref(null);
+async function viewChanges(previousId) {
+    diffOpen.value = true;
+    diffLoading.value = true;
+    diffError.value = '';
+    diffPayload.value = null;
+    try {
+        const { data } = await window.axios.get(route('projects.boqs.compare', [props.project.id, props.boq.id]), {
+            params: { previous_id: previousId },
+        });
+        diffPayload.value = data;
+    } catch {
+        diffError.value = 'Unable to load revision changes.';
+    } finally {
+        diffLoading.value = false;
+    }
 }
 
 const approvalAction = ref(null);
@@ -596,6 +630,7 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                                 :class="v.id === boq.id ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-line text-slate-600 hover:bg-slate-50'"
                             >v{{ v.version }}<span v-if="v.is_current"> ✓</span></Link>
                         </div>
+                        <p v-if="boq.revision_reason" class="mt-1 text-xs text-slate-500">Revision reason: {{ boq.revision_reason }}</p>
                     </div>
 
                     <div class="flex flex-col gap-3 lg:items-end">
@@ -621,7 +656,7 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                                 <AppButton size="sm" variant="ghost" class="text-red-600" @click="openApproval('reject')">Reject</AppButton>
                             </template>
                             <AppButton v-if="approval?.can_cancel" size="sm" variant="secondary" @click="openApproval('cancel')">Withdraw</AppButton>
-                            <AppButton v-if="can.revise" size="sm" variant="secondary" @click="confirming = 'revise'">Create revision</AppButton>
+                            <AppButton v-if="can.revise" size="sm" variant="secondary" @click="openRevise">Create revision</AppButton>
                             <AppButton v-if="can.import && !dirty" size="sm" icon="folder" @click="showImport = true">Import Excel / CSV</AppButton>
                             <ImportTemplateDownload v-if="can.import" module="boq.items" :project-id="project.id" size="sm" label="Download template" />
                             <AppButton v-if="editable" size="sm" variant="secondary" @click="addRow">Add item manually</AppButton>
@@ -677,6 +712,64 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                                     >
                                         <Icon name="download" :size="16" /> Download
                                     </a>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </AppCard>
+
+            <AppCard
+                v-if="versions.length"
+                title="Revision history"
+                subtitle="Stable line identities are kept across revisions. Approved revisions stay historical when a newer revision is approved."
+                :padded="false"
+            >
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-slate-50 text-[11px] tracking-wide text-slate-600 uppercase">
+                            <tr>
+                                <th class="px-4 py-2 text-left">Rev</th>
+                                <th class="px-4 py-2 text-left">Status</th>
+                                <th class="px-4 py-2 text-left">Reason</th>
+                                <th class="px-4 py-2 text-left">Created</th>
+                                <th class="px-4 py-2 text-left">Approved</th>
+                                <th class="px-4 py-2 text-right">BOQ value</th>
+                                <th class="px-4 py-2 text-left">Drawings</th>
+                                <th class="px-4 py-2 text-right">Changes</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-line">
+                            <tr v-for="v in versions" :key="v.id" :class="v.id === boq.id ? 'bg-brand-50/40' : ''">
+                                <td class="px-4 py-2">
+                                    <Link :href="route('projects.boqs.show', [project.id, v.id])" class="font-mono font-medium text-brand-700 hover:underline">v{{ v.version }}</Link>
+                                    <span v-if="v.is_current" class="ml-1 text-[10px] font-semibold text-emerald-700 uppercase">Current</span>
+                                </td>
+                                <td class="px-4 py-2"><StatusBadge :status="v.status" :label="v.status_label" /></td>
+                                <td class="px-4 py-2 text-slate-700">{{ v.revision_reason || '—' }}</td>
+                                <td class="px-4 py-2 text-slate-700">
+                                    <div>{{ formatDateTime(v.created_at) }}</div>
+                                    <div v-if="v.created_by" class="text-xs text-slate-500">{{ v.created_by }}</div>
+                                </td>
+                                <td class="px-4 py-2 text-slate-700">
+                                    <div>{{ v.approved_at ? formatDateTime(v.approved_at) : '—' }}</div>
+                                    <div v-if="v.approved_by" class="text-xs text-slate-500">{{ v.approved_by }}</div>
+                                </td>
+                                <td class="px-4 py-2 text-right tabular">{{ formatMoney(v.total_client_amount) }}</td>
+                                <td class="px-4 py-2 text-xs text-slate-600">
+                                    <template v-if="v.drawings?.length">
+                                        <div v-for="d in v.drawings" :key="d.id">{{ d.drawing_number }} {{ d.revision_code }}</div>
+                                    </template>
+                                    <template v-else>—</template>
+                                </td>
+                                <td class="px-4 py-2 text-right">
+                                    <button
+                                        v-if="v.parent_boq_id && v.id === boq.id"
+                                        type="button"
+                                        class="text-xs font-medium text-brand-700 hover:underline"
+                                        @click="viewChanges(v.parent_boq_id)"
+                                    >View changes</button>
+                                    <span v-else class="text-slate-400">—</span>
                                 </td>
                             </tr>
                         </tbody>
@@ -1237,6 +1330,48 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
             @close="showImport = false"
             @imported="() => ((showImport = false), router.reload())"
         />
+
+        <AppModal :show="reviseOpen" title="Create BOQ revision" @close="reviseOpen = false">
+            <p class="mb-3 text-sm text-slate-600">A new draft version is created from this approved BOQ. Line identities are kept; the approved version stays current until the revision is approved.</p>
+            <FormInput v-model="reviseForm.revision_reason" label="Revision reason" required maxlength="255" placeholder="Drawing Revision, Quantity Change, Rate Change…" :error="reviseForm.errors.revision_reason" />
+            <template #footer>
+                <AppButton variant="secondary" @click="reviseOpen = false">Cancel</AppButton>
+                <AppButton :loading="reviseForm.processing" @click="submitRevise">Create revision</AppButton>
+            </template>
+        </AppModal>
+
+        <AppModal :show="diffOpen" title="Revision changes" @close="diffOpen = false">
+            <div v-if="diffLoading" class="text-sm text-slate-600">Loading changes…</div>
+            <div v-else-if="diffError" class="text-sm text-red-700">{{ diffError }}</div>
+            <div v-else-if="diffPayload" class="space-y-3 text-sm">
+                <p class="text-slate-600">
+                    Comparing v{{ diffPayload.previous.version }} → v{{ diffPayload.current.version }}
+                    <template v-if="diffPayload.total_amount_changed"> · Total {{ formatMoney(diffPayload.previous.total_client_amount) }} → {{ formatMoney(diffPayload.current.total_client_amount) }}</template>
+                </p>
+                <div class="flex flex-wrap gap-2 text-xs text-slate-600">
+                    <span>Added {{ diffPayload.summary.added }}</span>
+                    <span>Removed {{ diffPayload.summary.removed }}</span>
+                    <span>Qty {{ diffPayload.summary.quantity_changed }}</span>
+                    <span>Rate {{ diffPayload.summary.rate_changed }}</span>
+                    <span>Labour {{ diffPayload.summary.labour_rate_changed }}</span>
+                </div>
+                <ul class="max-h-80 divide-y divide-line overflow-auto rounded-lg border border-line">
+                    <li v-for="(c, i) in diffPayload.changes" :key="i" class="px-3 py-2">
+                        <p class="font-medium text-slate-900">
+                            <span class="uppercase text-[10px] text-slate-500">{{ c.kind }}</span>
+                            {{ c.item_code }} {{ c.name }}
+                        </p>
+                        <div v-for="(change, field) in c.fields" :key="field" class="text-xs text-slate-600">
+                            {{ field }}: {{ change.from }} → {{ change.to }}
+                        </div>
+                    </li>
+                    <li v-if="!diffPayload.changes.length" class="px-3 py-4 text-slate-500">No line differences.</li>
+                </ul>
+            </div>
+            <template #footer>
+                <AppButton variant="secondary" @click="diffOpen = false">Close</AppButton>
+            </template>
+        </AppModal>
 
         <AppModal :show="showTitle" title="Edit BOQ title" @close="showTitle = false">
             <form id="title-form" @submit.prevent="saveTitle">

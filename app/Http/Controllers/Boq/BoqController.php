@@ -134,13 +134,7 @@ class BoqController extends Controller
             'units' => Unit::query()->active()->orderBy('symbol')->get(['id', 'name', 'symbol'])
                 ->map(fn (Unit $u) => ['value' => $u->id, 'label' => $u->symbol, 'name' => $u->name])->all(),
             'analyses' => $analyses,
-            'versions' => Boq::query()
-                ->where('project_id', $project->id)
-                ->where('boq_number', $boq->boq_number)
-                ->orderByDesc('version')
-                ->get(['id', 'version', 'status', 'is_current'])
-                ->map(fn (Boq $b) => ['id' => $b->id, 'version' => $b->version, 'status' => $b->status->value, 'is_current' => $b->is_current])
-                ->all(),
+            'versions' => $this->versionHistory($project, $boq, $withCosts),
             'approval' => $pending ? [
                 'id' => $pending->id,
                 'level' => $pending->current_level,
@@ -214,14 +208,74 @@ class BoqController extends Controller
         return back()->with('success', 'BOQ submitted for approval.');
     }
 
-    public function revise(Project $project, Boq $boq): RedirectResponse
+    public function revise(Request $request, Project $project, Boq $boq): RedirectResponse
     {
         Gate::authorize('revise', $boq);
 
-        $revision = $this->revisions->revise($boq);
+        $data = $request->validate([
+            'revision_reason' => ['required', 'string', 'min:3', 'max:255'],
+        ]);
+
+        $revision = $this->revisions->revise($boq, $data['revision_reason']);
 
         return redirect()->route('projects.boqs.show', [$project, $revision])
             ->with('success', "Revision v{$revision->version} created as a draft.");
+    }
+
+    public function compare(Request $request, Project $project, Boq $boq): \Illuminate\Http\JsonResponse
+    {
+        Gate::authorize('view', $boq);
+
+        $previousId = (int) $request->validate(['previous_id' => ['required', 'integer']])['previous_id'];
+        $previous = Boq::query()
+            ->where('project_id', $project->id)
+            ->where('boq_number', $boq->boq_number)
+            ->whereKey($previousId)
+            ->firstOrFail();
+
+        $withCosts = $request->user()->can('boq.view_costs');
+        $diff = app(\App\Services\Boq\BoqRevisionDiffService::class)->compare($previous, $boq, $withCosts);
+
+        return response()->json($diff);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function versionHistory(Project $project, Boq $boq, bool $withCosts): array
+    {
+        $versions = Boq::query()
+            ->with(['creator:id,name', 'approver:id,name', 'drawingRevisions.drawing:id,drawing_number,title'])
+            ->where('project_id', $project->id)
+            ->where('boq_number', $boq->boq_number)
+            ->orderByDesc('version')
+            ->get();
+
+        return $versions->map(function (Boq $b) use ($withCosts) {
+            $drawings = $b->drawingRevisions->map(fn (DrawingRevision $rev) => [
+                'id' => $rev->id,
+                'drawing_number' => $rev->drawing?->drawing_number,
+                'title' => $rev->drawing?->title,
+                'revision_code' => $rev->revision_code,
+            ])->values()->all();
+
+            return [
+                'id' => $b->id,
+                'version' => $b->version,
+                'status' => $b->status->value,
+                'status_label' => $b->status->label(),
+                'is_current' => $b->is_current,
+                'revision_reason' => $b->revision_reason,
+                'created_at' => $b->created_at?->toIso8601String(),
+                'created_by' => $b->creator?->name,
+                'approved_at' => $b->approved_at?->toIso8601String(),
+                'approved_by' => $b->approver?->name,
+                'total_client_amount' => (string) $b->total_client_amount,
+                'total_cost_amount' => $withCosts ? (string) $b->total_cost_amount : null,
+                'parent_boq_id' => $b->parent_boq_id,
+                'drawings' => $drawings,
+            ];
+        })->all();
     }
 
     /**

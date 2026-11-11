@@ -165,12 +165,21 @@ class EquipmentUsageService
             ? $closing->minus($opening)
             : $this->amount($data['working_hours'] ?? null, 'working_hours', 2);
         $idle = $this->amount($data['idle_hours'] ?? null, 'idle_hours', 2);
-        if ($working->plus($idle)->greaterThan(24)) {
-            throw ValidationException::withMessages(['working_hours' => 'Working and idle hours cannot exceed 24 in a day.']);
+
+        [$startTime, $endTime, $totalDuration] = $this->times($data);
+        $cap = $totalDuration ?? Decimal::of('24');
+        if ($working->plus($idle)->greaterThan($cap)) {
+            $label = $totalDuration !== null
+                ? 'Working and idle hours cannot exceed the total duration ('.$totalDuration->toMoney().' hours).'
+                : 'Working and idle hours cannot exceed 24 in a day.';
+            throw ValidationException::withMessages(['working_hours' => $label]);
         }
 
         return [
             'log_date' => $date,
+            'start_time' => $startTime,
+            'end_time' => $endTime,
+            'total_duration_hours' => $totalDuration?->toMoney(),
             'task_id' => $this->task($project, $data['task_id'] ?? null, 'task_id')?->id ?? $assignment->task_id,
             'opening_meter' => $opening?->toMoney(),
             'closing_meter' => $closing?->toMoney(),
@@ -178,5 +187,56 @@ class EquipmentUsageService
             'idle_hours' => $idle->toMoney(),
             'remarks' => $data['remarks'] ?? null,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array{0:?string,1:?string,2:?Decimal}
+     */
+    private function times(array $data): array
+    {
+        $start = $this->normalizeTime($data['start_time'] ?? null);
+        $end = $this->normalizeTime($data['end_time'] ?? null);
+        if (($start === null) !== ($end === null)) {
+            throw ValidationException::withMessages(['end_time' => 'Enter both start and end time, or neither.']);
+        }
+        if ($start === null) {
+            return [null, null, null];
+        }
+
+        $startMinutes = $this->minutes($start);
+        $endMinutes = $this->minutes($end);
+        $diff = $endMinutes - $startMinutes;
+        if ($diff < 0) {
+            // Overnight same-log support: end next calendar day.
+            $diff += 24 * 60;
+        }
+        if ($diff === 0) {
+            throw ValidationException::withMessages(['end_time' => 'End time must be after start time.']);
+        }
+
+        $hours = Decimal::of((string) $diff)->dividedBy('60')->round(2);
+
+        return [$start, $end, $hours];
+    }
+
+    private function normalizeTime(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $raw = trim((string) $value);
+        if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/', $raw, $m) !== 1) {
+            throw ValidationException::withMessages(['start_time' => 'Use HH:MM time format.']);
+        }
+
+        return sprintf('%02d:%02d:00', (int) $m[1], (int) $m[2]);
+    }
+
+    private function minutes(string $time): int
+    {
+        [$h, $m] = array_map('intval', explode(':', $time));
+
+        return ($h * 60) + $m;
     }
 }

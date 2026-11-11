@@ -1,6 +1,7 @@
 <script setup>
 import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
 import CellValue from '@/Components/Data/CellValue.vue';
+import DecimalInput from '@/Components/Form/DecimalInput.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import FormSelect from '@/Components/Form/FormSelect.vue';
 import SearchSelect from '@/Components/Form/SearchSelect.vue';
@@ -11,7 +12,7 @@ import AppDrawer from '@/Components/UI/AppDrawer.vue';
 import PageHeader from '@/Components/UI/PageHeader.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
-import { formatDateTime } from '@/lib/format';
+import { formatDate, formatDateTime, formatQty } from '@/lib/format';
 import { useForm } from '@inertiajs/vue3';
 import { computed, ref, shallowRef } from 'vue';
 
@@ -24,6 +25,8 @@ const props = defineProps({
     can: { type: Object, required: true },
     locationHistory: { type: Array, default: () => [] },
     locationTypes: { type: Array, default: () => [] },
+    quantityMovements: { type: Array, default: () => [] },
+    quantityMovementTypes: { type: Array, default: () => [] },
 });
 
 const title = computed(() => props.record[props.definition.nameColumn] ?? props.record.code);
@@ -69,6 +72,21 @@ function saveLocation() {
     });
 }
 
+const qtyOpen = ref(false);
+const qtyForm = useForm({
+    moved_at: new Date().toISOString().slice(0, 10),
+    movement_type: 'add',
+    quantity: '',
+    reason: '',
+    remarks: '',
+});
+function saveQty() {
+    qtyForm.post(route('equipment.quantity-movements.store', props.record.id), {
+        preserveScroll: true,
+        onSuccess: () => (qtyOpen.value = false),
+    });
+}
+
 function submit() {
     form.value.put(route('masters.update', [props.definition.slug, props.record.id]), {
         preserveScroll: true,
@@ -110,6 +128,22 @@ function submit() {
                 <p v-else class="mt-2 text-xs text-slate-500">No location changes yet.</p>
             </AppCard>
 
+            <AppCard v-if="definition.slug === 'equipment' && record.tracking_mode === 'quantity'" title="Quantity movements" class="lg:col-span-2">
+                <template #actions>
+                    <AppButton v-if="can.update" size="sm" @click="qtyOpen = true">Add / remove qty</AppButton>
+                </template>
+                <p class="text-sm text-slate-700">Available: <span class="font-semibold tabular">{{ formatQty(record.available_quantity) }}</span> · Opening: <span class="tabular">{{ formatQty(record.opening_quantity) }}</span></p>
+                <ul v-if="quantityMovements.length" class="mt-3 divide-y divide-line text-sm">
+                    <li v-for="row in quantityMovements" :key="row.id" class="flex justify-between gap-3 py-2">
+                        <div>
+                            <p class="font-medium text-slate-900">{{ row.movement_type_label }} · {{ formatQty(row.quantity) }}</p>
+                            <p class="text-xs text-slate-500">{{ formatDate(row.moved_at) }}<template v-if="row.created_by"> · {{ row.created_by }}</template><template v-if="row.reason"> · {{ row.reason }}</template></p>
+                        </div>
+                    </li>
+                </ul>
+                <p v-else class="mt-2 text-xs text-slate-500">No quantity movements yet. Individual assets use location/status instead of quantity.</p>
+            </AppCard>
+
             <AttachmentPanel
                 :key="`${attachableType}-${record.id}`"
                 :attachments="attachments"
@@ -142,6 +176,20 @@ function submit() {
             <template #footer>
                 <AppButton variant="secondary" @click="locationOpen = false">Cancel</AppButton>
                 <AppButton :loading="locationForm.processing" @click="saveLocation">Save location</AppButton>
+            </template>
+        </AppDrawer>
+
+        <AppDrawer :show="qtyOpen" title="Equipment quantity movement" @close="qtyOpen = false">
+            <div class="space-y-4">
+                <FormInput v-model="qtyForm.moved_at" type="date" label="Date" required :error="qtyForm.errors.moved_at" />
+                <FormSelect v-model="qtyForm.movement_type" label="Type" required :options="quantityMovementTypes" :error="qtyForm.errors.movement_type" />
+                <DecimalInput v-model="qtyForm.quantity" label="Quantity" :decimals="4" required :error="qtyForm.errors.quantity" />
+                <FormInput v-model="qtyForm.reason" label="Reason" maxlength="255" :error="qtyForm.errors.reason" />
+                <FormInput v-model="qtyForm.remarks" label="Remarks" multiline :rows="2" maxlength="500" :error="qtyForm.errors.remarks" />
+            </div>
+            <template #footer>
+                <AppButton variant="secondary" @click="qtyOpen = false">Cancel</AppButton>
+                <AppButton :loading="qtyForm.processing" @click="saveQty">Save movement</AppButton>
             </template>
         </AppDrawer>
     </AppLayout>

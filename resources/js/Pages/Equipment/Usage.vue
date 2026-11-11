@@ -39,7 +39,28 @@ const columns = [
 
 const drawer = ref(false);
 const editing = ref(null);
-const form = useForm({ equipment_assignment_id: null, log_date: props.today, task_id: null, opening_meter: null, closing_meter: null, working_hours: null, idle_hours: null, remarks: '' });
+const form = useForm({
+    equipment_assignment_id: null,
+    log_date: props.today,
+    start_time: null,
+    end_time: null,
+    task_id: null,
+    opening_meter: null,
+    closing_meter: null,
+    working_hours: null,
+    idle_hours: null,
+    remarks: '',
+});
+const durationPreview = computed(() => {
+    if (!form.start_time || !form.end_time) return null;
+    const [sh, sm] = String(form.start_time).split(':').map(Number);
+    const [eh, em] = String(form.end_time).split(':').map(Number);
+    if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return null;
+    let mins = eh * 60 + em - (sh * 60 + sm);
+    if (mins < 0) mins += 24 * 60;
+    if (mins <= 0) return null;
+    return (mins / 60).toFixed(2);
+});
 watch(
     () => form.equipment_assignment_id,
     (id) => {
@@ -62,6 +83,8 @@ function openEdit(row) {
     Object.assign(form, {
         equipment_assignment_id: row.equipment_assignment_id,
         log_date: row.log_date,
+        start_time: row.start_time ? String(row.start_time).slice(0, 5) : null,
+        end_time: row.end_time ? String(row.end_time).slice(0, 5) : null,
         task_id: row.task_id,
         opening_meter: row.opening_meter,
         closing_meter: row.closing_meter,
@@ -130,6 +153,10 @@ function destroyLog() {
                 <template #cell-hours="{ row }">
                     <span class="tabular">{{ formatNumber(row.working_hours, 0, 2) }}</span>
                     <span v-if="row.idle_hours !== '0.00'" class="text-xs text-slate-500"> + {{ formatNumber(row.idle_hours, 0, 2) }} idle</span>
+                    <div v-if="row.start_time || row.total_duration_hours" class="text-[11px] text-slate-500">
+                        <template v-if="row.start_time">{{ String(row.start_time).slice(0, 5) }}–{{ String(row.end_time).slice(0, 5) }}</template>
+                        <template v-if="row.total_duration_hours"> · {{ formatNumber(row.total_duration_hours, 0, 2) }}h</template>
+                    </div>
                 </template>
                 <template #cell-cost="{ row }">
                     <span class="font-semibold tabular">{{ formatMoney(row.posted ? row.cost_amount : row.estimated_cost) }}</span>
@@ -154,6 +181,10 @@ function destroyLog() {
                 <SearchSelect v-if="!editing" v-model="form.equipment_assignment_id" label="Equipment" required :options="options.assignments" :error="form.errors.equipment_assignment_id" />
                 <p v-else class="text-sm font-medium text-slate-800">{{ editing.equipment }}</p>
                 <FormInput v-model="form.log_date" type="date" label="Date" required :max="today" :error="form.errors.log_date" />
+                <div class="grid grid-cols-2 gap-3">
+                    <FormInput v-model="form.start_time" type="time" label="Start time" :error="form.errors.start_time" />
+                    <FormInput v-model="form.end_time" type="time" label="End time" :error="form.errors.end_time" :help="durationPreview ? `Total ${durationPreview} h` : null" />
+                </div>
                 <FormSelect v-model="form.task_id" label="Task" placeholder="No task" :options="options.tasks" :error="form.errors.task_id" />
                 <div class="grid grid-cols-2 gap-3">
                     <DecimalInput v-model="form.opening_meter" label="Opening meter" :error="form.errors.opening_meter" />

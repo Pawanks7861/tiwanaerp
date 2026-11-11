@@ -23,7 +23,7 @@ final class BoqPresenter
     public static function header(Boq $boq, bool $withCosts): array
     {
         $data = [
-            ...$boq->only(['id', 'boq_number', 'version', 'title', 'is_current', 'parent_boq_id', 'total_client_amount']),
+            ...$boq->only(['id', 'boq_number', 'version', 'title', 'revision_reason', 'is_current', 'parent_boq_id', 'total_client_amount']),
             'status' => $boq->status->value,
             'status_label' => $boq->status->label(),
             'approved_at' => $boq->approved_at?->toIso8601String(),

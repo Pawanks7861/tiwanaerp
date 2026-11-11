@@ -38,10 +38,12 @@ use App\Http\Controllers\Documents\DrawingController;
 use App\Http\Controllers\Equipment\EquipmentAssignmentController;
 use App\Http\Controllers\Equipment\EquipmentLocationController;
 use App\Http\Controllers\Equipment\EquipmentFuelController;
+use App\Http\Controllers\Equipment\EquipmentQuantityMovementController;
 use App\Http\Controllers\Equipment\EquipmentRepairController;
 use App\Http\Controllers\Equipment\EquipmentUsageController;
 use App\Http\Controllers\Files\FileViewerController;
 use App\Http\Controllers\Finance\CashFlowController;
+use App\Http\Controllers\Gate\CompanyGatePassController;
 use App\Http\Controllers\Gate\GatePassController;
 use App\Http\Controllers\Finance\ClientInvoiceController;
 use App\Http\Controllers\Finance\ExpenseController;
@@ -180,6 +182,7 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::put('/items', [BoqController::class, 'saveItems'])->name('items.save');
             Route::post('/submit', [BoqController::class, 'submit'])->name('submit');
             Route::post('/revise', [BoqController::class, 'revise'])->name('revise');
+            Route::get('/compare', [BoqController::class, 'compare'])->name('compare');
             Route::post('/import', [BoqExcelController::class, 'import'])->middleware('throttle:20,1')->name('import');
             Route::get('/export', [BoqExcelController::class, 'export'])->name('export');
             Route::post('/sections', [BoqSectionController::class, 'store'])->name('sections.store');
@@ -700,6 +703,9 @@ Route::middleware(['auth', 'company'])->group(function () {
     // Finance: company-wide cash flow and outstanding (projects the user can see)
     Route::get('/finance/cash-flow', [CashFlowController::class, 'company'])->name('finance.cash-flow');
 
+    // Company-wide Gate Pass list (view for all users with gate_pass.view)
+    Route::get('/gate-passes', [CompanyGatePassController::class, 'index'])->name('gate-passes.index');
+
     // CRM: leads, activities, quotations, conversion to project
     Route::prefix('/crm')->name('crm.')->group(function () {
         Route::get('/leads', [LeadController::class, 'index'])->name('leads.index');
@@ -762,6 +768,9 @@ Route::middleware(['auth', 'company'])->group(function () {
     });
 
     Route::post('/equipment/{equipment}/location', [EquipmentLocationController::class, 'update'])->whereNumber('equipment')->name('equipment.location');
+    Route::post('/equipment/{equipment}/quantity-movements', [EquipmentQuantityMovementController::class, 'store'])
+        ->whereNumber('equipment')
+        ->name('equipment.quantity-movements.store');
 
     // Masters (items, units, vendors, clients, ...) share one controller driven by MasterRegistry.
     Route::prefix('/masters/{master}')->name('masters.')

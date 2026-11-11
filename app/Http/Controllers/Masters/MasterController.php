@@ -68,6 +68,12 @@ class MasterController extends Controller
             'can' => $this->abilities($request, $definition),
             'locationHistory' => $model instanceof Equipment ? $this->locationHistory($model) : [],
             'locationTypes' => $model instanceof Equipment ? \App\Enums\Equipment\EquipmentLocationType::options() : [],
+            'quantityMovements' => $model instanceof Equipment && $model->isQuantityTracked()
+                ? $this->quantityMovements($model)
+                : [],
+            'quantityMovementTypes' => $model instanceof Equipment
+                ? \App\Enums\Equipment\EquipmentQuantityMovementType::manualOptions()
+                : [],
         ]);
     }
 
@@ -110,6 +116,23 @@ class MasterController extends Controller
             'remarks' => $row->remarks,
             'changed_by' => $row->changer?->name,
             'changed_at' => $row->changed_at?->toIso8601String(),
+        ])->all();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function quantityMovements(Equipment $equipment): array
+    {
+        return $equipment->quantityMovements()->with('creator:id,name')->limit(50)->get()->map(fn ($row) => [
+            'id' => $row->id,
+            'moved_at' => $row->moved_at?->toDateString(),
+            'movement_type' => $row->movement_type?->value,
+            'movement_type_label' => $row->movement_type?->label(),
+            'quantity' => (string) $row->quantity,
+            'reason' => $row->reason,
+            'remarks' => $row->remarks,
+            'created_by' => $row->creator?->name,
         ])->all();
     }
 

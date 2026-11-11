@@ -114,6 +114,8 @@ class EquipmentUsageApiController extends Controller
         return $request->validate([
             ...($creating ? ['equipment_assignment_id' => ['required', 'integer']] : []),
             'log_date' => ['required', 'date', 'before_or_equal:today'],
+            'start_time' => ['nullable', 'date_format:H:i'],
+            'end_time' => ['nullable', 'date_format:H:i'],
             'task_id' => ['nullable', 'integer'],
             'opening_meter' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999'],
             'closing_meter' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999'],

@@ -78,6 +78,17 @@ export function buildNavigation({ can, isSuperAdmin, multiCompany = false, advan
             ],
         },
         {
+            title: 'Operations',
+            items: [
+                can('gate_pass.view') && {
+                    label: 'Gate Passes',
+                    icon: 'truck',
+                    href: route('gate-passes.index'),
+                    active: route().current('gate-passes.*') || route().current('projects.gate-passes.*'),
+                },
+            ],
+        },
+        {
             title: 'Masters',
             items: [
                 ...masters

@@ -5,6 +5,7 @@ namespace App\Support\Masters\Definitions;
 use App\Enums\Equipment\EquipmentLocationType;
 use App\Enums\Equipment\EquipmentOwnership;
 use App\Enums\Equipment\EquipmentStatus;
+use App\Enums\Equipment\EquipmentTrackingMode;
 use App\Models\Equipment\Equipment;
 use App\Models\Masters\EquipmentType;
 use App\Models\Masters\Vendor;
@@ -80,6 +81,9 @@ class EquipmentDefinition extends MasterDefinition
             ['name' => 'hourly_rate', 'label' => 'Hourly rate', 'type' => 'rate', 'section' => 'Charge-out rates', 'help' => 'Default rate for project assignments.'],
             ['name' => 'daily_rate', 'label' => 'Daily rate', 'type' => 'rate', 'section' => 'Charge-out rates'],
             ['name' => 'status', 'label' => 'Status', 'type' => 'select', 'options' => 'statuses', 'default' => 'available', 'section' => 'Status', 'help' => 'Assigned / under repair are set by assignments and repairs.'],
+            ['name' => 'tracking_mode', 'label' => 'Tracking mode', 'type' => 'select', 'options' => 'tracking_modes', 'default' => 'individual', 'section' => 'Quantity', 'help' => 'Individual = unique asset (JCB with registration). Quantity = identical tools without unique serials.'],
+            ['name' => 'opening_quantity', 'label' => 'Opening qty', 'type' => 'decimal', 'decimals' => 4, 'showWhen' => ['tracking_mode' => 'quantity'], 'section' => 'Quantity'],
+            ['name' => 'available_quantity', 'label' => 'Available qty', 'type' => 'decimal', 'decimals' => 4, 'readonly' => true, 'showWhen' => ['tracking_mode' => 'quantity'], 'section' => 'Quantity', 'help' => 'Server-calculated from opening + movements.'],
             ['name' => 'remarks', 'label' => 'Remarks', 'type' => 'textarea', 'span' => 'full', 'section' => 'Status'],
             ['name' => 'is_active', 'label' => 'Active', 'type' => 'switch'],
         ];
@@ -91,8 +95,11 @@ class EquipmentDefinition extends MasterDefinition
             'code' => $this->codeRules('equipment', $record),
             'name' => ['required', 'string', 'max:150'],
             'equipment_type_id' => ['required', new ExistsInCompany(EquipmentType::class)],
-            'registration_no' => ['nullable', 'required_without:serial_no', 'string', 'max:50'],
-            'serial_no' => ['nullable', 'required_without:registration_no', 'string', 'max:50'],
+            'tracking_mode' => ['required', Rule::enum(EquipmentTrackingMode::class)],
+            'opening_quantity' => ['nullable', 'numeric', 'min:0', 'max:999999999', 'decimal:0,4'],
+            'available_quantity' => ['nullable'],
+            'registration_no' => ['nullable', 'string', 'max:50'],
+            'serial_no' => ['nullable', 'string', 'max:50'],
             'make' => ['nullable', 'string', 'max:80'],
             'model' => ['nullable', 'string', 'max:80'],
             'manufacture_year' => ['nullable', 'integer', 'min:1950', 'max:2100'],
@@ -130,6 +137,27 @@ class EquipmentDefinition extends MasterDefinition
         $data['hourly_rate'] = blank($data['hourly_rate'] ?? null) ? '0' : $data['hourly_rate'];
         $data['daily_rate'] = blank($data['daily_rate'] ?? null) ? '0' : $data['daily_rate'];
         $data['status'] = $this->status($data['status'] ?? null, $record);
+        $data['tracking_mode'] = $data['tracking_mode'] ?? EquipmentTrackingMode::Individual->value;
+        $mode = $data['tracking_mode'];
+        if ($mode === EquipmentTrackingMode::Quantity->value) {
+            $opening = blank($data['opening_quantity'] ?? null) ? '0' : (string) $data['opening_quantity'];
+            $data['opening_quantity'] = $opening;
+            if ($record === null) {
+                $data['available_quantity'] = $opening;
+            } else {
+                unset($data['available_quantity']);
+            }
+            $data['registration_no'] = $data['registration_no'] ?? null;
+            $data['serial_no'] = $data['serial_no'] ?? null;
+        } else {
+            $data['opening_quantity'] = '0';
+            $data['available_quantity'] = '0';
+            if (blank($data['registration_no'] ?? null) && blank($data['serial_no'] ?? null)) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'registration_no' => 'Registration number or serial number is required for individual equipment.',
+                ]);
+            }
+        }
 
         return $data;
     }
@@ -167,6 +195,7 @@ class EquipmentDefinition extends MasterDefinition
             'ownerships' => EquipmentOwnership::options(),
             'statuses' => EquipmentStatus::options(),
             'locations' => EquipmentLocationType::options(),
+            'tracking_modes' => EquipmentTrackingMode::options(),
             'projects' => $this->toOptions(Project::query()->orderBy('name')->get(['id', 'name'])),
         ];
     }

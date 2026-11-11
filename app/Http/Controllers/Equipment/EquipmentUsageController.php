@@ -47,7 +47,7 @@ class EquipmentUsageController extends Controller
                 'log_date' => $l->log_date?->toDateString(),
                 'task_id' => $l->task_id,
                 'task' => $l->task ? trim($l->task->wbs_code.' '.$l->task->name) : null,
-                ...$l->only(['opening_meter', 'closing_meter', 'working_hours', 'idle_hours', 'cost_amount', 'remarks']),
+                ...$l->only(['start_time', 'end_time', 'total_duration_hours', 'opening_meter', 'closing_meter', 'working_hours', 'idle_hours', 'cost_amount', 'remarks']),
                 'rate_basis' => $l->assignment?->rate_basis?->label(),
                 'rate' => $l->assignment?->rate,
                 'estimated_cost' => $l->assignment ? $this->usage->cost($l->assignment, $l)->toMoney() : null,
@@ -136,6 +136,8 @@ class EquipmentUsageController extends Controller
         return $request->validate([
             ...($creating ? ['equipment_assignment_id' => ['required', 'integer']] : []),
             'log_date' => ['required', 'date', 'before_or_equal:today'],
+            'start_time' => ['nullable', 'date_format:H:i'],
+            'end_time' => ['nullable', 'date_format:H:i'],
             'task_id' => ['nullable', 'integer'],
             'opening_meter' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999'],
             'closing_meter' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999'],

@@ -5,6 +5,7 @@ namespace App\Models\Equipment;
 use App\Enums\Equipment\EquipmentLocationType;
 use App\Enums\Equipment\EquipmentOwnership;
 use App\Enums\Equipment\EquipmentStatus;
+use App\Enums\Equipment\EquipmentTrackingMode;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Masters\EquipmentType;
 use App\Models\Masters\MasterModel;
@@ -21,7 +22,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'code', 'name', 'equipment_type_id', 'ownership', 'owner_vendor_id', 'source_purchase_order_id', 'source_grn_id',
     'registration_no', 'serial_no', 'make', 'model', 'capacity_rating', 'manufacture_year', 'purchase_date',
     'warranty_start', 'warranty_end', 'purchase_value', 'hourly_rate', 'daily_rate',
-    'status', 'location_type', 'location_project_id', 'location_name', 'location_notes', 'is_active', 'remarks',
+    'status', 'location_type', 'location_project_id', 'location_name', 'location_notes', 'is_active',
+    'tracking_mode', 'opening_quantity', 'available_quantity', 'remarks',
 ])]
 class Equipment extends MasterModel
 {
@@ -46,7 +48,23 @@ class Equipment extends MasterModel
             'hourly_rate' => 'decimal:4',
             'daily_rate' => 'decimal:4',
             'is_active' => 'boolean',
+            'tracking_mode' => EquipmentTrackingMode::class,
+            'opening_quantity' => 'decimal:4',
+            'available_quantity' => 'decimal:4',
         ];
+    }
+
+    /**
+     * @return HasMany<EquipmentQuantityMovement, $this>
+     */
+    public function quantityMovements(): HasMany
+    {
+        return $this->hasMany(EquipmentQuantityMovement::class)->orderByDesc('moved_at')->orderByDesc('id');
+    }
+
+    public function isQuantityTracked(): bool
+    {
+        return $this->tracking_mode === EquipmentTrackingMode::Quantity;
     }
 
     /**

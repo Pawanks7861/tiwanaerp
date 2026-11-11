@@ -15,9 +15,17 @@ use Illuminate\Validation\ValidationException;
  */
 class BoqRevisionService
 {
-    public function revise(Boq $boq): Boq
+    public function revise(Boq $boq, string $reason): Boq
     {
-        return DB::transaction(function () use ($boq) {
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw ValidationException::withMessages(['revision_reason' => 'A revision reason is required.']);
+        }
+        if (mb_strlen($reason) > 255) {
+            throw ValidationException::withMessages(['revision_reason' => 'Revision reason may not exceed 255 characters.']);
+        }
+
+        return DB::transaction(function () use ($boq, $reason) {
             $source = Boq::query()->whereKey($boq->id)->lockForUpdate()->firstOrFail();
 
             if ($source->status !== BoqStatus::Approved || ! $source->is_current) {
@@ -42,6 +50,7 @@ class BoqRevisionService
                 'boq_number' => $source->boq_number,
                 'version' => (int) $chain->max('version') + 1,
                 'parent_boq_id' => $source->id,
+                'revision_reason' => $reason,
                 'status' => BoqStatus::Draft,
                 'is_current' => false,
                 'total_cost_amount' => $source->total_cost_amount,
@@ -51,6 +60,12 @@ class BoqRevisionService
             $sectionMap = $this->cloneSections($source, $revision);
             $this->cloneItems($source, $revision, $sectionMap);
             $this->cloneDrawingLinks($source, $revision);
+
+            $revision->writeAudit('revised', null, [
+                'parent_boq_id' => $source->id,
+                'parent_version' => $source->version,
+                'revision_reason' => $reason,
+            ]);
 
             return $revision;
         });

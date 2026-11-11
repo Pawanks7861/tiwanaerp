@@ -8,6 +8,7 @@ use App\Models\Projects\Project;
 use App\Models\User;
 use App\Policies\ProjectPolicy;
 use App\Services\Approval\ApprovalService;
+use App\Support\Tenancy\CurrentCompany;
 
 class GatePassPolicy
 {
@@ -21,9 +22,20 @@ class GatePassPolicy
         return $user->can('gate_pass.view') && $this->projects->view($user, $project);
     }
 
+    /**
+     * Company-wide list (menu) — same company, no project membership required.
+     */
+    public function viewAnyCompany(User $user): bool
+    {
+        return $user->can('gate_pass.view');
+    }
+
     public function view(User $user, GatePass $pass): bool
     {
-        return $user->can('gate_pass.view') && $this->projects->view($user, $pass->project);
+        // View is company-scoped: any active company user with gate_pass.view may open a pass.
+        // Create/approve/verify remain project + permission gated.
+        return $user->can('gate_pass.view')
+            && (int) $pass->company_id === (int) app(CurrentCompany::class)->id();
     }
 
     public function create(User $user, Project $project): bool
