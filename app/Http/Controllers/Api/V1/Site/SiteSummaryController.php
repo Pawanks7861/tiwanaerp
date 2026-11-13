@@ -4,12 +4,10 @@ namespace App\Http\Controllers\Api\V1\Site;
 
 use App\Enums\Planning\TaskStatus;
 use App\Enums\SiteExecution\DprStatus;
-use App\Enums\SiteExecution\SiteDiaryStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
 use App\Models\SiteExecution\Dpr;
-use App\Models\SiteExecution\SiteDiary;
 use App\Queries\Reports\ProgressQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -46,21 +44,6 @@ class SiteSummaryController extends Controller
             })
             ->count();
 
-        $todayDiaries = (int) SiteDiary::query()
-            ->where('project_id', $project->id)
-            ->whereDate('diary_date', $today)
-            ->count();
-
-        $pendingDiaryReview = (int) SiteDiary::query()
-            ->where('project_id', $project->id)
-            ->where('status', SiteDiaryStatus::Submitted->value)
-            ->count();
-
-        $pendingDiaryApproval = (int) SiteDiary::query()
-            ->where('project_id', $project->id)
-            ->where('status', SiteDiaryStatus::Reviewed->value)
-            ->count();
-
         $todayDpr = Dpr::query()
             ->where('project_id', $project->id)
             ->whereDate('dpr_date', $today)
@@ -81,9 +64,6 @@ class SiteSummaryController extends Controller
             'data' => [
                 'open_tasks' => $openTasks,
                 'delayed_tasks' => $delayedTasks,
-                'today_diaries' => $todayDiaries,
-                'pending_diary_review' => $pendingDiaryReview,
-                'pending_diary_approval' => $pendingDiaryApproval,
                 'today_dpr_exists' => $todayDpr !== null,
                 'today_dpr' => $todayDpr ? [
                     'id' => $todayDpr->id,
@@ -94,8 +74,8 @@ class SiteSummaryController extends Controller
                 'project_progress_percent' => $progress['per_project'][(int) $project->id] ?? $progress['overall'],
                 'can' => [
                     'view_planning' => Gate::allows('viewAny', [ProjectTask::class, $project]),
-                    'create_diary' => Gate::allows('create', [SiteDiary::class, $project]),
                     'create_dpr' => Gate::allows('create', [Dpr::class, $project]),
+                    'view_dpr' => Gate::allows('viewAny', [Dpr::class, $project]),
                     'view_progress' => $request->user()->can('planning.view') || $request->user()->can('dpr.view'),
                 ],
             ],

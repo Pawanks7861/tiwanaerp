@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Material issued to projects (approved issues less approved site-to-store returns) against the
- * usage engineers recorded in approved site diaries. Diary usage is informational only — it never
- * moves stock or cost; the variance just highlights waste or under-reporting.
+ * usage reported on approved DPRs. DPR usage is informational only — it never moves stock or cost;
+ * the variance just highlights waste or under-reporting.
  */
 final class MaterialConsumptionQuery
 {
@@ -35,11 +35,11 @@ final class MaterialConsumptionQuery
             ->where('mr.return_date', '>=', $from)->where('mr.return_date', '<=', $toEod)
             ->selectRaw('mr.project_id, ri.material_id, 0 as issued, 0 as issued_value, ri.quantity as returned, ri.value as returned_value, 0 as diary');
 
-        $diary = DB::table('site_diary_materials as dm')
-            ->join('site_diaries as sd', 'sd.id', '=', 'dm.site_diary_id')
-            ->where('sd.company_id', $companyId)->whereIn('sd.project_id', $ids)->where('sd.status', 'approved')->whereNull('sd.deleted_at')
-            ->where('sd.diary_date', '>=', $from)->where('sd.diary_date', '<=', $toEod)
-            ->selectRaw('sd.project_id, dm.material_id, 0 as issued, 0 as issued_value, 0 as returned, 0 as returned_value, dm.quantity as diary');
+        $diary = DB::table('dpr_materials as dm')
+            ->join('dprs as dp', 'dp.id', '=', 'dm.dpr_id')
+            ->where('dp.company_id', $companyId)->whereIn('dp.project_id', $ids)->where('dp.status', 'approved')->whereNull('dp.deleted_at')
+            ->where('dp.dpr_date', '>=', $from)->where('dp.dpr_date', '<=', $toEod)
+            ->selectRaw('dp.project_id, dm.material_id, 0 as issued, 0 as issued_value, 0 as returned, 0 as returned_value, COALESCE(dm.issued_qty, dm.quantity, 0) as diary');
 
         $search = trim((string) ($filters['search'] ?? ''));
 

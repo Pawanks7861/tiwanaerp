@@ -12,17 +12,17 @@ import AppCard from '@/Components/UI/AppCard.vue';
 import AppDrawer from '@/Components/UI/AppDrawer.vue';
 import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
 import EmptyState from '@/Components/UI/EmptyState.vue';
-import Icon from '@/Components/UI/Icon.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
-import { formatDate, formatMoney, formatPercent, formatQty } from '@/lib/format';
+import { formatDate, formatPercent, formatQty } from '@/lib/format';
 import { router, useForm } from '@inertiajs/vue3';
 import axios from 'axios';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps({
     project: { type: Object, required: true },
     tasks: { type: Array, required: true },
+    summary: { type: Object, default: () => ({}) },
     filtered: { type: Boolean, default: false },
     filters: { type: Object, required: true },
     options: { type: Object, required: true },
@@ -30,49 +30,51 @@ const props = defineProps({
 });
 
 const showImport = ref(false);
-
-// ---- Tree --------------------------------------------------------------------------------------
-const view = ref('tree');
-const collapsed = reactive(new Set());
 const byId = computed(() => Object.fromEntries(props.tasks.map((t) => [t.id, t])));
-const childrenMap = computed(() => {
-    const map = {};
-    props.tasks.forEach((t) => {
-        const parent = t.parent_id && byId.value[t.parent_id] ? t.parent_id : 0;
-        (map[parent] ??= []).push(t);
+
+const heads = computed(() => props.tasks.filter((t) => t.is_head).sort((a, b) => a.sort_order - b.sort_order || a.id - b.id));
+
+/** Group: Head → activities with Sr. restarting per head. Ungrouped leaf top-level with qty shown under synthetic group. */
+const scheduleSections = computed(() => {
+    const sections = [];
+    const childIds = new Set();
+
+    heads.value.forEach((head) => {
+        const children = props.tasks
+            .filter((t) => t.parent_id === head.id)
+            .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+        children.forEach((c) => childIds.add(c.id));
+
+        const activities = children.length
+            ? children
+            : (Number(head.planned_qty) > 0 || head.unit_id ? [head] : []);
+
+        sections.push({
+            head,
+            activities: activities.map((a, i) => ({ ...a, sr: i + 1 })),
+        });
     });
 
-    return map;
-});
-const visibleRows = computed(() => {
-    if (view.value === 'list') {
-        return props.tasks.map((t) => ({ task: t, depth: 0 }));
-    }
-    const out = [];
-    const walk = (parentId, depth) => {
-        (childrenMap.value[parentId] ?? []).forEach((t) => {
-            out.push({ task: t, depth });
-            if (!collapsed.has(t.id)) {
-                walk(t.id, depth + 1);
-            }
+    const orphans = props.tasks.filter((t) => !t.is_head && !childIds.has(t.id) && t.parent_id && !byId.value[t.parent_id]);
+    if (orphans.length) {
+        sections.push({
+            head: { id: 0, wbs_code: '—', name: 'Ungrouped' },
+            activities: orphans.sort((a, b) => a.sort_order - b.sort_order).map((a, i) => ({ ...a, sr: i + 1 })),
         });
-    };
-    walk(0, 0);
+    }
 
-    return out;
+    return sections;
 });
-const hasChildren = (id) => (childrenMap.value[id] ?? []).length > 0;
-const toggle = (id) => (collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id));
 
 const filterSelects = computed(() => [
     { key: 'status', options: [{ value: 'all', label: 'All statuses' }, ...props.options.statuses] },
+    { key: 'head_id', options: [{ value: 'all', label: 'All heads' }, ...(props.options.heads ?? [])] },
     { key: 'assigned_to', options: [{ value: 'all', label: 'Anyone' }, ...props.options.members] },
-    { key: 'milestone_id', options: [{ value: 'all', label: 'All milestones' }, ...props.options.milestones] },
 ]);
 
-// ---- Drawer form -------------------------------------------------------------------------------
-const drawer = ref(null); // { task | null }
+const drawer = ref(null); // { task | null, mode: 'head'|'activity' }
 const form = useForm({
+    as_head: false,
     parent_id: null,
     wbs_code: '',
     name: '',
@@ -83,41 +85,53 @@ const form = useForm({
     planned_finish: null,
     unit_id: null,
     planned_qty: null,
-    boq_item_id: null,
+    hold_quantity: null,
     milestone_id: null,
-    budget_amount: null,
 });
 const task = computed(() => (drawer.value?.task ? byId.value[drawer.value.task.id] ?? drawer.value.task : null));
 const editable = computed(() => (task.value ? props.can.update : props.can.create));
+const isHeadForm = computed(() => !!form.as_head || (!!task.value && task.value.is_head && !task.value.parent_id && !Number(task.value.planned_qty)));
 
-function descendantsOf(id) {
-    const ids = new Set([id]);
-    let added = true;
-    while (added) {
-        added = false;
-        props.tasks.forEach((t) => {
-            if (t.parent_id && ids.has(t.parent_id) && !ids.has(t.id)) {
-                ids.add(t.id);
-                added = true;
-            }
-        });
-    }
+const parentOptions = computed(() => (props.options.heads ?? []).filter((h) => !task.value || h.value !== task.value.id));
 
-    return ids;
-}
-const parentOptions = computed(() => {
-    const excluded = task.value ? descendantsOf(task.value.id) : new Set();
-
-    return props.tasks.filter((t) => !excluded.has(t.id)).map((t) => ({ value: t.id, label: `${t.wbs_code} ${t.name}` }));
-});
-
-function openTask(t = null, parentId = null) {
+function openHead(t = null) {
     form.clearErrors();
-    const source = t ?? { parent_id: parentId, priority: 'medium' };
-    Object.keys(form.data()).forEach((key) => (form[key] = source[key] ?? (key === 'priority' ? 'medium' : key === 'wbs_code' || key === 'name' || key === 'description' ? '' : null)));
-    dependencyForm.reset();
-    dependencyForm.clearErrors();
-    drawer.value = { task: t };
+    form.as_head = true;
+    form.parent_id = null;
+    form.wbs_code = t?.wbs_code ?? '';
+    form.name = t?.name ?? '';
+    form.description = t?.description ?? '';
+    form.assigned_to = null;
+    form.priority = 'medium';
+    form.planned_start = null;
+    form.planned_finish = null;
+    form.unit_id = null;
+    form.planned_qty = null;
+    form.hold_quantity = null;
+    form.milestone_id = null;
+    drawer.value = { task: t, mode: 'head' };
+    if (!t) {
+        suggestWbs();
+    }
+}
+
+function openActivity(t = null, headId = null) {
+    form.clearErrors();
+    const source = t ?? {};
+    form.as_head = false;
+    form.parent_id = source.parent_id ?? headId ?? null;
+    form.wbs_code = source.wbs_code ?? '';
+    form.name = source.name ?? '';
+    form.description = source.description ?? '';
+    form.assigned_to = source.assigned_to ?? null;
+    form.priority = source.priority ?? 'medium';
+    form.planned_start = source.planned_start ?? null;
+    form.planned_finish = source.planned_finish ?? null;
+    form.unit_id = source.unit_id ?? null;
+    form.planned_qty = source.planned_qty ?? null;
+    form.hold_quantity = source.hold_quantity ?? '0';
+    form.milestone_id = source.milestone_id ?? null;
+    drawer.value = { task: t, mode: 'activity' };
     if (!t) {
         suggestWbs();
     }
@@ -125,43 +139,34 @@ function openTask(t = null, parentId = null) {
 
 async function suggestWbs() {
     try {
-        const { data } = await axios.get(route('projects.planning.tasks.suggest-wbs', props.project.id), { params: { parent_id: form.parent_id || undefined } });
+        const { data } = await axios.get(route('projects.planning.tasks.suggest-wbs', props.project.id), {
+            params: { parent_id: form.as_head ? undefined : form.parent_id || undefined },
+        });
         form.wbs_code = data.wbs_code;
     } catch {
-        // Suggestion is a convenience only; the server assigns a code when left empty.
+        // Server assigns when empty.
     }
 }
 watch(
-    () => form.parent_id,
+    () => [form.parent_id, form.as_head],
     () => drawer.value && !drawer.value.task && suggestWbs(),
 );
 
-function pickBoqItem(id) {
-    form.boq_item_id = id;
-    const item = props.options.boqItems.find((i) => i.value === id);
-    if (item) {
-        form.unit_id ||= item.unit_id;
-        form.planned_qty ||= item.quantity;
-        form.name ||= item.label;
-    }
-}
-
-const duration = computed(() => {
-    if (!form.planned_start || !form.planned_finish) {
-        return null;
-    }
-    const days = Math.round((new Date(form.planned_finish) - new Date(form.planned_start)) / 86400000) + 1;
-
-    return days > 0 ? days : null;
-});
-
 function save() {
-    const url = task.value ? route('projects.planning.tasks.update', [props.project.id, task.value.id]) : route('projects.planning.tasks.store', props.project.id);
+    const url = task.value
+        ? route('projects.planning.tasks.update', [props.project.id, task.value.id])
+        : route('projects.planning.tasks.store', props.project.id);
     form.transform((data) => {
         const payload = { ...data };
-        if (!props.can.view_costs) {
-            delete payload.budget_amount;
+        if (payload.as_head) {
+            payload.parent_id = null;
+            payload.unit_id = null;
+            payload.planned_qty = null;
+            payload.hold_quantity = null;
+            payload.planned_start = null;
+            payload.planned_finish = null;
         }
+        delete payload.boq_item_id;
 
         return payload;
     })[task.value ? 'put' : 'post'](url, {
@@ -170,7 +175,6 @@ function save() {
     });
 }
 
-// Status
 const statusProcessing = ref(false);
 function changeStatus(status) {
     statusProcessing.value = true;
@@ -181,27 +185,6 @@ function changeStatus(status) {
 }
 const statusLabel = (value) => props.options.statuses.find((s) => s.value === value)?.label ?? value;
 
-// Dependencies
-const dependencyForm = useForm({ predecessor_id: null, type: 'FS', lag_days: 0 });
-const predecessorOptions = computed(() => {
-    if (!task.value) {
-        return [];
-    }
-    const existing = new Set(task.value.predecessors.map((p) => p.predecessor_id));
-
-    return props.tasks.filter((t) => t.id !== task.value.id && !existing.has(t.id)).map((t) => ({ value: t.id, label: `${t.wbs_code} ${t.name}` }));
-});
-function addDependency() {
-    dependencyForm.post(route('projects.planning.tasks.dependencies.store', [props.project.id, task.value.id]), {
-        preserveScroll: true,
-        onSuccess: () => dependencyForm.reset(),
-    });
-}
-function removeDependency(dependency) {
-    router.delete(route('projects.planning.tasks.dependencies.destroy', [props.project.id, task.value.id, dependency.id]), { preserveScroll: true });
-}
-
-// Delete
 const deleting = ref(null);
 const deleteProcessing = ref(false);
 function destroy() {
@@ -212,213 +195,222 @@ function destroy() {
         onFinish: () => ((deleteProcessing.value = false), (deleting.value = null)),
     });
 }
+
+const summaryCards = computed(() => [
+    { label: 'Heads', value: props.summary.heads ?? 0 },
+    { label: 'Activities', value: props.summary.activities ?? 0 },
+    { label: 'Not started', value: props.summary.not_started ?? 0 },
+    { label: 'In progress', value: props.summary.in_progress ?? 0 },
+    { label: 'On hold', value: props.summary.on_hold ?? 0 },
+    { label: 'Completed', value: props.summary.completed ?? 0 },
+    { label: 'Delayed', value: props.summary.delayed ?? 0 },
+]);
 </script>
 
 <template>
     <ProjectLayout :project="project" active="planning" title="Planning">
         <PlanningNav :project-id="project.id" active="tasks" />
 
+        <div class="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+            <div v-for="card in summaryCards" :key="card.label" class="rounded-lg border border-line bg-white px-3 py-2">
+                <p class="text-[11px] tracking-wide text-slate-500 uppercase">{{ card.label }}</p>
+                <p class="mt-0.5 text-lg font-semibold tabular text-slate-900">{{ card.value }}</p>
+            </div>
+        </div>
+
         <AppCard :padded="false">
             <template #header>
                 <div>
-                    <h2 class="text-sm font-semibold text-slate-900">Work breakdown & tasks</h2>
-                    <p class="mt-0.5 text-xs text-slate-500">{{ tasks.length }} task(s). Progress and actual cost will come from DPRs and costing.</p>
+                    <h2 class="text-sm font-semibold text-slate-900">Activity schedule</h2>
+                    <p class="mt-0.5 text-xs text-slate-500">
+                        Work Area / Head → Activities. Executed qty comes from approved DPRs. BOQ is not required.
+                    </p>
                 </div>
             </template>
             <template #actions>
-                <div class="inline-flex rounded-lg border border-line p-0.5">
-                    <button type="button" class="rounded-md px-2.5 py-1 text-xs font-medium" :class="view === 'tree' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'" @click="view = 'tree'">Tree</button>
-                    <button type="button" class="rounded-md px-2.5 py-1 text-xs font-medium" :class="view === 'list' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'" @click="view = 'list'">List</button>
-                </div>
                 <ImportTemplateDownload v-if="can.import" module="planning.tasks" :project-id="project.id" size="sm" />
                 <AppButton v-if="can.import" size="sm" variant="secondary" @click="showImport = true">Import</AppButton>
-                <AppButton v-if="can.create" size="sm" icon="plus" @click="openTask()">Task</AppButton>
+                <AppButton v-if="can.create" size="sm" variant="secondary" icon="plus" @click="openHead()">Add Head</AppButton>
+                <AppButton v-if="can.create" size="sm" icon="plus" @click="openActivity()">Add Activity</AppButton>
             </template>
 
             <FilterBar
                 :filters="{
                     search: filters.search ?? '',
                     status: filters.status ?? 'all',
+                    head_id: filters.head_id ? Number(filters.head_id) : 'all',
                     assigned_to: filters.assigned_to ? Number(filters.assigned_to) : 'all',
-                    milestone_id: filters.milestone_id ? Number(filters.milestone_id) : 'all',
+                    on_hold: filters.on_hold ? '1' : '',
+                    delayed: filters.delayed ? '1' : '',
                 }"
                 :selects="filterSelects"
-                placeholder="Search WBS or task…"
+                placeholder="Search activity or head…"
             />
 
             <EmptyState
                 v-if="!tasks.length"
                 icon="calendar"
-                :title="filtered ? 'No matching tasks' : 'No tasks yet'"
-                :description="filtered ? 'Try different filters.' : 'Build the work breakdown: add top-level tasks, then sub-tasks under them.'"
+                :title="filtered ? 'No matching activities' : 'No planning yet'"
+                :description="filtered ? 'Try different filters.' : 'Add a Planning Head (e.g. PEB SHED), then activities under it.'"
             />
 
             <template v-else>
-                <!-- Desktop -->
                 <div class="hidden max-h-[70vh] overflow-auto md:block">
                     <table class="min-w-full text-sm">
                         <thead class="sticky top-0 z-10 bg-slate-50 text-xs tracking-wide text-slate-500 uppercase shadow-sm">
                             <tr>
-                                <th class="px-3 py-2.5 text-left">WBS / task</th>
-                                <th class="px-3 py-2.5 text-left">Status</th>
-                                <th class="px-3 py-2.5 text-left">Assignee</th>
-                                <th class="px-3 py-2.5 text-left">Planned</th>
-                                <th class="px-3 py-2.5 text-right">Days</th>
-                                <th class="px-3 py-2.5 text-right">Planned qty</th>
-                                <th class="px-3 py-2.5 text-left">BOQ / milestone</th>
+                                <th class="px-3 py-2 text-left" rowspan="2">Sr.</th>
+                                <th class="px-3 py-2 text-left" rowspan="2">Activity</th>
+                                <th class="px-3 py-2 text-left" rowspan="2">Unit</th>
+                                <th class="border-b border-slate-200 px-3 py-1.5 text-center" colspan="2">Time schedule</th>
+                                <th class="px-3 py-2 text-right" rowspan="2">Total qty</th>
+                                <th class="px-3 py-2 text-right" rowspan="2">Exe. qty</th>
+                                <th class="px-3 py-2 text-right" rowspan="2">Hold qty</th>
+                                <th class="px-3 py-2 text-right" rowspan="2">Balance qty</th>
+                                <th class="px-3 py-2 text-right" rowspan="2">% complete</th>
+                                <th class="px-3 py-2 text-left" rowspan="2">Remarks</th>
+                            </tr>
+                            <tr>
+                                <th class="px-3 py-1.5 text-left font-medium normal-case">Start date</th>
+                                <th class="px-3 py-1.5 text-left font-medium normal-case">End date</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-line bg-white">
-                            <tr v-for="{ task: t, depth } in visibleRows" :key="t.id" class="cursor-pointer hover:bg-slate-50" @click="openTask(t)">
-                                <td class="px-3 py-2">
-                                    <div class="flex items-center gap-1.5" :style="{ paddingLeft: `${depth * 1.25}rem` }">
-                                        <button
-                                            v-if="view === 'tree' && hasChildren(t.id)"
-                                            type="button"
-                                            class="rounded p-0.5 text-slate-400 hover:bg-slate-100"
-                                            :aria-label="collapsed.has(t.id) ? 'Expand' : 'Collapse'"
-                                            @click.stop="toggle(t.id)"
-                                        >
-                                            <Icon :name="collapsed.has(t.id) ? 'chevron-right' : 'chevron-down'" :size="14" />
-                                        </button>
-                                        <span v-else class="w-5" />
-                                        <span class="font-mono text-xs text-slate-500">{{ t.wbs_code }}</span>
-                                        <span class="font-medium text-slate-900" :class="hasChildren(t.id) ? 'font-semibold' : ''">{{ t.name }}</span>
-                                        <span v-if="t.predecessors.length" class="text-[10px] text-slate-400" :title="t.predecessors.map((p) => `${p.wbs_code} ${p.type}`).join(', ')">⇠ {{ t.predecessors.length }}</span>
-                                    </div>
-                                </td>
-                                <td class="px-3 py-2"><StatusBadge :status="t.status" :label="t.status_label" /></td>
-                                <td class="px-3 py-2 text-xs text-slate-600">{{ t.assignee ?? '—' }}</td>
-                                <td class="px-3 py-2 text-xs whitespace-nowrap text-slate-600">
-                                    <template v-if="t.planned_start">{{ formatDate(t.planned_start) }} – {{ formatDate(t.planned_finish) }}</template>
-                                    <span v-else class="text-slate-400">Not scheduled</span>
-                                    <div v-if="t.actual_start || t.actual_finish" class="text-[11px] text-slate-500">
-                                        Actual:
-                                        <template v-if="t.actual_start">{{ formatDate(t.actual_start) }}</template>
-                                        <template v-else>—</template>
-                                        –
-                                        <template v-if="t.actual_finish">{{ formatDate(t.actual_finish) }}</template>
-                                        <template v-else>—</template>
-                                    </div>
-                                </td>
-                                <td class="px-3 py-2 text-right text-xs tabular">{{ t.duration_days ?? '—' }}</td>
-                                <td class="px-3 py-2 text-right text-xs tabular">{{ Number(t.planned_qty) ? `${formatQty(t.planned_qty)} ${t.unit ?? ''}` : '—' }}</td>
-                                <td class="px-3 py-2 text-xs text-slate-600">
-                                    <div v-if="t.boq_item" class="truncate"><span class="font-mono">{{ t.boq_item.item_code }}</span> {{ t.boq_item.name }}</div>
-                                    <div v-if="t.milestone" class="text-slate-400">◆ {{ t.milestone }}</div>
-                                    <span v-if="!t.boq_item && !t.milestone">—</span>
-                                </td>
-                            </tr>
+                        <tbody>
+                            <template v-for="section in scheduleSections" :key="section.head.id">
+                                <tr class="bg-slate-100/80">
+                                    <td colspan="11" class="px-3 py-2">
+                                        <div class="flex flex-wrap items-center justify-between gap-2">
+                                            <button type="button" class="text-left font-semibold text-slate-900 hover:underline" @click="openHead(section.head.id ? section.head : null)">
+                                                <span class="font-mono text-xs text-slate-500">{{ section.head.wbs_code }}</span>
+                                                — {{ section.head.name }}
+                                            </button>
+                                            <AppButton
+                                                v-if="can.create && section.head.id"
+                                                size="sm"
+                                                variant="secondary"
+                                                icon="plus"
+                                                @click="openActivity(null, section.head.id)"
+                                            >Add activity</AppButton>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr
+                                    v-for="a in section.activities"
+                                    :key="a.id"
+                                    class="cursor-pointer border-t border-line hover:bg-slate-50"
+                                    @click="openActivity(a)"
+                                >
+                                    <td class="px-3 py-2 tabular text-slate-500">{{ a.sr }}</td>
+                                    <td class="px-3 py-2 font-medium text-slate-900">
+                                        {{ a.name }}
+                                        <StatusBadge class="ml-1.5 align-middle" :status="a.status" :label="a.status_label" />
+                                    </td>
+                                    <td class="px-3 py-2 text-slate-600">{{ a.unit ?? '—' }}</td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-xs text-slate-600">{{ a.planned_start ? formatDate(a.planned_start) : '—' }}</td>
+                                    <td class="px-3 py-2 whitespace-nowrap text-xs text-slate-600">{{ a.planned_finish ? formatDate(a.planned_finish) : '—' }}</td>
+                                    <td class="px-3 py-2 text-right tabular">{{ formatQty(a.planned_qty) }}</td>
+                                    <td class="px-3 py-2 text-right tabular text-slate-700">{{ formatQty(a.completed_qty) }}</td>
+                                    <td class="px-3 py-2 text-right tabular">{{ formatQty(a.hold_quantity) }}</td>
+                                    <td class="px-3 py-2 text-right tabular">{{ formatQty(a.balance_qty) }}</td>
+                                    <td class="px-3 py-2 text-right tabular">{{ formatPercent(a.completion_percent) }}</td>
+                                    <td class="max-w-[12rem] truncate px-3 py-2 text-xs text-slate-500" :title="a.description">{{ a.description || '—' }}</td>
+                                </tr>
+                            </template>
                         </tbody>
                     </table>
                 </div>
 
-                <!-- Mobile -->
                 <ul class="divide-y divide-line md:hidden">
-                    <li v-for="{ task: t, depth } in visibleRows" :key="t.id" class="px-4 py-3 active:bg-slate-50" :style="{ paddingLeft: `${1 + depth * 0.75}rem` }" @click="openTask(t)">
-                        <div class="flex items-start justify-between gap-2">
-                            <div class="min-w-0">
-                                <p class="truncate text-sm font-medium text-slate-900"><span class="font-mono text-xs text-slate-500">{{ t.wbs_code }}</span> {{ t.name }}</p>
-                                <p class="text-xs text-slate-500">
-                                    <template v-if="t.planned_start">{{ formatDate(t.planned_start) }} – {{ formatDate(t.planned_finish) }}</template><template v-else>Not scheduled</template>
-                                    <template v-if="t.assignee"> · {{ t.assignee }}</template>
-                                </p>
+                    <template v-for="section in scheduleSections" :key="`m-${section.head.id}`">
+                        <li class="bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900">
+                            {{ section.head.wbs_code }} — {{ section.head.name }}
+                        </li>
+                        <li
+                            v-for="a in section.activities"
+                            :key="a.id"
+                            class="px-4 py-3 active:bg-slate-50"
+                            @click="openActivity(a)"
+                        >
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="min-w-0">
+                                    <p class="text-sm font-medium text-slate-900">{{ a.sr }}. {{ a.name }}</p>
+                                    <p class="text-xs text-slate-500">
+                                        {{ a.unit ?? '—' }} ·
+                                        <template v-if="a.planned_start">{{ formatDate(a.planned_start) }} – {{ formatDate(a.planned_finish) }}</template>
+                                        <template v-else>No schedule</template>
+                                    </p>
+                                    <p class="mt-0.5 text-xs tabular text-slate-600">
+                                        Exe {{ formatQty(a.completed_qty) }} / {{ formatQty(a.planned_qty) }} · Bal {{ formatQty(a.balance_qty) }} · {{ formatPercent(a.completion_percent) }}
+                                    </p>
+                                </div>
+                                <StatusBadge :status="a.status" :label="a.status_label" />
                             </div>
-                            <StatusBadge :status="t.status" :label="t.status_label" />
-                        </div>
-                    </li>
+                        </li>
+                    </template>
                 </ul>
             </template>
         </AppCard>
 
-        <AppDrawer :show="!!drawer" :title="task ? `${task.wbs_code} ${task.name}` : 'New task'" @close="drawer = null">
-            <div class="space-y-5">
-                <form id="task-form" class="space-y-4" @submit.prevent="save">
-                    <fieldset :disabled="!editable" class="space-y-4">
-                        <SearchSelect v-model="form.parent_id" label="Parent task" placeholder="— Top level —" :options="parentOptions" :error="form.errors.parent_id" />
+        <AppDrawer
+            :show="!!drawer"
+            :title="drawer?.mode === 'head' ? (task ? `Head ${task.wbs_code}` : 'Add Planning Head') : (task ? `Activity ${task.name}` : 'Add Activity')"
+            @close="drawer = null"
+        >
+            <form id="task-form" class="space-y-4" @submit.prevent="save">
+                <fieldset :disabled="!editable" class="space-y-4">
+                    <template v-if="drawer?.mode === 'head' || isHeadForm">
                         <div class="grid grid-cols-3 gap-3">
-                            <FormInput v-model="form.wbs_code" label="WBS" uppercase maxlength="20" :error="form.errors.wbs_code" help="Auto if empty" />
-                            <FormInput v-model="form.name" label="Task" required maxlength="255" class="col-span-2" :error="form.errors.name" />
+                            <FormInput v-model="form.wbs_code" label="Code" uppercase maxlength="20" :error="form.errors.wbs_code" help="e.g. A" />
+                            <FormInput v-model="form.name" label="Head name" required maxlength="255" class="col-span-2" :error="form.errors.name" help="e.g. PEB SHED" />
                         </div>
                         <FormInput v-model="form.description" label="Description" multiline :rows="2" :error="form.errors.description" />
-                        <div class="grid grid-cols-2 gap-3">
-                            <FormSelect v-model="form.assigned_to" label="Assignee" placeholder="Unassigned" :options="options.members" :error="form.errors.assigned_to" />
-                            <FormSelect v-model="form.priority" label="Priority" :options="options.priorities" :error="form.errors.priority" />
-                            <FormInput v-model="form.planned_start" type="date" label="Planned start" :error="form.errors.planned_start" />
-                            <FormInput v-model="form.planned_finish" type="date" label="Planned finish" :error="form.errors.planned_finish" :help="duration ? `${duration} day(s)` : null" />
+                    </template>
+                    <template v-else>
+                        <SearchSelect v-model="form.parent_id" label="Planning head" placeholder="Select head…" :options="parentOptions" :error="form.errors.parent_id" />
+                        <div class="grid grid-cols-3 gap-3">
+                            <FormInput v-model="form.wbs_code" label="Code" uppercase maxlength="20" :error="form.errors.wbs_code" help="Auto if empty" />
+                            <FormInput v-model="form.name" label="Activity" required maxlength="255" class="col-span-2" :error="form.errors.name" />
                         </div>
-                        <SearchSelect
-                            :model-value="form.boq_item_id"
-                            label="BOQ line"
-                            :options="options.boqItems"
-                            :help="options.boqItems.length ? 'Lines of the current approved BOQ' : 'No approved BOQ yet'"
-                            :error="form.errors.boq_item_id"
-                            @update:model-value="pickBoqItem"
-                        />
                         <div class="grid grid-cols-2 gap-3">
-                            <FormSelect v-model="form.unit_id" label="Unit" :options="options.units" :error="form.errors.unit_id" />
-                            <DecimalInput v-model="form.planned_qty" label="Planned qty" :decimals="4" :error="form.errors.planned_qty" />
+                            <FormSelect v-model="form.unit_id" label="Unit" required :options="options.units" :error="form.errors.unit_id" />
+                            <DecimalInput v-model="form.planned_qty" label="Total qty" :decimals="4" :error="form.errors.planned_qty" />
+                            <FormInput v-model="form.planned_start" type="date" label="Start date" required :error="form.errors.planned_start" />
+                            <FormInput v-model="form.planned_finish" type="date" label="End date" required :error="form.errors.planned_finish" />
+                            <DecimalInput v-model="form.hold_quantity" label="Hold qty" :decimals="4" :error="form.errors.hold_quantity" />
                             <FormSelect v-model="form.milestone_id" label="Milestone" placeholder="None" :options="options.milestones" :error="form.errors.milestone_id" />
-                            <DecimalInput v-if="can.view_costs" v-model="form.budget_amount" label="Budget" prefix="₹" :decimals="2" :error="form.errors.budget_amount" />
                         </div>
-                    </fieldset>
-                </form>
+                        <FormInput v-model="form.description" label="Remarks" multiline :rows="2" :error="form.errors.description" />
+                        <p class="text-[11px] text-slate-400">Executed, balance and % complete are calculated from approved DPR progress. BOQ is not required.</p>
+                    </template>
+                </fieldset>
+            </form>
 
-                <template v-if="task">
-                    <section class="rounded-lg border border-line p-3">
-                        <h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Status & progress</h3>
-                        <div class="mt-2 flex flex-wrap items-center gap-2">
-                            <StatusBadge :status="task.status" :label="task.status_label" />
-                            <template v-if="can.update_progress">
-                                <AppButton
-                                    v-for="next in options.transitions[task.status]"
-                                    :key="next"
-                                    size="sm"
-                                    variant="secondary"
-                                    :loading="statusProcessing"
-                                    @click="changeStatus(next)"
-                                >→ {{ statusLabel(next) }}</AppButton>
-                            </template>
-                        </div>
-                        <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                            <dt class="text-slate-500">Actual start</dt><dd class="text-right">{{ formatDate(task.actual_start) }}</dd>
-                            <dt class="text-slate-500">Actual finish</dt><dd class="text-right">{{ formatDate(task.actual_finish) }}</dd>
-                            <dt class="text-slate-500">Completed qty</dt><dd class="text-right tabular">{{ formatQty(task.completed_qty) }} {{ task.unit ?? '' }}</dd>
-                            <dt class="text-slate-500">Progress</dt><dd class="text-right tabular">{{ formatPercent(task.progress_percent) }}</dd>
-                            <template v-if="can.view_costs">
-                                <dt class="text-slate-500">Actual cost</dt><dd class="text-right tabular">{{ formatMoney(task.actual_cost) }}</dd>
-                            </template>
-                        </dl>
-                        <p class="mt-2 text-[11px] text-slate-400">Completed quantity, progress and actual cost are recorded through DPRs and costing (later phase).</p>
-                    </section>
+            <template v-if="task && drawer?.mode === 'activity'">
+                <section class="mt-5 rounded-lg border border-line p-3">
+                    <h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Progress (from approved DPR)</h3>
+                    <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                        <dt class="text-slate-500">Executed</dt><dd class="text-right tabular">{{ formatQty(task.completed_qty) }} {{ task.unit ?? '' }}</dd>
+                        <dt class="text-slate-500">Balance</dt><dd class="text-right tabular">{{ formatQty(task.balance_qty) }}</dd>
+                        <dt class="text-slate-500">Completion</dt><dd class="text-right tabular">{{ formatPercent(task.completion_percent) }}</dd>
+                        <dt class="text-slate-500">Status</dt><dd class="text-right"><StatusBadge :status="task.status" :label="task.status_label" /></dd>
+                        <dt class="text-slate-500">Actual start</dt><dd class="text-right">{{ formatDate(task.actual_start) }}</dd>
+                        <dt class="text-slate-500">Actual finish</dt><dd class="text-right">{{ formatDate(task.actual_finish) }}</dd>
+                    </dl>
+                    <div v-if="can.update_progress" class="mt-2 flex flex-wrap gap-2">
+                        <AppButton
+                            v-for="next in options.transitions[task.status]"
+                            :key="next"
+                            size="sm"
+                            variant="secondary"
+                            :loading="statusProcessing"
+                            @click="changeStatus(next)"
+                        >→ {{ statusLabel(next) }}</AppButton>
+                    </div>
+                </section>
+            </template>
 
-                    <section class="rounded-lg border border-line p-3">
-                        <h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Predecessors</h3>
-                        <ul v-if="task.predecessors.length" class="mt-2 divide-y divide-line text-sm">
-                            <li v-for="p in task.predecessors" :key="p.id" class="flex items-center justify-between gap-2 py-1.5">
-                                <span class="min-w-0 truncate"><span class="font-mono text-xs text-slate-500">{{ p.wbs_code }}</span> {{ p.name }}</span>
-                                <span class="flex shrink-0 items-center gap-2 text-xs text-slate-600">
-                                    {{ p.type }}<template v-if="p.lag_days"> {{ p.lag_days > 0 ? '+' : '' }}{{ p.lag_days }}d</template>
-                                    <button v-if="can.update" type="button" class="rounded p-1 text-slate-400 hover:text-red-600" aria-label="Remove dependency" @click="removeDependency(p)"><Icon name="trash" :size="14" /></button>
-                                </span>
-                            </li>
-                        </ul>
-                        <p v-else class="mt-2 text-xs text-slate-500">No predecessors.</p>
-                        <form v-if="can.update" class="mt-3 grid grid-cols-6 items-start gap-2" @submit.prevent="addDependency">
-                            <SearchSelect v-model="dependencyForm.predecessor_id" :options="predecessorOptions" placeholder="Predecessor…" class="col-span-6" :error="dependencyForm.errors.predecessor_id" />
-                            <select v-model="dependencyForm.type" class="col-span-3 rounded-lg border-slate-300 py-2 text-sm" aria-label="Dependency type">
-                                <option v-for="t in options.dependencyTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
-                            </select>
-                            <input v-model.number="dependencyForm.lag_days" type="number" min="-365" max="365" class="col-span-1 rounded-lg border-slate-300 py-2 text-sm" aria-label="Lag days" title="Lag (days)" />
-                            <AppButton type="submit" size="md" variant="secondary" class="col-span-2" :disabled="!dependencyForm.predecessor_id" :loading="dependencyForm.processing">Add</AppButton>
-                            <p v-if="dependencyForm.errors.lag_days" class="col-span-6 text-xs text-red-600">{{ dependencyForm.errors.lag_days }}</p>
-                        </form>
-                    </section>
-                </template>
-            </div>
             <template #footer>
                 <AppButton v-if="task && can.delete" variant="ghost" class="mr-auto text-red-600" icon="trash" @click="deleting = task">Delete</AppButton>
-                <AppButton v-if="task && can.create" variant="secondary" @click="openTask(null, task.id)">Add sub-task</AppButton>
                 <AppButton variant="secondary" @click="drawer = null">Close</AppButton>
                 <AppButton v-if="editable" type="submit" form="task-form" :loading="form.processing">{{ task ? 'Save' : 'Create' }}</AppButton>
             </template>
@@ -427,8 +419,8 @@ function destroy() {
         <ConfirmDialog
             :show="!!deleting"
             :title="`Delete ${deleting?.wbs_code ?? ''} ${deleting?.name ?? ''}?`"
-            message="Tasks with sub-tasks cannot be deleted. Its dependencies are removed too."
-            confirm-label="Delete task"
+            message="Heads with activities cannot be deleted until activities are removed."
+            confirm-label="Delete"
             :processing="deleteProcessing"
             @close="deleting = null"
             @confirm="destroy"

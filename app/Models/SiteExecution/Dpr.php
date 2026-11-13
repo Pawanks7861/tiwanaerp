@@ -21,10 +21,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
- * Daily progress report: one per project per day, built from the day's approved site diaries.
+ * Daily progress report: one per project per day (direct entry from Planning/WBS).
  * Final approval posts progress_entries (DprService::post); the DPR is then locked.
+ * Site Diary is legacy and is not required for new DPRs.
  */
-#[Fillable(['weather', 'site_issues', 'remarks', 'engineer_id'])]
+#[Fillable([
+    'weather', 'site_issues', 'remarks', 'engineer_id', 'site_id',
+    'work_performed', 'constraints_summary', 'department', 'agency_name',
+])]
 class Dpr extends Model implements Approvable
 {
     use Auditable, BelongsToCompany, Blameable, HasApprovals, HasAttachments, LocksWhenNotEditable, SoftDeletes;
@@ -117,6 +121,23 @@ class Dpr extends Model implements Approvable
     public function materials(): HasMany
     {
         return $this->hasMany(DprMaterial::class)->orderBy('id');
+    }
+
+    /** @return HasMany<DprConstraint, $this> */
+    public function constraints(): HasMany
+    {
+        return $this->hasMany(DprConstraint::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    /** @return BelongsTo<\App\Models\Projects\Site, $this> */
+    public function site(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Projects\Site::class);
+    }
+
+    public function isLegacyDiarySourced(): bool
+    {
+        return ($this->source ?? 'direct') === 'legacy_site_diary';
     }
 
     public function approvalDocumentType(): string

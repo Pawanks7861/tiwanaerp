@@ -150,6 +150,7 @@ use App\Models\SiteExecution\Dpr;
 use App\Models\SiteExecution\DprEquipment;
 use App\Models\SiteExecution\DprItem;
 use App\Models\SiteExecution\DprLabour;
+use App\Models\SiteExecution\DprConstraint;
 use App\Models\SiteExecution\DprMaterial;
 use App\Models\SiteExecution\SiteDiary;
 use App\Models\SiteExecution\SiteDiaryEquipment;
@@ -362,6 +363,7 @@ class AppServiceProvider extends ServiceProvider
             'dpr_labour' => DprLabour::class,
             'dpr_equipment' => DprEquipment::class,
             'dpr_material' => DprMaterial::class,
+            'dpr_constraint' => DprConstraint::class,
             'progress_entry' => ProgressEntry::class,
             'labour' => Labour::class,
             'labour_attendance' => LabourAttendance::class,

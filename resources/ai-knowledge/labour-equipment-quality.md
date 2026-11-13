@@ -13,5 +13,5 @@
 - Raise inspections and NCRs from Quality.
 - Drawing approvals remain under Drawing Management (separate from quality inspections).
 
-## Site Diary / DPR
-- Site Diary and Daily Progress Reports are entered per project for authorized site users.
+## DPR (daily site document)
+- Daily Progress Reports are the daily site document per project for authorized site users. Legacy Site Diary records remain readable only.

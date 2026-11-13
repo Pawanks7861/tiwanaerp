@@ -12,22 +12,17 @@ use App\Models\SiteExecution\SiteDiary;
 use App\Models\SiteExecution\SiteDiaryPhoto;
 use App\Services\SiteExecution\SiteDiaryPhotoService;
 use App\Services\SiteExecution\SiteDiaryService;
-use App\Services\Uploads\LargeFileUploadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class SiteDiaryController extends Controller
 {
     public function __construct(
-        private readonly SiteDiaryService $diaries,
         private readonly SiteDiaryPhotoService $photos,
-        private readonly LargeFileUploadService $uploads,
     ) {}
 
     public function index(Request $request, Project $project): AnonymousResourceCollection
@@ -89,133 +84,58 @@ class SiteDiaryController extends Controller
             ->first();
 
         if ($existing !== null) {
-            $this->storePhotos($request, $existing);
-
             return (new SiteDiaryResource($this->withLines($existing)))->response();
         }
 
-        $diary = $this->diaries->create($project, $data);
-        $this->storePhotos($request, $diary);
-
-        if ($request->boolean('submit') || ($request->hasFile('photos') && $diary->fresh()?->isEditable() && filled($data['work_performed'] ?? null))) {
-            if ($diary->fresh()?->isEditable() && Gate::allows('submit', $diary)) {
-                try {
-                    $this->diaries->submit($diary, $request->user());
-                } catch (ValidationException) {
-                    // Keep draft when submit criteria not met (e.g. no work text/items).
-                }
-            }
-        }
-
-        return (new SiteDiaryResource($this->withLines($diary->fresh())))
-            ->response()
-            ->setStatusCode(201);
+        return $this->retiredGone();
     }
 
     public function update(UpdateSiteDiaryRequest $request, Project $project, SiteDiary $siteDiary): JsonResponse
     {
         $this->assertOnProject($project, $siteDiary);
+        Gate::authorize('view', $siteDiary);
 
-        if ($siteDiary->status === SiteDiaryStatus::Approved) {
-            throw ValidationException::withMessages(['diary' => 'An approved site diary cannot be edited.']);
-        }
-
-        $diary = $this->diaries->update($siteDiary, $request->payload());
-        $this->storePhotos($request, $diary);
-
-        return (new SiteDiaryResource($this->withLines($diary->fresh())))->response();
+        return $this->retiredGone();
     }
 
-    public function submit(Request $request, Project $project, SiteDiary $siteDiary): SiteDiaryResource
+    public function submit(Request $request, Project $project, SiteDiary $siteDiary): JsonResponse
     {
         $this->assertOnProject($project, $siteDiary);
-        Gate::authorize('submit', $siteDiary);
-        $this->diaries->submit($siteDiary, $request->user());
+        Gate::authorize('view', $siteDiary);
 
-        return new SiteDiaryResource($this->withLines($siteDiary->fresh()));
+        return $this->retiredGone();
     }
 
-    public function review(Request $request, Project $project, SiteDiary $siteDiary): SiteDiaryResource
+    public function review(Request $request, Project $project, SiteDiary $siteDiary): JsonResponse
     {
         $this->assertOnProject($project, $siteDiary);
-        Gate::authorize('review', $siteDiary);
-        $this->diaries->review($siteDiary, $request->user());
+        Gate::authorize('view', $siteDiary);
 
-        return new SiteDiaryResource($this->withLines($siteDiary->fresh()));
+        return $this->retiredGone();
     }
 
-    public function approve(Request $request, Project $project, SiteDiary $siteDiary): SiteDiaryResource
+    public function approve(Request $request, Project $project, SiteDiary $siteDiary): JsonResponse
     {
         $this->assertOnProject($project, $siteDiary);
-        if ($siteDiary->status !== SiteDiaryStatus::Approved) {
-            Gate::authorize('approve', $siteDiary);
-        } else {
-            abort_unless(
-                $request->user()->can('site_diary.approve') && Gate::allows('view', $siteDiary),
-                403
-            );
-        }
-        $this->diaries->approve($siteDiary, $request->user());
+        Gate::authorize('view', $siteDiary);
 
-        return new SiteDiaryResource($this->withLines($siteDiary->fresh()));
+        return $this->retiredGone();
     }
 
-    public function reject(Request $request, Project $project, SiteDiary $siteDiary): SiteDiaryResource
+    public function reject(Request $request, Project $project, SiteDiary $siteDiary): JsonResponse
     {
         $this->assertOnProject($project, $siteDiary);
-        Gate::authorize('reject', $siteDiary);
-        $reason = $request->validate(['reason' => ['required', 'string', 'min:5', 'max:500']])['reason'];
-        $this->diaries->reject($siteDiary, $request->user(), $reason);
+        Gate::authorize('view', $siteDiary);
 
-        return new SiteDiaryResource($this->withLines($siteDiary->fresh()));
+        return $this->retiredGone();
     }
 
     public function storePhoto(Request $request, Project $project, SiteDiary $siteDiary): JsonResponse
     {
         $this->assertOnProject($project, $siteDiary);
-        Gate::authorize('update', $siteDiary);
+        Gate::authorize('view', $siteDiary);
 
-        if ($request->filled('upload_id')) {
-            $data = $request->validate([
-                'upload_id' => ['required', 'uuid'],
-                'uuid' => ['nullable', 'uuid'],
-                'caption' => ['nullable', 'string', 'max:255'],
-                'latitude' => ['nullable', 'numeric', 'between:-90,90'],
-                'longitude' => ['nullable', 'numeric', 'between:-180,180'],
-                'taken_at' => ['nullable', 'date', 'before_or_equal:'.now()->addDay()->toDateString()],
-            ]);
-            $file = $this->uploads->claim($request->user(), $data['upload_id']);
-            $photo = $this->photos->store($siteDiary, $file, [
-                'uuid' => $data['uuid'] ?? null,
-                'caption' => $data['caption'] ?? null,
-                'latitude' => isset($data['latitude']) ? round((float) $data['latitude'], 7) : null,
-                'longitude' => isset($data['longitude']) ? round((float) $data['longitude'], 7) : null,
-                'taken_at' => $data['taken_at'] ?? null,
-            ]);
-            $this->uploads->release($request->user(), $data['upload_id']);
-
-            return response()->json(['data' => $this->photoPayload($project, $siteDiary, $photo)], 201);
-        }
-
-        $maxKb = (int) config('uploads.photo_max_kb');
-        $data = $request->validate([
-            'photo' => ['required', 'file', "max:{$maxKb}", 'extensions:'.implode(',', config('uploads.image_extensions'))],
-            'uuid' => ['nullable', 'uuid'],
-            'caption' => ['nullable', 'string', 'max:255'],
-            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
-            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
-            'taken_at' => ['nullable', 'date', 'before_or_equal:'.now()->addDay()->toDateString()],
-        ]);
-
-        $photo = $this->photos->store($siteDiary, $request->file('photo'), [
-            'uuid' => $data['uuid'] ?? null,
-            'caption' => $data['caption'] ?? null,
-            'latitude' => isset($data['latitude']) ? round((float) $data['latitude'], 7) : null,
-            'longitude' => isset($data['longitude']) ? round((float) $data['longitude'], 7) : null,
-            'taken_at' => $data['taken_at'] ?? null,
-        ]);
-
-        return response()->json(['data' => $this->photoPayload($project, $siteDiary, $photo)], 201);
+        return $this->retiredGone();
     }
 
     public function photo(Project $project, SiteDiary $siteDiary, SiteDiaryPhoto $photo): StreamedResponse
@@ -231,54 +151,9 @@ class SiteDiaryController extends Controller
     {
         $this->assertOnProject($project, $siteDiary);
         abort_unless((int) $photo->site_diary_id === (int) $siteDiary->id, 404);
-        Gate::authorize('update', $siteDiary);
-        $this->photos->delete($photo);
+        Gate::authorize('view', $siteDiary);
 
-        return response()->json(['message' => 'Photo removed.']);
-    }
-
-    private function storePhotos(Request $request, SiteDiary $diary): void
-    {
-        if (! $diary->isEditable()) {
-            return;
-        }
-
-        $uuids = $request->input('photo_uuids', []);
-        $uuids = is_array($uuids) ? array_values($uuids) : [];
-
-        if ($request->hasFile('photos')) {
-            $files = $request->file('photos');
-            $files = is_array($files) ? $files : [$files];
-            foreach ($files as $i => $file) {
-                if ($file instanceof UploadedFile && $file->isValid()) {
-                    $this->photos->store($diary, $file, [
-                        'uuid' => is_string($uuids[$i] ?? null) ? $uuids[$i] : null,
-                    ]);
-                }
-            }
-        }
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function photoPayload(Project $project, SiteDiary $diary, SiteDiaryPhoto $photo): array
-    {
-        return [
-            'id' => $photo->id,
-            'uuid' => $photo->uuid,
-            'caption' => $photo->caption,
-            'mime' => $photo->mime,
-            'size' => $photo->size_bytes,
-            'latitude' => $photo->latitude,
-            'longitude' => $photo->longitude,
-            'taken_at' => $photo->taken_at?->toIso8601String(),
-            'url' => route('api.v1.projects.site-diaries.photos.show', [
-                'project' => $project->id,
-                'siteDiary' => $diary->id,
-                'photo' => $photo->id,
-            ]),
-        ];
+        return $this->retiredGone();
     }
 
     private function withLines(SiteDiary $diary): SiteDiary
@@ -302,5 +177,10 @@ class SiteDiaryController extends Controller
     private function assertOnProject(Project $project, SiteDiary $diary): void
     {
         abort_unless((int) $diary->project_id === (int) $project->id, 404);
+    }
+
+    private function retiredGone(): JsonResponse
+    {
+        return response()->json(['message' => SiteDiaryService::RETIRED_MESSAGE], 410);
     }
 }

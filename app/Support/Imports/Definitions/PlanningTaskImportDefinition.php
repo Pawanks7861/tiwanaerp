@@ -67,7 +67,7 @@ class PlanningTaskImportDefinition extends ImportDefinition
 
     public function instructions(): string
     {
-        return 'Creates project tasks in Not started status. Dependencies are applied after tasks exist. Progress and status are not changed by import. Example rows labelled EXAMPLE are ignored.';
+        return 'Creates Planning Heads and Activities without requiring BOQ. Use Head Code / Head Name to group activities (same code = same head). Progress is not changed by import. EXAMPLE rows are ignored.';
     }
 
     public function templateFilename(): string
@@ -78,16 +78,18 @@ class PlanningTaskImportDefinition extends ImportDefinition
     public function fields(): array
     {
         return [
-            new ImportField('wbs_code', 'WBS code', true, ['wbs', 'code']),
-            new ImportField('name', 'Task name', true, ['task', 'title']),
-            new ImportField('parent_wbs', 'Parent WBS', false, ['parent']),
-            new ImportField('description', 'Description', false),
-            new ImportField('planned_start', 'Planned start', false, ['start_date', 'start'], 'date'),
-            new ImportField('planned_finish', 'Planned finish', false, ['end_date', 'finish'], 'date'),
+            new ImportField('head_code', 'Head Code', false, ['head', 'section_code', 'work_area_code'], help: 'e.g. A — groups activities under one Planning Head.'),
+            new ImportField('head_name', 'Head Name', false, ['work_area', 'section', 'head_title'], help: 'e.g. PEB SHED. Created if missing for Head Code.'),
+            new ImportField('wbs_code', 'Activity code', false, ['wbs', 'code', 'activity_code'], help: 'Optional; auto-assigned when empty.'),
+            new ImportField('name', 'Activity', true, ['task', 'title', 'activity', 'activity_name']),
+            new ImportField('parent_wbs', 'Parent WBS', false, ['parent'], help: 'Legacy: parent WBS code. Prefer Head Code.'),
+            new ImportField('description', 'Remarks', false, ['remarks', 'remark']),
+            new ImportField('planned_start', 'Start Date', false, ['start_date', 'start'], 'date'),
+            new ImportField('planned_finish', 'End Date', false, ['end_date', 'finish'], 'date'),
             new ImportField('priority', 'Priority', false, [], 'text', array_map(fn (TaskPriority $p) => $p->value, TaskPriority::cases())),
             new ImportField('assignee', 'Assignee', false, ['assigned_to', 'email'], help: 'Company user email on the project team.'),
             new ImportField('unit', 'Unit', false, ['uom']),
-            new ImportField('planned_qty', 'Planned quantity', false, ['qty', 'quantity'], 'number'),
+            new ImportField('planned_qty', 'Total Qty', false, ['qty', 'quantity', 'total_qty'], 'number'),
             new ImportField('predecessor_wbs', 'Predecessor WBS', false, ['predecessor']),
             new ImportField('dependency_type', 'Dependency type', false, ['dep_type'], 'text', array_map(fn (DependencyType $t) => $t->value, DependencyType::cases()), 'FS, SS, FF or SF. Default FS.'),
             new ImportField('lag_days', 'Lag days', false, ['lag'], 'number'),
@@ -97,16 +99,18 @@ class PlanningTaskImportDefinition extends ImportDefinition
     public function exampleRows(): array
     {
         return [[
-            'wbs_code' => 'EXAMPLE-1.0',
-            'name' => 'Site mobilisation',
+            'head_code' => 'A',
+            'head_name' => 'PEB SHED',
+            'wbs_code' => '',
+            'name' => 'Footing Excavation',
             'parent_wbs' => '',
             'description' => 'EXAMPLE ROW — ignored',
-            'planned_start' => '2026-04-01',
-            'planned_finish' => '2026-04-15',
+            'planned_start' => '2026-02-02',
+            'planned_finish' => '2026-02-10',
             'priority' => 'medium',
             'assignee' => '',
-            'unit' => '',
-            'planned_qty' => '',
+            'unit' => 'No.',
+            'planned_qty' => '104',
             'predecessor_wbs' => '',
             'dependency_type' => 'FS',
             'lag_days' => '0',
@@ -126,29 +130,20 @@ class PlanningTaskImportDefinition extends ImportDefinition
 
         $wbs = $this->str($mapped['wbs_code'] ?? null);
         $name = $this->str($mapped['name'] ?? null);
-        $missing = [];
-        if ($wbs === null) {
-            $missing['wbs_code'] = ['WBS code is required.'];
-        }
+        $headCode = $this->str($mapped['head_code'] ?? null);
+        $headName = $this->str($mapped['head_name'] ?? null);
         if ($name === null) {
-            $missing['name'] = ['Task name is required.'];
-        }
-        if ($missing !== []) {
-            $this->fail($missing);
+            $this->fail(['name' => ['Activity name is required.']]);
         }
 
-        if (ProjectTask::query()->where('project_id', $project->id)->where('wbs_code', $wbs)->exists()) {
-            $this->fail(['wbs_code' => ["WBS code {$wbs} already exists on this project."]]);
+        if ($wbs !== null && ProjectTask::query()->where('project_id', $project->id)->where('wbs_code', $wbs)->exists()) {
+            $this->fail(['wbs_code' => ["Activity code {$wbs} already exists on this project."]]);
         }
 
-        $parentWbs = $this->str($mapped['parent_wbs'] ?? null);
+        $parentWbs = $this->str($mapped['parent_wbs'] ?? null) ?? $headCode;
         $parentId = null;
         if ($parentWbs !== null) {
             $parentId = ProjectTask::query()->where('project_id', $project->id)->where('wbs_code', $parentWbs)->value('id');
-            if ($parentId === null) {
-                // Parent may appear later in the same file — resolve again at commit.
-                $parentId = null;
-            }
         }
 
         $assignee = $this->str($mapped['assignee'] ?? null);
@@ -189,6 +184,8 @@ class PlanningTaskImportDefinition extends ImportDefinition
         $data = [
             'wbs_code' => $wbs,
             'name' => $name,
+            'head_code' => $headCode,
+            'head_name' => $headName,
             'parent_wbs' => $parentWbs,
             'parent_id' => $parentId,
             'description' => $this->str($mapped['description'] ?? null),
@@ -204,7 +201,7 @@ class PlanningTaskImportDefinition extends ImportDefinition
         ];
 
         Validator::make($data, [
-            'wbs_code' => ['required', 'string', 'max:40', 'regex:'.PlanningService::WBS_PATTERN],
+            'wbs_code' => ['nullable', 'string', 'max:40', 'regex:'.PlanningService::WBS_PATTERN],
             'name' => ['required', 'string', 'max:200'],
             'planned_start' => ['nullable', 'date'],
             'planned_finish' => ['nullable', 'date', 'after_or_equal:planned_start'],
@@ -214,7 +211,7 @@ class PlanningTaskImportDefinition extends ImportDefinition
             'action' => 'create',
             'data' => $data,
             'existing_id' => null,
-            'preview' => ['code' => $wbs, 'name' => $name],
+            'preview' => ['code' => $wbs ?? $headCode, 'name' => $name],
         ];
     }
 
@@ -225,18 +222,32 @@ class PlanningTaskImportDefinition extends ImportDefinition
         }
 
         $data = $prepared['data'];
-        if (! empty($data['parent_wbs']) && empty($data['parent_id'])) {
+        if (! empty($data['head_code']) && empty($data['parent_id'])) {
+            $head = ProjectTask::query()
+                ->where('project_id', $context->project->id)
+                ->where('wbs_code', $data['head_code'])
+                ->whereNull('parent_id')
+                ->first();
+            if ($head === null) {
+                $head = $this->planning->saveTask($context->project, [
+                    'as_head' => true,
+                    'wbs_code' => $data['head_code'],
+                    'name' => $data['head_name'] ?? $data['head_code'],
+                ]);
+            }
+            $data['parent_id'] = $head->id;
+        } elseif (! empty($data['parent_wbs']) && empty($data['parent_id'])) {
             $data['parent_id'] = ProjectTask::query()
                 ->where('project_id', $context->project->id)
                 ->where('wbs_code', $data['parent_wbs'])
                 ->value('id');
             if ($data['parent_id'] === null) {
-                $this->fail(['parent_wbs' => ["Parent WBS {$data['parent_wbs']} was not found."]]);
+                $this->fail(['parent_wbs' => ["Parent / head {$data['parent_wbs']} was not found."]]);
             }
         }
 
         $payload = [
-            'wbs_code' => $data['wbs_code'],
+            'wbs_code' => $data['wbs_code'] ?? null,
             'name' => $data['name'],
             'parent_id' => $data['parent_id'] ?? null,
             'description' => $data['description'] ?? null,
@@ -246,6 +257,7 @@ class PlanningTaskImportDefinition extends ImportDefinition
             'assigned_to' => $data['assigned_to'] ?? null,
             'unit_id' => $data['unit_id'] ?? null,
             'planned_qty' => $data['planned_qty'] ?? null,
+            'as_head' => false,
         ];
 
         $task = $this->planning->saveTask($context->project, $payload, null);

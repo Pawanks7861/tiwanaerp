@@ -72,32 +72,69 @@ class PlanningService
             if (isset($data['milestone_id'])) {
                 $this->milestoneOf($project, (int) $data['milestone_id']);
             }
-            if (isset($data['boq_item_id'])) {
-                $this->linkableBoqItem($project, (int) $data['boq_item_id']);
+            // BOQ is optional/historical only — never required for Planning.
+            $boqItemId = array_key_exists('boq_item_id', $data)
+                ? (blank($data['boq_item_id'] ?? null) ? null : (int) $data['boq_item_id'])
+                : ($task?->boq_item_id);
+            if ($boqItemId !== null) {
+                $this->linkableBoqItem($project, $boqItemId);
             }
 
-            $start = isset($data['planned_start']) ? CarbonImmutable::parse($data['planned_start']) : null;
-            $finish = isset($data['planned_finish']) ? CarbonImmutable::parse($data['planned_finish']) : null;
+            $asHead = (bool) ($data['as_head'] ?? false) || ($parent === null && blank($data['unit_id'] ?? null) && ! isset($data['planned_qty']));
+            $start = isset($data['planned_start']) && $data['planned_start'] !== null && $data['planned_start'] !== ''
+                ? CarbonImmutable::parse($data['planned_start']) : null;
+            $finish = isset($data['planned_finish']) && $data['planned_finish'] !== null && $data['planned_finish'] !== ''
+                ? CarbonImmutable::parse($data['planned_finish']) : null;
             if ($start && $finish && $finish->lt($start)) {
                 throw ValidationException::withMessages(['planned_finish' => 'Planned finish cannot be before planned start.']);
+            }
+
+            // Activities (non-head) require schedule + unit + total qty when creating/updating as activity.
+            $isActivity = ! $asHead && ($parent !== null || filled($data['unit_id'] ?? null) || filled($data['planned_qty'] ?? null)
+                || ($task !== null && $task->parent_id !== null));
+            if ($isActivity && $task === null) {
+                $errors = [];
+                if ($start === null) {
+                    $errors['planned_start'] = 'Planned start is required for an activity.';
+                }
+                if ($finish === null) {
+                    $errors['planned_finish'] = 'Planned end is required for an activity.';
+                }
+                if (blank($data['unit_id'] ?? null)) {
+                    $errors['unit_id'] = 'Choose a unit for the activity.';
+                }
+                if ($errors !== []) {
+                    throw ValidationException::withMessages($errors);
+                }
+            }
+
+            $plannedQty = Decimal::of((string) ($data['planned_qty'] ?? ($task?->planned_qty ?? '0')));
+            $holdQty = Decimal::of((string) ($data['hold_quantity'] ?? ($task?->hold_quantity ?? '0')));
+            if ($holdQty->isNegative()) {
+                throw ValidationException::withMessages(['hold_quantity' => 'Hold quantity cannot be negative.']);
+            }
+            $executed = Decimal::of((string) ($task?->completed_qty ?? '0'));
+            if ($holdQty->plus($executed)->greaterThan($plannedQty) && $plannedQty->isPositive()) {
+                throw ValidationException::withMessages(['hold_quantity' => 'Hold quantity cannot exceed remaining planned quantity.']);
             }
 
             $task ??= new ProjectTask;
             $previousAssignee = $task->exists ? $task->getOriginal('assigned_to') : null;
             $task->fill([
                 'parent_id' => $parent?->id,
-                'milestone_id' => $data['milestone_id'] ?? null,
-                'boq_item_id' => $data['boq_item_id'] ?? null,
+                'milestone_id' => array_key_exists('milestone_id', $data) ? ($data['milestone_id'] ?? null) : $task->milestone_id,
+                'boq_item_id' => $boqItemId,
                 'wbs_code' => $wbs,
                 'name' => $data['name'],
-                'description' => $data['description'] ?? null,
-                'assigned_to' => $data['assigned_to'] ?? null,
-                'priority' => $data['priority'] ?? 'medium',
-                'planned_start' => $start?->toDateString(),
-                'planned_finish' => $finish?->toDateString(),
+                'description' => array_key_exists('description', $data) ? ($data['description'] ?? null) : $task->description,
+                'assigned_to' => array_key_exists('assigned_to', $data) ? ($data['assigned_to'] ?? null) : $task->assigned_to,
+                'priority' => $data['priority'] ?? ($task->priority?->value ?? 'medium'),
+                'planned_start' => $start?->toDateString() ?? (array_key_exists('planned_start', $data) ? null : $task->planned_start?->toDateString()),
+                'planned_finish' => $finish?->toDateString() ?? (array_key_exists('planned_finish', $data) ? null : $task->planned_finish?->toDateString()),
                 'duration_days' => $start && $finish ? (int) $start->diffInDays($finish) + 1 : null,
-                'unit_id' => $data['unit_id'] ?? null,
-                'planned_qty' => Decimal::of((string) ($data['planned_qty'] ?? '0'))->toQuantity(),
+                'unit_id' => array_key_exists('unit_id', $data) ? ($data['unit_id'] ?? null) : $task->unit_id,
+                'planned_qty' => $plannedQty->toQuantity(),
+                'hold_quantity' => $holdQty->toQuantity(),
                 'sort_order' => $data['sort_order'] ?? ($task->exists ? $task->sort_order : $this->nextSort($project, $parent)),
             ]);
             if (array_key_exists('budget_amount', $data)) {

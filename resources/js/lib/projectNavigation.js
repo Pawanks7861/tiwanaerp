@@ -39,7 +39,6 @@ export function buildProjectTabs({ projectId, can, procurementHome = null, finan
         procurementHome && { key: 'procurement', label: 'Procurement', icon: 'truck', href: procurementHome },
         can('inventory.view') && { key: 'inventory', label: 'Inventory', icon: 'archive', href: route('projects.inventory.index', projectId) },
 
-        can('site_diary.view') && { key: 'site-diaries', label: 'Site Diary', icon: 'camera', href: route('projects.site-diaries.index', projectId) },
         can('dpr.view') && { key: 'dprs', label: 'DPR', icon: 'clipboard', href: route('projects.dprs.index', projectId) },
         can('planning.view') && { key: 'progress', label: 'Progress', icon: 'check-circle', href: route('projects.progress', projectId) },
 

@@ -14,6 +14,7 @@ defineProps({
     filters: { type: Object, required: true },
     statuses: { type: Array, required: true },
     can: { type: Object, required: true },
+    retired: { type: Boolean, default: true },
 });
 
 const columns = [
@@ -28,9 +29,13 @@ const columns = [
 
 <template>
     <ProjectLayout :project="project" active="site-diaries" title="Site diaries">
-        <AppCard title="Site diaries" subtitle="Daily site records by the engineers. Approved diaries feed the DPR of that date; a diary never posts progress itself." :padded="false">
+        <AppCard title="Site diaries (retired)" subtitle="Historical records only. Use DPR for new daily site documentation — Site Diary can no longer be created or edited." :padded="false">
+            <p v-if="retired" class="border-b border-line bg-slate-50 px-4 py-2 text-sm text-slate-600">
+                Site Diary is retired. Open
+                <a :href="route('projects.dprs.index', project.id)" class="font-medium text-brand-700 hover:underline">Daily progress reports</a>
+                for today's site work.
+            </p>
             <template #actions>
-                <AppButton v-if="can.create" size="sm" icon="plus" :href="route('projects.site-diaries.create', project.id)">New diary</AppButton>
             </template>
             <FilterBar
                 :filters="{ search: filters.search ?? '', status: filters.status ?? 'all', mine: filters.mine ? '1' : 'all' }"

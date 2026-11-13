@@ -6,10 +6,12 @@ use App\Enums\SiteExecution\DprStatus;
 use App\Models\Planning\ProgressEntry;
 use App\Models\Projects\Project;
 use App\Models\SiteExecution\Dpr;
+use App\Models\SiteExecution\DprConstraint;
 use App\Models\SiteExecution\DprEquipment;
 use App\Models\SiteExecution\DprItem;
 use App\Models\SiteExecution\DprLabour;
 use App\Models\SiteExecution\DprMaterial;
+use App\Support\Math\Decimal;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
 use App\Services\Numbering\DocumentNumberService;
@@ -21,10 +23,9 @@ use Illuminate\Validation\ValidationException;
 use Spatie\Permission\PermissionRegistrar;
 
 /**
- * DPRs: one per project per day, created from that day's approved site diaries and editable until
- * submitted. Final approval (approval engine) posts progress through ProgressLedgerService and
- * locks the DPR. An approved DPR is corrected by reopening it: its postings are reversed, the
- * revision increases and it returns to draft for editing and re-approval.
+ * DPRs: one per project per day. Created directly from Planning/WBS (and optional attendance /
+ * equipment / inventory summaries). Site Diary is legacy and is NOT required.
+ * Final approval posts progress through ProgressLedgerService and locks the DPR.
  */
 class DprService
 {
@@ -35,30 +36,28 @@ class DprService
     public function __construct(
         private readonly DocumentNumberService $numbers,
         private readonly ApprovalService $approvals,
-        private readonly DprAggregationService $aggregation,
+        private readonly DprPrefillService $prefill,
         private readonly ProgressLedgerService $ledger,
     ) {}
 
     /**
-     * @param  array{dpr_date: string, engineer_id?: ?int, remarks?: ?string}  $data
+     * @param  array{dpr_date: string, engineer_id?: ?int, remarks?: ?string, site_id?: ?int, include_completed?: bool}  $data
      */
     public function create(Project $project, array $data): Dpr
     {
         $date = CarbonImmutable::parse($data['dpr_date'])->toDateString();
+        $includeCompleted = (bool) ($data['include_completed'] ?? false);
 
-        return DB::transaction(function () use ($project, $data, $date) {
+        return DB::transaction(function () use ($project, $data, $date, $includeCompleted) {
             $existing = Dpr::query()->withTrashed()->where('project_id', $project->id)->whereDate('dpr_date', $date)->lockForUpdate()->first();
             if ($existing !== null && ! $existing->trashed()) {
                 throw ValidationException::withMessages(['dpr_date' => "{$existing->dpr_number} already covers this date."]);
             }
 
-            $content = $this->aggregation->aggregate($project, $date);
-            if ($content['diary_ids'] === []) {
-                throw ValidationException::withMessages(['dpr_date' => 'There is no approved site diary for this date. Approve the diaries first.']);
-            }
+            // Prefer direct prefill. Optionally merge legacy approved diaries when present (historical days).
+            $content = $this->prefill->forDateMergingLegacy($project, $date, $includeCompleted);
 
             if ($existing !== null) {
-                // The unique (project, date) index also covers deleted DPRs: reuse the number and row.
                 $existing->restore();
                 $dpr = $existing;
             } else {
@@ -72,11 +71,19 @@ class DprService
 
             $dpr->fill([
                 'engineer_id' => $this->engineer($project, $data['engineer_id'] ?? null),
-                'weather' => $content['weather'],
-                'site_issues' => $content['site_issues'],
+                'weather' => $data['weather'] ?? $content['weather'],
+                'site_issues' => $data['site_issues'] ?? $content['site_issues'],
                 'remarks' => $data['remarks'] ?? null,
+                'work_performed' => $data['work_performed'] ?? null,
+                'constraints_summary' => $data['constraints_summary'] ?? null,
+                'department' => $data['department'] ?? null,
+                'agency_name' => $data['agency_name'] ?? null,
+                'site_id' => $data['site_id'] ?? null,
             ]);
-            $dpr->forceFill(['status' => DprStatus::Draft])->save();
+            $dpr->forceFill([
+                'status' => DprStatus::Draft,
+                'source' => $content['source'] ?? 'direct',
+            ])->save();
 
             $this->replaceContent($dpr, $project, $content);
 
@@ -98,6 +105,11 @@ class DprService
                 'weather' => $data['weather'] ?? null,
                 'site_issues' => $data['site_issues'] ?? null,
                 'remarks' => $data['remarks'] ?? null,
+                'work_performed' => $data['work_performed'] ?? $locked->work_performed,
+                'constraints_summary' => $data['constraints_summary'] ?? $locked->constraints_summary,
+                'department' => $data['department'] ?? $locked->department,
+                'agency_name' => $data['agency_name'] ?? $locked->agency_name,
+                'site_id' => array_key_exists('site_id', $data) ? $data['site_id'] : $locked->site_id,
             ])->save();
 
             $this->replaceContent($locked, $project, $data);
@@ -108,24 +120,43 @@ class DprService
     }
 
     /**
-     * Re-read the approved diaries of the DPR date (e.g. a diary approved after the DPR was made).
-     * Lines are matched by task + BOQ line + unit so posted line history is kept.
+     * Re-prefill activity/manpower/equipment/material summaries for the DPR date.
+     * Preserves matching item ids (and executed quantities already entered) where possible.
      */
-    public function refresh(Dpr $dpr): Dpr
+    public function refresh(Dpr $dpr, bool $includeCompleted = false): Dpr
     {
-        return DB::transaction(function () use ($dpr) {
+        return DB::transaction(function () use ($dpr, $includeCompleted) {
             $locked = $this->lockEditable($dpr);
             $project = Project::query()->findOrFail($locked->project_id);
-            $content = $this->aggregation->aggregate($project, $locked->dpr_date->toDateString());
+            $date = $locked->dpr_date->toDateString();
+            $content = $this->prefill->forDate($project, $date, $includeCompleted);
 
-            $existing = DprItem::query()->where('dpr_id', $locked->id)->get()->keyBy(fn (DprItem $i) => $this->itemKey($i->task_id, $i->boq_item_id, $i->unit_id, $i->description));
+            $existing = DprItem::query()->where('dpr_id', $locked->id)->get()->keyBy(
+                fn (DprItem $i) => $this->itemKey($i->task_id, $i->boq_item_id, $i->unit_id, $i->description)
+            );
             $content['items'] = array_map(function (array $row) use ($existing) {
-                $match = $existing->get($this->itemKey($row['task_id'], $row['boq_item_id'], $row['unit_id'], $row['description']));
+                $match = $existing->get($this->itemKey($row['task_id'] ?? null, $row['boq_item_id'] ?? null, $row['unit_id'] ?? null, $row['description'] ?? null));
+                if ($match) {
+                    $row['id'] = $match->id;
+                    $row['executed_qty'] = (string) $match->executed_qty;
+                    $row['today_target_qty'] = $match->today_target_qty !== null ? (string) $match->today_target_qty : ($row['today_target_qty'] ?? null);
+                    $row['hold_quantity'] = (string) ($match->hold_quantity ?? '0');
+                    $row['hold_reason'] = $match->hold_reason;
+                    $row['shortfall_reason'] = $match->shortfall_reason;
+                    $row['remarks'] = $match->remarks;
+                }
 
-                return $row + ['id' => $match?->id];
+                return $row;
             }, $content['items']);
 
-            $locked->fill(['weather' => $content['weather'], 'site_issues' => $content['site_issues']])->save();
+            // Keep user-entered constraints/labours overrides unless empty.
+            if ($locked->labours()->exists() && ($content['labours'] ?? []) === []) {
+                unset($content['labours']);
+            }
+            if ($locked->equipment()->exists() && ($content['equipment'] ?? []) === []) {
+                unset($content['equipment']);
+            }
+
             $this->replaceContent($locked, $project, $content);
             $dpr->setRawAttributes($locked->getAttributes(), true);
 
@@ -295,12 +326,33 @@ class DprService
             $item = ! blank($row['id'] ?? null) ? $existing->get((int) $row['id']) : null;
             $item ??= (new DprItem)->forceFill(['dpr_id' => $dpr->id]);
 
+            $hold = $this->quantity($row['hold_quantity'] ?? '0', "items.{$i}.hold_quantity", allowZero: true);
+            $targetQty = isset($row['today_target_qty']) && $row['today_target_qty'] !== '' && $row['today_target_qty'] !== null
+                ? $this->quantity($row['today_target_qty'], "items.{$i}.today_target_qty", allowZero: true)
+                : null;
+            $executed = $this->quantity($row['executed_qty'] ?? null, "items.{$i}.executed_qty", allowZero: true);
+
             $item->forceFill([
                 'task_id' => $target['task']?->id,
                 'boq_item_id' => $target['boq']?->id,
                 'description' => $row['description'] ?? null,
+                'activity_name_snapshot' => $row['activity_name_snapshot'] ?? $row['description'] ?? $target['task']?->name,
+                'work_area' => $row['work_area'] ?? null,
+                'unit_snapshot' => $row['unit_snapshot'] ?? $target['unit']->symbol ?? $target['unit']->name,
                 'unit_id' => $target['unit']->id,
-                'executed_qty' => $this->quantity($row['executed_qty'] ?? null, "items.{$i}.executed_qty", allowZero: true)->toQuantity(),
+                'planned_start_date' => $row['planned_start_date'] ?? null,
+                'planned_end_date' => $row['planned_end_date'] ?? null,
+                'today_target_qty' => $targetQty?->toQuantity(),
+                'executed_qty' => $executed->toQuantity(),
+                'hold_quantity' => $hold->toQuantity(),
+                'hold_reason' => $row['hold_reason'] ?? null,
+                'hold_since' => $row['hold_since'] ?? null,
+                'hold_responsible' => $row['hold_responsible'] ?? null,
+                'hold_expected_resolution' => $row['hold_expected_resolution'] ?? null,
+                'hold_status' => $row['hold_status'] ?? null,
+                'on_hold' => (bool) ($row['on_hold'] ?? $hold->isPositive()),
+                'shortfall_reason' => $row['shortfall_reason'] ?? null,
+                'remarks' => $row['remarks'] ?? null,
                 'sort_order' => $i + 1,
             ])->save();
             $keep[] = $item->id;
@@ -315,46 +367,99 @@ class DprService
             $removed->each->delete();
         }
 
-        DprLabour::query()->where('dpr_id', $dpr->id)->get()->each->delete();
-        DprEquipment::query()->where('dpr_id', $dpr->id)->get()->each->delete();
-        DprMaterial::query()->where('dpr_id', $dpr->id)->get()->each->delete();
-
-        foreach (array_values($content['labours'] ?? []) as $i => $row) {
-            (new DprLabour)->forceFill([
-                'dpr_id' => $dpr->id,
-                'labour_trade_id' => $this->labourTrade($row['labour_trade_id'] ?? null, "labours.{$i}.labour_trade_id")->id,
-                'subcontractor_id' => $this->subcontractor($row['subcontractor_id'] ?? null, "labours.{$i}.subcontractor_id")?->id,
-                'headcount' => $this->headcount($row['headcount'] ?? null, "labours.{$i}.headcount"),
-                'hours' => $this->hours($row['hours'] ?? null, "labours.{$i}.hours"),
-                'remarks' => $row['remarks'] ?? null,
-            ])->save();
-        }
-
-        foreach (array_values($content['equipment'] ?? []) as $i => $row) {
-            $type = $this->equipmentType($row['equipment_type_id'] ?? null, "equipment.{$i}.equipment_type_id");
-            if ($type === null && blank($row['description'] ?? null)) {
-                throw ValidationException::withMessages(["equipment.{$i}.equipment_type_id" => 'Choose the equipment type or describe the equipment.']);
+        if (array_key_exists('labours', $content)) {
+            DprLabour::query()->where('dpr_id', $dpr->id)->get()->each->delete();
+            foreach (array_values($content['labours'] ?? []) as $i => $row) {
+                (new DprLabour)->forceFill([
+                    'dpr_id' => $dpr->id,
+                    'labour_trade_id' => $this->labourTrade($row['labour_trade_id'] ?? null, "labours.{$i}.labour_trade_id")->id,
+                    'subcontractor_id' => $this->subcontractor($row['subcontractor_id'] ?? null, "labours.{$i}.subcontractor_id")?->id,
+                    'headcount' => $this->headcount($row['headcount'] ?? null, "labours.{$i}.headcount"),
+                    'skilled' => isset($row['skilled']) ? (int) $row['skilled'] : null,
+                    'unskilled' => isset($row['unskilled']) ? (int) $row['unskilled'] : null,
+                    'operator_count' => isset($row['operator_count']) ? (int) $row['operator_count'] : null,
+                    'helper_count' => isset($row['helper_count']) ? (int) $row['helper_count'] : null,
+                    'hours' => $this->hours($row['hours'] ?? null, "labours.{$i}.hours"),
+                    'remarks' => $row['remarks'] ?? null,
+                    'is_informational' => (bool) ($row['is_informational'] ?? true),
+                    'source' => $row['source'] ?? 'manual',
+                ])->save();
             }
-            (new DprEquipment)->forceFill([
-                'dpr_id' => $dpr->id,
-                'equipment_type_id' => $type?->id,
-                'description' => $row['description'] ?? null,
-                'working_hours' => $this->hours($row['working_hours'] ?? null, "equipment.{$i}.working_hours"),
-                'idle_hours' => $this->hours($row['idle_hours'] ?? null, "equipment.{$i}.idle_hours"),
-            ])->save();
         }
 
-        foreach (array_values($content['materials'] ?? []) as $i => $row) {
-            $resolved = $this->materialWithUnit($row['material_id'] ?? null, $row['unit_id'] ?? null, "materials.{$i}");
-            (new DprMaterial)->forceFill([
-                'dpr_id' => $dpr->id,
-                'material_id' => $resolved['material']->id,
-                'quantity' => $this->quantity($row['quantity'] ?? null, "materials.{$i}.quantity")->toQuantity(),
-                'unit_id' => $resolved['unit_id'],
-                'remarks' => $row['remarks'] ?? null,
-            ])->save();
+        if (array_key_exists('equipment', $content)) {
+            DprEquipment::query()->where('dpr_id', $dpr->id)->get()->each->delete();
+            foreach (array_values($content['equipment'] ?? []) as $i => $row) {
+                $type = $this->equipmentType($row['equipment_type_id'] ?? null, "equipment.{$i}.equipment_type_id");
+                if ($type === null && blank($row['description'] ?? null) && blank($row['equipment_id'] ?? null)) {
+                    throw ValidationException::withMessages(["equipment.{$i}.equipment_type_id" => 'Choose the equipment type or describe the equipment.']);
+                }
+                $working = $this->hours($row['working_hours'] ?? null, "equipment.{$i}.working_hours");
+                $idle = $this->hours($row['idle_hours'] ?? null, "equipment.{$i}.idle_hours");
+                (new DprEquipment)->forceFill([
+                    'dpr_id' => $dpr->id,
+                    'equipment_id' => $row['equipment_id'] ?? null,
+                    'equipment_type_id' => $type?->id,
+                    'description' => $row['description'] ?? null,
+                    'operator_name' => $row['operator_name'] ?? null,
+                    'start_time' => $row['start_time'] ?? null,
+                    'end_time' => $row['end_time'] ?? null,
+                    'duration_hours' => $row['duration_hours'] ?? Decimal::of($working)->plus($idle)->round(2)->toString(),
+                    'working_hours' => $working,
+                    'idle_hours' => $idle,
+                    'status' => $row['status'] ?? null,
+                    'remarks' => $row['remarks'] ?? null,
+                    'is_informational' => (bool) ($row['is_informational'] ?? true),
+                ])->save();
+            }
+        }
+
+        if (array_key_exists('materials', $content)) {
+            DprMaterial::query()->where('dpr_id', $dpr->id)->get()->each->delete();
+            foreach (array_values($content['materials'] ?? []) as $i => $row) {
+                $resolved = $this->materialWithUnit($row['material_id'] ?? null, $row['unit_id'] ?? null, "materials.{$i}");
+                $issued = $this->quantity($row['issued_qty'] ?? $row['quantity'] ?? '0.0001', "materials.{$i}.quantity", allowZero: true);
+                $qty = $issued->isPositive() ? $issued : Decimal::of('0.0001');
+                (new DprMaterial)->forceFill([
+                    'dpr_id' => $dpr->id,
+                    'material_id' => $resolved['material']->id,
+                    'opening_qty' => isset($row['opening_qty']) ? $this->quantity($row['opening_qty'], "materials.{$i}.opening_qty", allowZero: true)->toQuantity() : null,
+                    'received_qty' => isset($row['received_qty']) ? $this->quantity($row['received_qty'], "materials.{$i}.received_qty", allowZero: true)->toQuantity() : null,
+                    'issued_qty' => $issued->toQuantity(),
+                    'closing_qty' => isset($row['closing_qty']) ? $this->quantity($row['closing_qty'], "materials.{$i}.closing_qty", allowZero: true)->toQuantity() : null,
+                    'quantity' => $qty->toQuantity(),
+                    'unit_id' => $resolved['unit_id'],
+                    'remarks' => $row['remarks'] ?? null,
+                    'is_informational' => (bool) ($row['is_informational'] ?? true),
+                    'source' => $row['source'] ?? 'manual',
+                ])->save();
+            }
+        }
+
+        if (array_key_exists('constraints', $content)) {
+            DprConstraint::query()->where('dpr_id', $dpr->id)->delete();
+            foreach (array_values($content['constraints'] ?? []) as $i => $row) {
+                if (blank($row['category'] ?? null) || blank($row['description'] ?? null)) {
+                    continue;
+                }
+                (new DprConstraint)->forceFill([
+                    'dpr_id' => $dpr->id,
+                    'category' => $row['category'],
+                    'description' => $row['description'],
+                    'work_area' => $row['work_area'] ?? null,
+                    'task_id' => $row['task_id'] ?? null,
+                    'responsible' => $row['responsible'] ?? null,
+                    'priority' => $row['priority'] ?? null,
+                    'raised_date' => $row['raised_date'] ?? null,
+                    'expected_resolution' => $row['expected_resolution'] ?? null,
+                    'status' => $row['status'] ?? 'open',
+                    'remarks' => $row['remarks'] ?? null,
+                    'sort_order' => $i + 1,
+                ])->save();
+            }
         }
 
         $this->ledger->snapshot($dpr);
     }
+
 }

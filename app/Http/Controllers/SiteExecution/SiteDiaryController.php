@@ -64,26 +64,20 @@ class SiteDiaryController extends Controller
             ]),
             'filters' => $filters,
             'statuses' => SiteDiaryStatus::options(),
-            'can' => ['create' => $user->can('create', [SiteDiary::class, $project])],
+            'can' => ['create' => false],
+            'retired' => true,
         ]);
     }
 
     public function create(Project $project): Response
     {
         Gate::authorize('create', [SiteDiary::class, $project]);
-
-        return $this->form($project, null);
+        abort(403, SiteDiaryService::RETIRED_MESSAGE);
     }
 
     public function store(SiteDiaryRequest $request, Project $project): RedirectResponse
     {
-        $diary = $this->diaries->create($project, $request->validated());
-
-        if ($request->input('intent') === 'photos') {
-            return redirect()->route('projects.site-diaries.edit', [$project, $diary, 'step' => 'photos'])->with('success', 'Draft saved. Add the photos now.');
-        }
-
-        return $this->afterSave($request, $project, $diary, 'Site diary saved as draft.');
+        throw ValidationException::withMessages(['diary' => SiteDiaryService::RETIRED_MESSAGE]);
     }
 
     /**
@@ -109,7 +103,6 @@ class SiteDiaryController extends Controller
     {
         Gate::authorize('view', $siteDiary);
 
-        $user = $request->user();
         $diary = $siteDiary->load(['site:id,name', 'creator:id,name', 'submitter:id,name', 'reviewer:id,name', 'approver:id,name', 'rejecter:id,name']);
 
         return Inertia::render('SiteExecution/Diaries/Show', [
@@ -155,65 +148,50 @@ class SiteDiaryController extends Controller
                     'quantity' => $m->quantity, 'unit' => $m->unit?->symbol, 'remarks' => $m->remarks,
                 ])->all(),
             'photos' => $this->photos($project, $diary),
-            'can' => $this->abilities($user, $diary),
+            'can' => $this->readOnlyAbilities(),
+            'retired' => true,
         ]);
     }
 
     public function edit(Project $project, SiteDiary $siteDiary): Response
     {
         Gate::authorize('update', $siteDiary);
-        abort_unless($siteDiary->isEditable(), 403);
-
-        return $this->form($project, $siteDiary);
+        abort(403, SiteDiaryService::RETIRED_MESSAGE);
     }
 
     public function update(SiteDiaryRequest $request, Project $project, SiteDiary $siteDiary): RedirectResponse
     {
-        $this->diaries->update($siteDiary, $request->validated());
-
-        return $this->afterSave($request, $project, $siteDiary, 'Site diary updated.');
+        throw ValidationException::withMessages(['diary' => SiteDiaryService::RETIRED_MESSAGE]);
     }
 
     public function destroy(Project $project, SiteDiary $siteDiary): RedirectResponse
     {
         Gate::authorize('delete', $siteDiary);
-
-        $this->diaries->delete($siteDiary);
-
-        return redirect()->route('projects.site-diaries.index', $project)->with('success', 'Site diary deleted.');
+        throw ValidationException::withMessages(['diary' => SiteDiaryService::RETIRED_MESSAGE]);
     }
 
     public function submit(Request $request, Project $project, SiteDiary $siteDiary): RedirectResponse
     {
         Gate::authorize('submit', $siteDiary);
-        $this->diaries->submit($siteDiary, $request->user());
-
-        return back()->with('success', 'Site diary submitted for review.');
+        throw ValidationException::withMessages(['diary' => SiteDiaryService::RETIRED_MESSAGE]);
     }
 
     public function review(Request $request, Project $project, SiteDiary $siteDiary): RedirectResponse
     {
         Gate::authorize('review', $siteDiary);
-        $this->diaries->review($siteDiary, $request->user());
-
-        return back()->with('success', 'Site diary marked as reviewed.');
+        throw ValidationException::withMessages(['diary' => SiteDiaryService::RETIRED_MESSAGE]);
     }
 
     public function approve(Request $request, Project $project, SiteDiary $siteDiary): RedirectResponse
     {
         Gate::authorize('approve', $siteDiary);
-        $this->diaries->approve($siteDiary, $request->user());
-
-        return back()->with('success', 'Site diary approved. It is now available for the DPR of that date.');
+        throw ValidationException::withMessages(['diary' => SiteDiaryService::RETIRED_MESSAGE]);
     }
 
     public function reject(Request $request, Project $project, SiteDiary $siteDiary): RedirectResponse
     {
         Gate::authorize('reject', $siteDiary);
-        $reason = $request->validate(['reason' => ['required', 'string', 'min:5', 'max:500']])['reason'];
-        $this->diaries->reject($siteDiary, $request->user(), $reason);
-
-        return back()->with('success', 'Site diary rejected and returned to its author.');
+        throw ValidationException::withMessages(['diary' => SiteDiaryService::RETIRED_MESSAGE]);
     }
 
     private function form(Project $project, ?SiteDiary $diary): Response
@@ -280,18 +258,18 @@ class SiteDiaryController extends Controller
      *
      * @return array<string, bool>
      */
-    private function abilities(User $user, SiteDiary $diary): array
+    /**
+     * @return array<string, bool>
+     */
+    private function readOnlyAbilities(): array
     {
-        $editable = $diary->isEditable();
-        $notSubmitter = (int) ($diary->submitted_by ?? $diary->created_by) !== (int) $user->id;
-
         return [
-            'update' => $editable && $user->can('update', $diary),
-            'delete' => $editable && $user->can('delete', $diary),
-            'submit' => $editable && $user->can('submit', $diary),
-            'review' => $diary->status === SiteDiaryStatus::Submitted && $notSubmitter && $user->can('review', $diary),
-            'approve' => $diary->status === SiteDiaryStatus::Reviewed && $notSubmitter && $user->can('approve', $diary),
-            'reject' => in_array($diary->status, [SiteDiaryStatus::Submitted, SiteDiaryStatus::Reviewed], true) && $notSubmitter && $user->can('reject', $diary),
+            'update' => false,
+            'delete' => false,
+            'submit' => false,
+            'review' => false,
+            'approve' => false,
+            'reject' => false,
         ];
     }
 }

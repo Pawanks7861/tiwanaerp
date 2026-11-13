@@ -20,6 +20,7 @@ const columns = [
     { key: 'dpr_number', label: 'DPR' },
     { key: 'dpr_date', label: 'Date', mobile: false },
     { key: 'status', label: 'Status' },
+    { key: 'source', label: 'Source', mobile: false },
     { key: 'engineer', label: 'Engineer', mobile: false },
     { key: 'items_count', label: 'Work lines', align: 'right', mobile: false },
 ];
@@ -27,7 +28,7 @@ const columns = [
 
 <template>
     <ProjectLayout :project="project" active="dprs" title="Daily progress reports">
-        <AppCard title="Daily progress reports" subtitle="One DPR per day, built from the approved site diaries. Approving a DPR is the only step that posts progress." :padded="false">
+        <AppCard title="Daily progress reports" subtitle="One DPR per project per day. Filled from WBS activities; approval posts progress to the ledger." :padded="false">
             <template #actions>
                 <AppButton v-if="can.create" size="sm" icon="plus" :href="route('projects.dprs.create', project.id)">New DPR</AppButton>
             </template>
@@ -42,7 +43,7 @@ const columns = [
                 :row-href="(row) => route('projects.dprs.show', [project.id, row.id])"
                 empty-icon="clipboard"
                 empty-title="No DPRs yet"
-                empty-description="Approve the day's site diaries, then create the DPR for that date."
+                empty-description="Create today's DPR to record site work and progress."
             >
                 <template #cell-dpr_number="{ row }">
                     <div class="font-mono font-medium text-slate-900">{{ row.dpr_number }}</div>
@@ -50,6 +51,7 @@ const columns = [
                 </template>
                 <template #cell-dpr_date="{ row }">{{ formatDate(row.dpr_date) }}</template>
                 <template #cell-status="{ row }"><StatusBadge :status="row.status" :label="row.status_label" /></template>
+                <template #cell-source="{ row }"><span class="text-xs text-slate-600">{{ row.source_label }}</span></template>
                 <template #cell-engineer="{ value }">{{ value ?? '—' }}</template>
                 <template #cell-items_count="{ value }"><span class="tabular">{{ value }}</span></template>
             </DataTable>

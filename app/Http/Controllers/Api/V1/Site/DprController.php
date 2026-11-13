@@ -4,12 +4,12 @@ namespace App\Http\Controllers\Api\V1\Site;
 
 use App\Enums\SiteExecution\DprStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\SiteExecution\DprRequest;
 use App\Http\Resources\DprResource;
 use App\Models\Core\Company;
 use App\Models\Projects\Project;
 use App\Models\SiteExecution\Dpr;
-use App\Models\SiteExecution\SiteDiary;
-use App\Services\SiteExecution\DprAggregationService;
+use App\Services\SiteExecution\DprPrefillService;
 use App\Services\SiteExecution\DprService;
 use App\Support\Format\IndianNumber;
 use App\Support\Pdf\PdfResponder;
@@ -25,7 +25,7 @@ class DprController extends Controller
 {
     public function __construct(
         private readonly DprService $dprs,
-        private readonly DprAggregationService $aggregation,
+        private readonly DprPrefillService $prefill,
     ) {}
 
     public function index(Request $request, Project $project): AnonymousResourceCollection
@@ -61,50 +61,38 @@ class DprController extends Controller
     {
         Gate::authorize('create', [Dpr::class, $project]);
 
-        $date = substr((string) ($request->validate([
+        $validated = $request->validate([
             'date' => ['nullable', 'date', 'before_or_equal:today'],
-        ])['date'] ?? now()->toDateString()), 0, 10);
+            'include_completed' => ['nullable', 'boolean'],
+        ]);
+        $date = substr((string) ($validated['date'] ?? now()->toDateString()), 0, 10);
+        $includeCompleted = $request->boolean('include_completed');
 
         $existing = Dpr::query()
             ->where('project_id', $project->id)
             ->whereDate('dpr_date', $date)
             ->first(['id', 'dpr_number', 'status']);
 
-        $aggregate = $this->aggregation->aggregate($project, $date);
-        $diaries = SiteDiary::query()
-            ->where('project_id', $project->id)
-            ->whereDate('diary_date', $date)
-            ->with(['site:id,name', 'creator:id,name'])
-            ->withCount('workItems')
-            ->orderBy('id')
-            ->get()
-            ->map(fn (SiteDiary $d) => [
-                'id' => $d->id,
-                'uuid' => $d->uuid,
-                'site' => $d->site?->name ?? $d->work_location,
-                'status' => $d->status->value,
-                'status_label' => $d->status->label(),
-                'created_by' => $d->creator?->name,
-                'work_items_count' => $d->work_items_count,
-                'approved' => $d->status->value === 'approved',
-            ]);
+        $content = $this->prefill->forDateMergingLegacy($project, $date, $includeCompleted);
 
         return response()->json([
             'data' => [
                 'date' => $date,
+                'include_completed' => $includeCompleted,
                 'existing' => $existing ? [
                     'id' => $existing->id,
                     'dpr_number' => $existing->dpr_number,
                     'status' => $existing->status?->value ?? $existing->status,
                 ] : null,
-                'diary_ids' => $aggregate['diary_ids'],
-                'diaries' => $diaries,
-                'weather' => $aggregate['weather'],
-                'site_issues' => $aggregate['site_issues'],
-                'items' => $aggregate['items'],
-                'labours' => $aggregate['labours'],
-                'equipment' => $aggregate['equipment'],
-                'materials' => $aggregate['materials'],
+                'source' => $content['source'],
+                'diary_ids' => $content['diary_ids'] ?? [],
+                'weather' => $content['weather'],
+                'site_issues' => $content['site_issues'],
+                'items' => $content['items'],
+                'labours' => $content['labours'],
+                'equipment' => $content['equipment'],
+                'materials' => $content['materials'],
+                'constraints' => $content['constraints'],
             ],
         ]);
     }
@@ -117,6 +105,7 @@ class DprController extends Controller
             'dpr_date' => ['required', 'date', 'before_or_equal:today'],
             'engineer_id' => ['nullable', 'integer'],
             'remarks' => ['nullable', 'string', 'max:5000'],
+            'include_completed' => ['nullable', 'boolean'],
         ]);
 
         $dpr = $this->dprs->create($project, $data);
@@ -134,51 +123,20 @@ class DprController extends Controller
         return new DprResource($this->detail($dpr));
     }
 
-    public function update(Request $request, Project $project, Dpr $dpr): DprResource
+    public function update(DprRequest $request, Project $project, Dpr $dpr): DprResource
     {
         $this->assertOnProject($project, $dpr);
-        Gate::authorize('update', $dpr);
 
-        $data = $request->validate([
-            'engineer_id' => ['nullable', 'integer'],
-            'weather' => ['nullable', 'string', 'max:50'],
-            'site_issues' => ['nullable', 'string', 'max:5000'],
-            'remarks' => ['nullable', 'string', 'max:5000'],
-            'items' => ['nullable', 'array', 'max:200'],
-            'items.*.id' => ['nullable', 'integer'],
-            'items.*.task_id' => ['nullable', 'integer'],
-            'items.*.boq_item_id' => ['nullable', 'integer'],
-            'items.*.description' => ['nullable', 'string', 'max:500'],
-            'items.*.unit_id' => ['nullable', 'integer'],
-            'items.*.executed_qty' => ['required_with:items', 'numeric', 'decimal:0,4', 'gt:0', 'max:9999999999'],
-            'labours' => ['nullable', 'array', 'max:200'],
-            'labours.*.labour_trade_id' => ['required', 'integer'],
-            'labours.*.subcontractor_id' => ['nullable', 'integer'],
-            'labours.*.headcount' => ['required', 'integer', 'min:1', 'max:100000'],
-            'labours.*.hours' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999.99'],
-            'labours.*.remarks' => ['nullable', 'string', 'max:255'],
-            'equipment' => ['nullable', 'array', 'max:200'],
-            'equipment.*.equipment_type_id' => ['nullable', 'integer'],
-            'equipment.*.description' => ['nullable', 'string', 'max:150'],
-            'equipment.*.working_hours' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999.99'],
-            'equipment.*.idle_hours' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999.99'],
-            'materials' => ['nullable', 'array', 'max:200'],
-            'materials.*.material_id' => ['required', 'integer'],
-            'materials.*.quantity' => ['required', 'numeric', 'decimal:0,4', 'gt:0', 'max:9999999999'],
-            'materials.*.unit_id' => ['nullable', 'integer'],
-            'materials.*.remarks' => ['nullable', 'string', 'max:255'],
-        ]);
-
-        $updated = $this->dprs->update($dpr, $data);
+        $updated = $this->dprs->update($dpr, $request->validated());
 
         return new DprResource($this->detail($updated));
     }
 
-    public function refresh(Project $project, Dpr $dpr): DprResource
+    public function refresh(Request $request, Project $project, Dpr $dpr): DprResource
     {
         $this->assertOnProject($project, $dpr);
         Gate::authorize('update', $dpr);
-        $updated = $this->dprs->refresh($dpr);
+        $updated = $this->dprs->refresh($dpr, $request->boolean('include_completed'));
 
         return new DprResource($this->detail($updated));
     }
@@ -217,8 +175,10 @@ class DprController extends Controller
             'labours' => $dpr->labours()->with(['trade:id,name', 'subcontractor:id,name'])->get(),
             'equipment' => $dpr->equipment()->with('equipmentType:id,name')->get(),
             'materials' => $dpr->materials()->with(['material:id,code,name', 'unit:id,symbol'])->get(),
+            'constraints' => $dpr->constraints()->with('task:id,wbs_code,name')->get(),
             'qty' => fn ($v) => $v === null ? '—' : IndianNumber::quantity($v),
-        ])->setPaper('a4');
+            'pct' => fn ($v) => $v === null ? '—' : IndianNumber::quantity($v).'%',
+        ])->setPaper('a4', 'landscape');
 
         $inline = $request->routeIs('api.v1.projects.dprs.pdf.view');
 
@@ -237,6 +197,7 @@ class DprController extends Controller
             'equipment.equipmentType:id,name',
             'materials.material:id,code,name',
             'materials.unit:id,symbol',
+            'constraints.task:id,wbs_code,name',
             'attachments.uploader:id,name',
             'latestApprovalRequest.submitter:id,name',
             'latestApprovalRequest.actions.user:id,name',

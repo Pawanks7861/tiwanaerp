@@ -73,8 +73,30 @@ class ProgressLedgerService
             }
 
             $this->snapshot($dpr, posted: true);
+            $this->syncTaskHolds($items);
             $this->recomputeTasks($items->pluck('task_id'));
         });
+    }
+
+    /**
+     * Planning hold is authoritative on the task; approved DPR hold updates it.
+     *
+     * @param  Collection<int, DprItem>  $items
+     */
+    private function syncTaskHolds(Collection $items): void
+    {
+        foreach ($items as $item) {
+            if (! $item->task_id) {
+                continue;
+            }
+            $task = ProjectTask::query()->whereKey($item->task_id)->lockForUpdate()->first();
+            if ($task === null) {
+                continue;
+            }
+            $task->forceFill([
+                'hold_quantity' => Decimal::of($item->hold_quantity ?? '0')->toQuantity(),
+            ])->save();
+        }
     }
 
     /**
@@ -133,23 +155,15 @@ class ProgressLedgerService
     {
         $project = Project::query()->findOrFail($dpr->project_id);
         $items = $this->items($dpr);
-        $ownByTask = [];
-        $ownByLine = [];
 
         foreach ($items as $item) {
             $uid = $item->boq_item_id ? BoqItem::query()->whereKey($item->boq_item_id)->value('line_uid') : null;
             $item->setAttribute('boq_line_uid', $uid);
-            if (! $posted && $item->task_id) {
-                $ownByTask[$item->task_id] = Decimal::of($ownByTask[$item->task_id] ?? '0')->plus($item->executed_qty);
-            }
-            if (! $posted && $uid) {
-                $ownByLine[$uid] = Decimal::of($ownByLine[$uid] ?? '0')->plus($item->executed_qty);
-            }
         }
 
         foreach ($items as $item) {
             $planned = null;
-            $cumulative = null;
+            $previous = Decimal::zero();
             $uid = $item->boq_line_uid;
             $task = $item->task_id ? ProjectTask::query()->withTrashed()->find($item->task_id) : null;
             $taskPlan = $task !== null && Decimal::of($task->planned_qty ?? '0')->isPositive() ? Decimal::of($task->planned_qty) : null;
@@ -157,18 +171,50 @@ class ProgressLedgerService
             // A task without a planned quantity (0) is measured against its BOQ line when it has one.
             if ($task !== null && ($taskPlan !== null || $uid === null)) {
                 $planned = $taskPlan;
-                $cumulative = TaskProgressService::sum(ProgressEntry::query()->where('task_id', $item->task_id))->plus($ownByTask[$item->task_id] ?? '0');
+                $previous = TaskProgressService::sum(ProgressEntry::query()->where('task_id', $item->task_id));
             } elseif ($uid) {
                 $line = $this->currentLine($project, $uid);
                 $planned = $line ? Decimal::of($this->effectiveQty->forItem($line)) : null;
-                $cumulative = TaskProgressService::sum(ProgressEntry::query()->where('project_id', $project->id)->where('boq_line_uid', $uid))->plus($ownByLine[$uid] ?? '0');
+                $previous = TaskProgressService::sum(ProgressEntry::query()->where('project_id', $project->id)->where('boq_line_uid', $uid));
             }
+
+            // When not yet posted, ledger excludes today's qty; add it for cumulative.
+            // When posted, ledger already includes today's qty — previous must exclude this DPR's own posting.
+            $today = Decimal::of($item->executed_qty ?? '0');
+            if ($posted) {
+                $cumulative = $previous;
+                $previous = $previous->minus($today);
+                if ($previous->isNegative()) {
+                    $previous = Decimal::zero();
+                }
+            } else {
+                $cumulative = $previous->plus($today);
+            }
+
+            $hold = Decimal::of($item->hold_quantity ?? '0');
+            $balance = $planned !== null
+                ? $planned->minus($cumulative)->minus($hold)
+                : null;
+
+            $completion = ($planned !== null && $planned->isPositive())
+                ? $cumulative->times(100)->dividedBy($planned, 4)->toRate()
+                : null;
+
+            $target = $item->today_target_qty !== null ? Decimal::of($item->today_target_qty) : null;
+            $variance = $target !== null ? $today->minus($target)->toQuantity() : null;
+            $achievement = ($target !== null && $target->isPositive())
+                ? $today->times(100)->dividedBy($target, 4)->toRate()
+                : null;
 
             $item->forceFill([
                 'boq_line_uid' => $uid,
                 'planned_qty' => $planned?->toQuantity(),
-                'cumulative_qty' => $cumulative?->toQuantity(),
-                'balance_qty' => $planned !== null && $cumulative !== null ? $planned->minus($cumulative)->toQuantity() : null,
+                'previous_executed_qty' => $previous->toQuantity(),
+                'cumulative_qty' => $cumulative->toQuantity(),
+                'balance_qty' => $balance?->toQuantity(),
+                'completion_percent' => $completion,
+                'target_variance' => $variance,
+                'achievement_percent' => $achievement,
             ])->save();
         }
     }

@@ -31,7 +31,7 @@ class ProjectTaskRequest extends FormRequest
 
     protected function decimalFields(): array
     {
-        return ['planned_qty', 'budget_amount'];
+        return ['planned_qty', 'hold_quantity', 'budget_amount'];
     }
 
     public function rules(): array
@@ -40,8 +40,10 @@ class ProjectTaskRequest extends FormRequest
         $project = $this->route('project');
 
         return [
+            'as_head' => ['nullable', 'boolean'],
             'parent_id' => ['nullable', 'integer'],
             'milestone_id' => ['nullable', 'integer'],
+            // Optional historical reference only — never required for Planning.
             'boq_item_id' => ['nullable', 'integer'],
             'wbs_code' => ['nullable', 'string', 'max:20', 'regex:'.PlanningService::WBS_PATTERN],
             'name' => ['required', 'string', 'max:255'],
@@ -53,6 +55,7 @@ class ProjectTaskRequest extends FormRequest
             'planned_finish' => ['nullable', 'date', 'after_or_equal:planned_start'],
             'unit_id' => ['nullable', ExistsInCompany::active(Unit::class)],
             'planned_qty' => ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
+            'hold_quantity' => ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
             'budget_amount' => ['nullable', 'numeric', 'min:0', 'max:9999999999999999', 'decimal:0,2'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
         ];
@@ -61,11 +64,16 @@ class ProjectTaskRequest extends FormRequest
     public function attributes(): array
     {
         return [
-            'parent_id' => 'parent task',
-            'boq_item_id' => 'BOQ line',
-            'wbs_code' => 'WBS code',
+            'parent_id' => 'planning head',
+            'boq_item_id' => 'BOQ line (optional)',
+            'wbs_code' => 'head / WBS code',
             'assigned_to' => 'assignee',
             'unit_id' => 'unit',
+            'planned_qty' => 'total quantity',
+            'hold_quantity' => 'hold quantity',
+            'planned_start' => 'start date',
+            'planned_finish' => 'end date',
+            'description' => 'remarks',
         ];
     }
 

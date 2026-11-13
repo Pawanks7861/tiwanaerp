@@ -8,7 +8,6 @@ use App\Enums\Planning\TaskStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Http\Requests\Planning\ProjectTaskRequest;
-use App\Models\Boq\BoqItem;
 use App\Models\Masters\Unit;
 use App\Models\Planning\ProjectMilestone;
 use App\Models\Planning\ProjectTask;
@@ -40,15 +39,18 @@ class ProjectTaskController extends Controller
             'status' => ['nullable', Rule::enum(TaskStatus::class)],
             'assigned_to' => ['nullable', 'integer'],
             'milestone_id' => ['nullable', 'integer'],
+            'head_id' => ['nullable', 'integer'],
+            'on_hold' => ['nullable', 'boolean'],
+            'delayed' => ['nullable', 'boolean'],
         ]);
 
+        $today = now()->toDateString();
         $tasks = $project->tasks()
             ->with([
                 'assignee:id,name',
                 'unit:id,symbol',
                 'milestone:id,name',
-                'boqItem:id,boq_id,item_code,name,quantity,unit_id',
-                'boqItem.unit:id,symbol',
+                'parent:id,wbs_code,name',
                 'dependencies.predecessor:id,wbs_code,name',
             ])
             ->when($filters['search'] ?? null, fn (Builder $q, $term) => $q->where(fn (Builder $w) => $w
@@ -57,15 +59,32 @@ class ProjectTaskController extends Controller
             ->when($filters['status'] ?? null, fn (Builder $q, $s) => $q->where('status', $s))
             ->when($filters['assigned_to'] ?? null, fn (Builder $q, $id) => $q->where('assigned_to', $id))
             ->when($filters['milestone_id'] ?? null, fn (Builder $q, $id) => $q->where('milestone_id', $id))
+            ->when($filters['head_id'] ?? null, fn (Builder $q, $id) => $q->where(fn (Builder $w) => $w
+                ->where('id', $id)->orWhere('parent_id', $id)))
+            ->when($request->boolean('on_hold'), fn (Builder $q) => $q->where(fn (Builder $w) => $w
+                ->where('status', TaskStatus::OnHold)
+                ->orWhere('hold_quantity', '>', 0)))
+            ->when($request->boolean('delayed'), function (Builder $q) use ($today) {
+                $q->where(function (Builder $w) use ($today) {
+                    $w->where('status', TaskStatus::Delayed)
+                        ->orWhere(fn (Builder $inner) => $inner
+                            ->whereNotIn('status', [TaskStatus::Completed, TaskStatus::OnHold])
+                            ->whereNotNull('planned_finish')
+                            ->whereDate('planned_finish', '<', $today));
+                });
+            })
             ->orderBy('sort_order')
             ->orderBy('id')
             ->limit(3000)
             ->get();
 
+        $presented = $tasks->map(fn (ProjectTask $t) => $this->present($t, $withCosts))->all();
+
         return Inertia::render('Planning/Tasks', [
             'project' => ProjectHeader::for($project),
-            'tasks' => $tasks->map(fn (ProjectTask $t) => $this->present($t, $withCosts))->all(),
-            'filtered' => array_filter($filters) !== [],
+            'tasks' => $presented,
+            'summary' => $this->summary($tasks),
+            'filtered' => array_filter($filters, fn ($v) => $v !== null && $v !== '' && $v !== false) !== [],
             'filters' => $filters,
             'options' => $this->options($project, $withCosts),
             'can' => [
@@ -91,16 +110,18 @@ class ProjectTaskController extends Controller
 
     public function store(ProjectTaskRequest $request, Project $project): RedirectResponse
     {
-        $task = $this->planning->saveTask($project, $request->taskData($request->user()));
+        $data = $request->taskData($request->user());
+        $task = $this->planning->saveTask($project, $data);
+        $label = ! empty($data['as_head']) || $task->isPlanningHead() ? 'Planning head' : 'Activity';
 
-        return back()->with('success', "Task {$task->wbs_code} created.");
+        return back()->with('success', "{$label} {$task->wbs_code} created.");
     }
 
     public function update(ProjectTaskRequest $request, Project $project, ProjectTask $task): RedirectResponse
     {
         $this->planning->saveTask($project, $request->taskData($request->user()), $task);
 
-        return back()->with('success', 'Task updated.');
+        return back()->with('success', 'Planning updated.');
     }
 
     public function updateStatus(Request $request, Project $project, ProjectTask $task): RedirectResponse
@@ -129,9 +150,14 @@ class ProjectTaskController extends Controller
     {
         $data = [
             ...$t->only([
-                'id', 'parent_id', 'wbs_code', 'name', 'description', 'assigned_to', 'milestone_id', 'boq_item_id',
-                'duration_days', 'unit_id', 'planned_qty', 'completed_qty', 'progress_percent', 'sort_order',
+                'id', 'parent_id', 'wbs_code', 'name', 'description', 'assigned_to', 'milestone_id',
+                'duration_days', 'unit_id', 'planned_qty', 'completed_qty', 'hold_quantity', 'progress_percent', 'sort_order',
             ]),
+            'is_head' => $t->isPlanningHead(),
+            'head_name' => $t->parent?->name,
+            'head_code' => $t->parent?->wbs_code,
+            'balance_qty' => $t->balanceQuantity(),
+            'completion_percent' => $t->completionPercent(),
             'status' => $t->status->value,
             'status_label' => $t->status->label(),
             'priority' => $t->priority->value,
@@ -142,13 +168,6 @@ class ProjectTaskController extends Controller
             'assignee' => $t->assignee?->name,
             'unit' => $t->unit?->symbol,
             'milestone' => $t->milestone?->name,
-            'boq_item' => $t->boqItem ? [
-                'id' => $t->boqItem->id,
-                'item_code' => $t->boqItem->item_code,
-                'name' => $t->boqItem->name,
-                'quantity' => $t->boqItem->quantity,
-                'unit' => $t->boqItem->unit?->symbol,
-            ] : null,
             'predecessors' => $t->dependencies->map(fn (TaskDependency $d) => [
                 'id' => $d->id,
                 'predecessor_id' => $d->predecessor_id,
@@ -165,6 +184,26 @@ class ProjectTaskController extends Controller
         }
 
         return $data;
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, ProjectTask>  $tasks
+     * @return array<string, int>
+     */
+    private function summary($tasks): array
+    {
+        $heads = $tasks->whereNull('parent_id')->count();
+        $activities = $tasks->filter(fn (ProjectTask $t) => $t->unit_id !== null || $t->parent_id !== null || (float) $t->planned_qty > 0);
+
+        return [
+            'heads' => $heads,
+            'activities' => $activities->count(),
+            'not_started' => $activities->where('status', TaskStatus::NotStarted)->count(),
+            'in_progress' => $activities->where('status', TaskStatus::InProgress)->count(),
+            'on_hold' => $activities->filter(fn (ProjectTask $t) => $t->status === TaskStatus::OnHold || (float) ($t->hold_quantity ?? 0) > 0)->count(),
+            'completed' => $activities->where('status', TaskStatus::Completed)->count(),
+            'delayed' => $activities->where('status', TaskStatus::Delayed)->count(),
+        ];
     }
 
     /**
@@ -185,18 +224,9 @@ class ProjectTaskController extends Controller
                 ->map(fn (ProjectMilestone $m) => ['value' => $m->id, 'label' => $m->name])->all(),
             'units' => Unit::query()->active()->orderBy('symbol')->get(['id', 'symbol'])
                 ->map(fn (Unit $u) => ['value' => $u->id, 'label' => $u->symbol])->all(),
-            'boqItems' => $this->planning->linkableBoqItems($project)
-                ->with(['unit:id,symbol', 'boq:id,boq_number,version'])
-                ->orderBy('boq_id')->orderBy('sort_order')->orderBy('id')
-                ->limit(3000)
-                ->get(['id', 'boq_id', 'item_code', 'name', 'quantity', 'unit_id'])
-                ->map(fn (BoqItem $i) => [
-                    'value' => $i->id,
-                    'label' => trim(($i->item_code ? $i->item_code.' ' : '').$i->name),
-                    'description' => "{$i->quantity} {$i->unit?->symbol} · {$i->boq?->boq_number} v{$i->boq?->version}",
-                    'unit_id' => $i->unit_id,
-                    'quantity' => $i->quantity,
-                ])->all(),
+            'heads' => $project->tasks()->whereNull('parent_id')->orderBy('sort_order')->orderBy('id')
+                ->get(['id', 'wbs_code', 'name'])
+                ->map(fn (ProjectTask $h) => ['value' => $h->id, 'label' => trim($h->wbs_code.' '.$h->name)])->all(),
             'statuses' => TaskStatus::options(),
             'priorities' => TaskPriority::options(),
             'dependencyTypes' => DependencyType::options(),

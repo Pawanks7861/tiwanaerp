@@ -21,7 +21,17 @@ class DprItem extends Model
 
     public const PARENT_KEY = 'dpr_id';
 
-    public const POSTING_COLUMNS = ['planned_qty', 'cumulative_qty', 'balance_qty', 'boq_line_uid', 'updated_at'];
+    public const POSTING_COLUMNS = [
+        'planned_qty',
+        'previous_executed_qty',
+        'cumulative_qty',
+        'balance_qty',
+        'completion_percent',
+        'target_variance',
+        'achievement_percent',
+        'boq_line_uid',
+        'updated_at',
+    ];
 
     protected $guarded = ['*'];
 
@@ -29,9 +39,20 @@ class DprItem extends Model
     {
         return [
             'planned_qty' => 'decimal:4',
+            'previous_executed_qty' => 'decimal:4',
+            'today_target_qty' => 'decimal:4',
             'executed_qty' => 'decimal:4',
+            'hold_quantity' => 'decimal:4',
             'cumulative_qty' => 'decimal:4',
             'balance_qty' => 'decimal:4',
+            'target_variance' => 'decimal:4',
+            'achievement_percent' => 'decimal:4',
+            'completion_percent' => 'decimal:4',
+            'planned_start_date' => 'date',
+            'planned_end_date' => 'date',
+            'hold_since' => 'date',
+            'hold_expected_resolution' => 'date',
+            'on_hold' => 'boolean',
             'sort_order' => 'integer',
         ];
     }

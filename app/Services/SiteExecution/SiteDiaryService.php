@@ -27,6 +27,8 @@ class SiteDiaryService
 
     public const MAX_LINES = 100;
 
+    public const RETIRED_MESSAGE = 'Site Diary is retired. The Daily Progress Report (DPR) is the daily site document.';
+
     /**
      * Idempotent on the client uuid: a retried create returns the diary saved the first time.
      *
@@ -34,6 +36,8 @@ class SiteDiaryService
      */
     public function create(Project $project, array $data): SiteDiary
     {
+        $this->assertNotRetired();
+
         $uuid = $data['uuid'] ?? null;
         if ($uuid !== null && ($existing = $this->byUuid($project, $uuid))) {
             return $existing;
@@ -58,6 +62,8 @@ class SiteDiaryService
      */
     public function update(SiteDiary $diary, array $data): SiteDiary
     {
+        $this->assertNotRetired();
+
         return DB::transaction(function () use ($diary, $data) {
             $locked = SiteDiary::query()->whereKey($diary->id)->lockForUpdate()->firstOrFail();
             $locked->assertEditable();
@@ -73,12 +79,16 @@ class SiteDiaryService
 
     public function delete(SiteDiary $diary): void
     {
+        $this->assertNotRetired();
+
         $diary->assertEditable();
         $diary->delete();
     }
 
     public function submit(SiteDiary $diary, User $user): void
     {
+        $this->assertNotRetired();
+
         $this->transition($diary, function (SiteDiary $locked) use ($user) {
             $locked->assertEditable();
 
@@ -101,6 +111,8 @@ class SiteDiaryService
 
     public function review(SiteDiary $diary, User $user): void
     {
+        $this->assertNotRetired();
+
         $this->transition($diary, function (SiteDiary $locked) use ($user) {
             $this->assertStatus($locked, [SiteDiaryStatus::Submitted], 'Only a submitted diary can be reviewed.');
             $this->assertNotSubmitter($locked, $user, 'review');
@@ -111,6 +123,8 @@ class SiteDiaryService
 
     public function approve(SiteDiary $diary, User $user): void
     {
+        $this->assertNotRetired();
+
         $this->transition($diary, function (SiteDiary $locked) use ($user) {
             $this->assertStatus($locked, [SiteDiaryStatus::Reviewed], 'Only a reviewed diary can be approved.');
             $this->assertNotSubmitter($locked, $user, 'approve');
@@ -121,6 +135,8 @@ class SiteDiaryService
 
     public function reject(SiteDiary $diary, User $user, string $reason): void
     {
+        $this->assertNotRetired();
+
         $this->transition($diary, function (SiteDiary $locked) use ($user, $reason) {
             $this->assertStatus($locked, [SiteDiaryStatus::Submitted, SiteDiaryStatus::Reviewed], 'Only a submitted or reviewed diary can be rejected.');
             $this->assertNotSubmitter($locked, $user, 'reject');
@@ -161,6 +177,11 @@ class SiteDiaryService
         if ((int) ($diary->submitted_by ?? $diary->created_by) === (int) $user->id) {
             throw ValidationException::withMessages(['diary' => "You cannot {$action} a diary you submitted yourself."]);
         }
+    }
+
+    private function assertNotRetired(): void
+    {
+        throw ValidationException::withMessages(['diary' => self::RETIRED_MESSAGE]);
     }
 
     private function byUuid(Project $project, string $uuid): ?SiteDiary
