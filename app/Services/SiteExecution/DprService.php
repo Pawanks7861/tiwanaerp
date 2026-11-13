@@ -3,6 +3,9 @@
 namespace App\Services\SiteExecution;
 
 use App\Enums\SiteExecution\DprStatus;
+use App\Models\Approval\ApprovalAction;
+use App\Models\Approval\ApprovalRequest;
+use App\Models\Core\Attachment;
 use App\Models\Planning\ProgressEntry;
 use App\Models\Projects\Project;
 use App\Models\SiteExecution\Dpr;
@@ -14,11 +17,13 @@ use App\Models\SiteExecution\DprMaterial;
 use App\Support\Math\Decimal;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
+use App\Services\Files\FilePreviewService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Services\Planning\ProgressLedgerService;
 use App\Services\SiteExecution\Concerns\ResolvesWorkLines;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Spatie\Permission\PermissionRegistrar;
 
@@ -164,6 +169,11 @@ class DprService
         });
     }
 
+    /**
+     * Permanently remove an editable DPR and all related rows/files (items, resources,
+     * constraints, attachments, approval history, stored PDF). Blocked once progress
+     * has been posted or the DPR has been reopened (revision > 0).
+     */
     public function delete(Dpr $dpr): void
     {
         DB::transaction(function () use ($dpr) {
@@ -171,8 +181,49 @@ class DprService
             if ($locked->revision > 0 || $this->hasLedgerHistory($locked)) {
                 throw ValidationException::withMessages(['dpr' => 'This DPR has progress history; correct it instead of deleting it.']);
             }
-            $locked->delete();
+
+            $this->purgeRelated($locked);
+            $locked->forceDelete();
         });
+    }
+
+    /**
+     * Hard-delete every child row and related morph / file for a DPR. Call only inside
+     * a transaction on an editable DPR with no ledger history.
+     */
+    private function purgeRelated(Dpr $dpr): void
+    {
+        $requestIds = ApprovalRequest::query()
+            ->where('approvable_type', $dpr->getMorphClass())
+            ->where('approvable_id', $dpr->id)
+            ->pluck('id');
+
+        if ($requestIds->isNotEmpty()) {
+            ApprovalAction::query()->whereIn('approval_request_id', $requestIds)->delete();
+            ApprovalRequest::query()->whereIn('id', $requestIds)->delete();
+        }
+
+        $attachments = Attachment::withTrashed()
+            ->where('attachable_type', $dpr->getMorphClass())
+            ->where('attachable_id', $dpr->id)
+            ->get();
+
+        $previews = app(FilePreviewService::class);
+        foreach ($attachments as $attachment) {
+            Storage::disk($attachment->disk)->delete($attachment->path);
+            $previews->purge('attachment', (int) $attachment->id);
+            $attachment->forceDelete();
+        }
+
+        if (filled($dpr->pdf_path)) {
+            Storage::disk(config('uploads.disk'))->delete($dpr->pdf_path);
+        }
+
+        DprItem::query()->where('dpr_id', $dpr->id)->delete();
+        DprLabour::query()->where('dpr_id', $dpr->id)->delete();
+        DprEquipment::query()->where('dpr_id', $dpr->id)->delete();
+        DprMaterial::query()->where('dpr_id', $dpr->id)->delete();
+        DprConstraint::query()->where('dpr_id', $dpr->id)->delete();
     }
 
     public function submit(Dpr $dpr, User $user): void

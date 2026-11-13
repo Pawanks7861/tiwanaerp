@@ -52,7 +52,7 @@ const visibleItems = computed(() => {
 const ACTIONS = {
     submit: { title: 'Submit DPR for approval?', message: 'Quantities are checked against the plan now and again at approval. Approval posts them to the progress ledger.', label: 'Submit', danger: false },
     refresh: { title: 'Refresh activity lines?', message: 'Activity, labour, equipment and material summaries are rebuilt from planning and site data. Manual edits on those lines may be replaced.', label: 'Refresh', danger: false },
-    delete: { title: 'Delete this DPR?', message: 'The draft is removed permanently.', label: 'Delete', danger: true },
+    delete: { title: 'Delete this DPR?', message: 'This permanently removes the DPR and all related work lines, labour, equipment, materials, constraints, attachments, and approval history for this report.', label: 'Delete', danger: true },
 };
 
 function run(action) {

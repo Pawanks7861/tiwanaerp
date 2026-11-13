@@ -46,6 +46,7 @@ class DprController extends Controller
             'search' => ['nullable', 'string', 'max:100'],
         ]);
 
+        $user = $request->user();
         $page = Dpr::query()->where('project_id', $project->id)
             ->with('engineer:id,name')
             ->withCount('items')
@@ -61,10 +62,13 @@ class DprController extends Controller
                 ...$this->header($dpr),
                 'engineer' => $dpr->engineer?->name,
                 'items_count' => $dpr->items_count,
+                'can' => [
+                    'delete' => $dpr->isEditable() && $dpr->revision === 0 && $user->can('delete', $dpr),
+                ],
             ]),
             'filters' => $filters,
             'statuses' => DprStatus::options(),
-            'can' => ['create' => $request->user()->can('create', [Dpr::class, $project])],
+            'can' => ['create' => $user->can('create', [Dpr::class, $project])],
         ]);
     }
 

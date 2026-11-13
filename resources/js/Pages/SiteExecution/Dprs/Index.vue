@@ -4,11 +4,14 @@ import FilterBar from '@/Components/Data/FilterBar.vue';
 import Pagination from '@/Components/Data/Pagination.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
+import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { formatDate } from '@/lib/format';
+import { router } from '@inertiajs/vue3';
+import { ref } from 'vue';
 
-defineProps({
+const props = defineProps({
     project: { type: Object, required: true },
     dprs: { type: Object, required: true },
     filters: { type: Object, required: true },
@@ -24,6 +27,21 @@ const columns = [
     { key: 'engineer', label: 'Engineer', mobile: false },
     { key: 'items_count', label: 'Work lines', align: 'right', mobile: false },
 ];
+
+const deleting = ref(null);
+const processing = ref(false);
+
+function runDelete() {
+    if (!deleting.value) return;
+    processing.value = true;
+    router.delete(route('projects.dprs.destroy', [props.project.id, deleting.value.id]), {
+        preserveScroll: true,
+        onFinish: () => {
+            processing.value = false;
+            deleting.value = null;
+        },
+    });
+}
 </script>
 
 <template>
@@ -54,8 +72,29 @@ const columns = [
                 <template #cell-source="{ row }"><span class="text-xs text-slate-600">{{ row.source_label }}</span></template>
                 <template #cell-engineer="{ value }">{{ value ?? '—' }}</template>
                 <template #cell-items_count="{ value }"><span class="tabular">{{ value }}</span></template>
+                <template #actions="{ row }">
+                    <AppButton
+                        v-if="row.can?.delete"
+                        variant="ghost"
+                        size="sm"
+                        icon="trash"
+                        aria-label="Delete DPR"
+                        @click="deleting = row"
+                    />
+                </template>
             </DataTable>
             <Pagination :paginator="dprs" />
         </AppCard>
+
+        <ConfirmDialog
+            :show="!!deleting"
+            title="Delete this DPR?"
+            message="This permanently removes the DPR and all related work lines, labour, equipment, materials, constraints, attachments, and approval history for this report."
+            confirm-label="Delete"
+            danger
+            :processing="processing"
+            @confirm="runDelete"
+            @close="deleting = null"
+        />
     </ProjectLayout>
 </template>
