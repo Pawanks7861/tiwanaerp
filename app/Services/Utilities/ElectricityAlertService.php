@@ -6,22 +6,24 @@ use App\Enums\Utilities\ElectricityBillStatus;
 use App\Models\Utilities\ElectricityBill;
 use App\Support\Math\Decimal;
 use App\Support\Tenancy\CurrentCompany;
+use Carbon\Carbon;
 
 final class ElectricityAlertService
 {
     /**
      * @return list<array<string, mixed>>
      */
-    public function forMonth(string $monthStart, bool $includeCosts = true): array
+    public function forMonth(string $monthStart, bool $includeCosts = true, ?int $utilitySiteId = null): array
     {
         $alerts = [];
-        $monthEnd = \Carbon\Carbon::parse($monthStart)->endOfMonth()->toDateString();
+        $monthEnd = Carbon::parse($monthStart)->endOfMonth()->toDateString();
         $settings = $this->settings();
 
         $bills = ElectricityBill::query()
             ->with(['site:id,name,code', 'connection:id,connection_number,contract_demand,sanctioned_demand,low_pf_threshold', 'components'])
             ->whereBetween('billing_month', [$monthStart, $monthEnd])
             ->whereNotIn('status', [ElectricityBillStatus::Cancelled->value])
+            ->when($utilitySiteId, fn ($q) => $q->where('utility_site_id', $utilitySiteId))
             ->get();
 
         foreach ($bills as $bill) {
@@ -84,8 +86,8 @@ final class ElectricityAlertService
         $costSpikePct = $settings['cost_spike_percent'] ?? null;
         $consumptionSpikePct = $settings['consumption_spike_percent'] ?? null;
         if ($costSpikePct !== null || $consumptionSpikePct !== null) {
-            $prevStart = \Carbon\Carbon::parse($monthStart)->subMonth()->startOfMonth()->toDateString();
-            $prevEnd = \Carbon\Carbon::parse($monthStart)->subMonth()->endOfMonth()->toDateString();
+            $prevStart = Carbon::parse($monthStart)->subMonth()->startOfMonth()->toDateString();
+            $prevEnd = Carbon::parse($monthStart)->subMonth()->endOfMonth()->toDateString();
             $prevBills = ElectricityBill::query()
                 ->whereBetween('billing_month', [$prevStart, $prevEnd])
                 ->whereNotIn('status', [ElectricityBillStatus::Cancelled->value])

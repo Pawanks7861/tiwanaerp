@@ -4,10 +4,10 @@
     <meta charset="utf-8">
     <title>{{ $po->po_number }}</title>
     <style>
-        @page { margin: 18px 20px 36px; }
+        @page { margin: 16px 18px 34px; }
         body { font-family: DejaVu Sans, sans-serif; font-size: 8.5px; color: #111; }
-        h1 { font-size: 14px; margin: 0; }
-        h2 { font-size: 13px; margin: 0; letter-spacing: 1px; text-align: center; }
+        h1 { font-size: 13px; margin: 0; }
+        h2 { font-size: 14px; margin: 0; letter-spacing: 1.2px; text-align: center; font-weight: bold; }
         table { width: 100%; border-collapse: collapse; }
         .muted { color: #555; }
         .right { text-align: right; }
@@ -23,9 +23,21 @@
         .sig { border-top: 1px solid #333; display: inline-block; min-width: 160px; padding-top: 3px; margin-top: 28px; }
         thead { display: table-header-group; }
         tr { page-break-inside: avoid; }
+        .draft-mark {
+            position: fixed; top: 42%; left: 8%; width: 84%; text-align: center;
+            font-size: 64px; color: rgba(180, 40, 40, 0.12); letter-spacing: 8px; font-weight: bold;
+            transform: rotate(-28deg); z-index: 0;
+        }
+        .content { position: relative; z-index: 1; }
+        .kv td { padding: 1px 0; vertical-align: top; }
+        .kv .k { width: 48%; color: #555; }
     </style>
 </head>
 <body>
+    @if ($is_draft)
+        <div class="draft-mark">DRAFT</div>
+    @endif
+    <div class="content">
     <table>
         <tr>
             <td style="width: 22%; vertical-align: top;">@include('pdf.partials.logo')</td>
@@ -42,42 +54,81 @@
         </tr>
     </table>
 
+    {{-- Top: left parties (~65%) / right voucher + dispatch (~35%) --}}
     <table style="margin-top: 8px;">
         <tr>
-            <td class="box" style="width: 50%;">
-                <div class="label">{{ $invoice_to['label'] }}</div>
-                <strong>{{ $invoice_to['name'] }}</strong>
-                @foreach ($invoice_to['lines'] as $line)<div>{!! nl2br(e($line)) !!}</div>@endforeach
-                @foreach ($invoice_to['meta'] as $line)<div>{{ $line }}</div>@endforeach
-            </td>
-            <td class="box" style="width: 50%;">
-                <div class="label">Document details</div>
+            <td style="width: 65%; vertical-align: top; padding: 0;">
                 <table>
-                    @foreach ($meta as $k => $v)
-                        <tr>
-                            <td style="width: 42%;" class="muted">{{ $k }}</td>
-                            <td><strong>{{ $v }}</strong></td>
-                        </tr>
-                    @endforeach
+                    <tr>
+                        <td class="box">
+                            <div class="label">{{ $invoice_to['label'] }}</div>
+                            <strong>{{ $invoice_to['name'] }}</strong>
+                            @foreach ($invoice_to['lines'] as $line)<div>{!! nl2br(e($line)) !!}</div>@endforeach
+                            @foreach ($invoice_to['meta'] as $line)<div>{{ $line }}</div>@endforeach
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="box">
+                            <div class="label">{{ $consignee['label'] }}</div>
+                            <strong>{{ $consignee['name'] }}</strong>
+                            @foreach ($consignee['lines'] as $line)<div>{!! nl2br(e($line)) !!}</div>@endforeach
+                            @foreach ($consignee['meta'] as $line)<div>{{ $line }}</div>@endforeach
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="box">
+                            <div class="label">{{ $supplier['label'] }}</div>
+                            <strong>{{ $supplier['name'] }}</strong>
+                            @foreach ($supplier['lines'] as $line)<div>{!! nl2br(e($line)) !!}</div>@endforeach
+                            @foreach ($supplier['meta'] as $line)<div>{{ $line }}</div>@endforeach
+                        </td>
+                    </tr>
                 </table>
             </td>
-        </tr>
-        <tr>
-            <td class="box">
-                <div class="label">{{ $consignee['label'] }}</div>
-                <strong>{{ $consignee['name'] }}</strong>
-                @foreach ($consignee['lines'] as $line)<div>{!! nl2br(e($line)) !!}</div>@endforeach
-                @foreach ($consignee['meta'] as $line)<div>{{ $line }}</div>@endforeach
-            </td>
-            <td class="box">
-                <div class="label">{{ $supplier['label'] }}</div>
-                <strong>{{ $supplier['name'] }}</strong>
-                @foreach ($supplier['lines'] as $line)<div>{!! nl2br(e($line)) !!}</div>@endforeach
-                @foreach ($supplier['meta'] as $line)<div>{{ $line }}</div>@endforeach
-                @if ($bank !== [])
-                    <div class="label" style="margin-top: 4px;">Supplier bank</div>
-                    @foreach ($bank as $k => $v)<div>{{ $k }}: {{ $v }}</div>@endforeach
-                @endif
+            <td style="width: 35%; vertical-align: top; padding: 0;">
+                <table>
+                    <tr>
+                        <td class="box">
+                            <div class="label">Document details</div>
+                            <table class="kv">
+                                @foreach ($meta as $k => $v)
+                                    <tr>
+                                        <td class="k">{{ $k }}</td>
+                                        <td><strong>{{ $v }}</strong></td>
+                                    </tr>
+                                @endforeach
+                            </table>
+                        </td>
+                    </tr>
+                    @if ($dispatch !== [] || $bank !== [])
+                        <tr>
+                            <td class="box">
+                                @if ($dispatch !== [])
+                                    <div class="label">Dispatch / Delivery</div>
+                                    <table class="kv">
+                                        @foreach ($dispatch as $k => $v)
+                                            <tr>
+                                                <td class="k">{{ $k }}</td>
+                                                <td><strong>{{ $v }}</strong></td>
+                                            </tr>
+                                        @endforeach
+                                    </table>
+                                @endif
+                                @if ($bank !== [])
+                                    <div class="label" style="margin-top: 4px;">Supplier bank</div>
+                                    <table class="kv">
+                                        @foreach ($bank as $k => $v)
+                                            <tr>
+                                                <td class="k">{{ $k }}</td>
+                                                <td><strong>{{ $v }}</strong></td>
+                                            </tr>
+                                        @endforeach
+                                    </table>
+                                @endif
+                            </td>
+                        </tr>
+                    @endif
+                </table>
             </td>
         </tr>
     </table>
@@ -86,20 +137,15 @@
         <thead>
             <tr>
                 <th style="width: 3%;">#</th>
-                <th style="width: 26%; text-align: left;">Description of Goods</th>
-                <th>MR / Indent</th>
-                <th>HSN/SAC</th>
-                <th>Qty</th>
-                <th>Unit</th>
-                <th>Rate</th>
-                <th>Disc %</th>
-                <th>Taxable</th>
-                @if ($intra)
-                    <th>CGST</th><th>SGST</th>
-                @else
-                    <th>IGST</th>
-                @endif
-                <th>Amount</th>
+                <th style="width: 28%; text-align: left;">Description of Goods</th>
+                <th style="width: 10%;">MR / Indent</th>
+                <th style="width: 10%;">Brand / Make</th>
+                <th style="width: 8%;">Due On</th>
+                <th style="width: 8%;">Qty</th>
+                <th style="width: 7%;">Rate</th>
+                <th style="width: 5%;">Per</th>
+                <th style="width: 5%;">Disc %</th>
+                <th style="width: 9%;">Amount</th>
             </tr>
         </thead>
         <tbody>
@@ -109,21 +155,20 @@
                     <td>
                         {{ $item['description'] }}
                         @if ($item['item_code'])<br><span class="muted">{{ $item['item_code'] }}</span>@endif
-                        @if ($item['hsn_sac'])<br><span class="muted">HSN {{ $item['hsn_sac'] }}</span>@endif
+                        @if ($item['hsn_sac'])<br><span class="muted">HSN/SAC: {{ $item['hsn_sac'] }}</span>@endif
+                        @if ($intra)
+                            <br><span class="muted">CGST {{ rtrim(rtrim($item['cgst_rate'], '0'), '.') }}% · SGST {{ rtrim(rtrim($item['sgst_rate'], '0'), '.') }}%</span>
+                        @else
+                            <br><span class="muted">IGST {{ rtrim(rtrim($item['igst_rate'], '0'), '.') }}%</span>
+                        @endif
                     </td>
                     <td class="center">{{ $item['mr_ref'] ?: '—' }}</td>
-                    <td class="center">{{ $item['hsn_sac'] ?: '—' }}</td>
-                    <td class="right">{{ $qty($item['quantity']) }}</td>
-                    <td class="center">{{ $item['unit'] }}</td>
+                    <td class="center">{{ $item['brand_make'] ?: '—' }}</td>
+                    <td class="center">{{ $item['due_on'] ?: '—' }}</td>
+                    <td class="right">{{ $qty($item['quantity']) }} {{ $item['unit'] }}</td>
                     <td class="right">{{ $money($item['rate']) }}</td>
+                    <td class="center">{{ $item['unit'] }}</td>
                     <td class="right">{{ rtrim(rtrim($item['discount_percent'], '0'), '.') ?: '0' }}</td>
-                    <td class="right">{{ $money($item['taxable_amount']) }}</td>
-                    @if ($intra)
-                        <td class="right">{{ rtrim(rtrim($item['cgst_rate'], '0'), '.') }}%<br>{{ $money($item['cgst_amount']) }}</td>
-                        <td class="right">{{ rtrim(rtrim($item['sgst_rate'], '0'), '.') }}%<br>{{ $money($item['sgst_amount']) }}</td>
-                    @else
-                        <td class="right">{{ rtrim(rtrim($item['igst_rate'], '0'), '.') }}%<br>{{ $money($item['igst_amount']) }}</td>
-                    @endif
                     <td class="right">{{ $money($item['amount']) }}</td>
                 </tr>
             @endforeach
@@ -138,6 +183,9 @@
                 @if ($terms)
                     <div class="label">Terms &amp; Conditions</div>
                     <div style="line-height: 1.35;">{!! nl2br(e($terms)) !!}</div>
+                @endif
+                @if (filled($company_pan))
+                    <div style="margin-top: 10px;">Company's PAN: <strong>{{ $company_pan }}</strong></div>
                 @endif
             </td>
             <td style="width: 45%; vertical-align: top;">
@@ -185,6 +233,7 @@
             </td>
         </tr>
     </table>
+    </div>
 
     <div class="footer">
         {{ $po->po_number }}@if ($po->revision_no > 0) · Rev {{ $po->revision_no }}@endif

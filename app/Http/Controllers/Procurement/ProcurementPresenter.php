@@ -16,6 +16,7 @@ use App\Models\Projects\Project;
 use App\Models\Projects\Site;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
+use App\Services\Boq\EffectiveBoqQuantityService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
@@ -61,7 +62,10 @@ final class ProcurementPresenter
      */
     public static function vendor(?Vendor $vendor): ?array
     {
-        return $vendor ? $vendor->only(['id', 'code', 'name', 'gstin', 'state_code', 'city', 'contact_person', 'mobile', 'email', 'payment_terms']) : null;
+        return $vendor ? $vendor->only([
+            'id', 'code', 'name', 'gstin', 'state_code', 'city', 'contact_person', 'mobile', 'email',
+            'payment_terms', 'bank_name', 'bank_account_no', 'bank_ifsc',
+        ]) : null;
     }
 
     /**
@@ -109,12 +113,17 @@ final class ProcurementPresenter
      */
     public static function vendorOptions(): array
     {
-        return Vendor::query()->active()->orderBy('name')->get(['id', 'code', 'name', 'gstin', 'state_code', 'city'])
+        return Vendor::query()->active()->orderBy('name')->get([
+            'id', 'code', 'name', 'gstin', 'state_code', 'city', 'bank_name', 'bank_account_no', 'bank_ifsc',
+        ])
             ->map(fn (Vendor $v) => [
                 'value' => $v->id,
                 'label' => $v->name,
                 'description' => collect([$v->code, $v->city, $v->state_code ? 'State '.$v->state_code : 'No GST state'])->filter()->implode(' · '),
                 'state_code' => $v->state_code,
+                'bank_name' => $v->bank_name,
+                'bank_account_no' => $v->bank_account_no,
+                'bank_ifsc' => $v->bank_ifsc,
             ])->all();
     }
 
@@ -152,7 +161,7 @@ final class ProcurementPresenter
             return [];
         }
 
-        $effective = app(\App\Services\Boq\EffectiveBoqQuantityService::class);
+        $effective = app(EffectiveBoqQuantityService::class);
 
         return BoqItem::query()->where('boq_id', $boqId)->orderBy('sort_order')->get(['id', 'item_code', 'name', 'unit_id', 'quantity', 'line_uid', 'is_variation_originated'])
             ->map(function (BoqItem $i) use ($effective) {

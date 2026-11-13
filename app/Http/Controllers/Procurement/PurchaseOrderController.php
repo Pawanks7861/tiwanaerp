@@ -9,6 +9,7 @@ use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Http\Requests\Procurement\PurchaseOrderRequest;
 use App\Models\Core\Company;
+use App\Models\Core\DocumentTermsTemplate;
 use App\Models\Procurement\Grn;
 use App\Models\Procurement\MaterialRequest;
 use App\Models\Procurement\MaterialRequestItem;
@@ -21,10 +22,12 @@ use App\Models\User;
 use App\Services\Procurement\ProcurementQuantityService;
 use App\Services\Procurement\PurchaseOrderAmendmentService;
 use App\Services\Procurement\PurchaseOrderService;
+use App\Support\Math\Decimal;
+use App\Support\Pdf\DocumentPdfSettings;
 use App\Support\Pdf\PdfResponder;
 use App\Support\Pdf\PurchaseOrderPdfDataBuilder;
 use App\Support\Procurement\ProcurementSettings;
-use App\Support\Math\Decimal;
+use App\Support\Tenancy\CurrentCompany;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
@@ -128,7 +131,13 @@ class PurchaseOrderController extends Controller
             'project' => ProjectHeader::for($project),
             'order' => [
                 ...$this->header($po),
-                ...$po->only(['billing_address', 'shipping_address', 'place_of_supply_state', 'vendor_state_code', 'payment_terms', 'terms', 'remarks', 'direct_justification', 'cancelled_reason', ...PurchaseOrder::MONEY_FIELDS]),
+                ...$po->only([
+                    'billing_address', 'shipping_address', 'consignee_name', 'consignee_email', 'consignee_gstin',
+                    'place_of_supply_state', 'vendor_state_code', 'payment_terms', 'terms', 'document_terms_template_id',
+                    'remarks', 'other_references', 'reference_number', 'dispatched_through', 'destination',
+                    'delivery_terms', 'direct_justification', 'cancelled_reason', ...PurchaseOrder::MONEY_FIELDS,
+                ]),
+                'reference_date' => $po->reference_date?->toDateString(),
                 'place_of_supply_label' => IndianState::tryFrom((string) $po->place_of_supply_state)?->label(),
                 'tax_type_label' => $po->tax_type?->label(),
                 'vendor' => ProcurementPresenter::vendor($po->vendor),
@@ -148,13 +157,14 @@ class PurchaseOrderController extends Controller
                 $over = $received->minus($ordered);
 
                 return [
-                ...$i->only(['id', 'item_code', 'description', 'hsn_sac', 'quantity', 'rate', 'discount_percent', 'discount_amount', 'base_amount', 'taxable_amount',
-                    'cgst_rate', 'cgst_amount', 'sgst_rate', 'sgst_amount', 'igst_rate', 'igst_amount', 'amount', 'received_qty']),
-                'unit' => $i->unit?->symbol,
-                'remaining_qty' => ($over->isPositive() ? Decimal::zero() : $ordered->minus($received))->toQuantity(),
-                'over_received_qty' => ($over->isPositive() ? $over : Decimal::zero())->toQuantity(),
-                'tax_rate' => $i->taxRate?->name,
-                'material_request' => $i->materialRequestItem?->materialRequest?->request_number,
+                    ...$i->only(['id', 'item_code', 'description', 'hsn_sac', 'brand', 'make', 'quantity', 'rate', 'discount_percent', 'discount_amount', 'base_amount', 'taxable_amount',
+                        'cgst_rate', 'cgst_amount', 'sgst_rate', 'sgst_amount', 'igst_rate', 'igst_amount', 'amount', 'received_qty']),
+                    'due_date' => $i->due_date?->toDateString(),
+                    'unit' => $i->unit?->symbol,
+                    'remaining_qty' => ($over->isPositive() ? Decimal::zero() : $ordered->minus($received))->toQuantity(),
+                    'over_received_qty' => ($over->isPositive() ? $over : Decimal::zero())->toQuantity(),
+                    'tax_rate' => $i->taxRate?->name,
+                    'material_request' => $i->materialRequestItem?->materialRequest?->request_number,
                 ];
             })->all(),
             'revisions' => $po->revisions()->with('creator:id,name')->get()->map(fn (PurchaseOrderRevision $r) => [
@@ -195,13 +205,20 @@ class PurchaseOrderController extends Controller
             'project' => ProjectHeader::for($project),
             'order' => [
                 ...$this->header($po),
-                ...$po->only(['billing_address', 'shipping_address', 'place_of_supply_state', 'payment_terms', 'terms', 'remarks', 'direct_justification', 'freight_amount', 'other_charges']),
+                ...$po->only([
+                    'billing_address', 'shipping_address', 'consignee_name', 'consignee_email', 'consignee_gstin',
+                    'place_of_supply_state', 'payment_terms', 'terms', 'document_terms_template_id', 'remarks',
+                    'other_references', 'reference_number', 'dispatched_through', 'destination', 'delivery_terms',
+                    'direct_justification', 'freight_amount', 'other_charges',
+                ]),
                 'po_date' => $po->po_date?->toDateString(),
                 'delivery_date' => $po->delivery_date?->toDateString(),
+                'reference_date' => $po->reference_date?->toDateString(),
                 'is_direct' => $po->isDirect(),
                 'vendor' => ProcurementPresenter::vendor($po->vendor()->first()),
                 'items' => $items->map(fn (PurchaseOrderItem $i) => [
-                    ...$i->only(['id', 'material_request_item_id', 'item_code', 'description', 'hsn_sac', 'quantity', 'rate', 'discount_percent', 'tax_rate_id', 'received_qty']),
+                    ...$i->only(['id', 'material_request_item_id', 'item_code', 'description', 'hsn_sac', 'brand', 'make', 'quantity', 'rate', 'discount_percent', 'tax_rate_id', 'received_qty']),
+                    'due_date' => $i->due_date?->toDateString(),
                     'unit' => $i->unit?->symbol,
                     'material_request' => $i->materialRequestItem?->materialRequest?->request_number,
                 ])->all(),
@@ -335,6 +352,8 @@ class PurchaseOrderController extends Controller
             ->orderBy('material_request_id')->orderBy('sort_order')
             ->limit(1000)->get();
         $remaining = $this->quantities->remaining($lines, exceptOrderId: $po?->id);
+        $company = app(CurrentCompany::class)->require();
+        $settings = DocumentPdfSettings::for($company);
 
         return [
             'lines' => $lines->map(fn (MaterialRequestItem $i) => [
@@ -350,9 +369,36 @@ class PurchaseOrderController extends Controller
             'vendors' => $po === null ? ProcurementPresenter::vendorOptions() : [],
             'taxRates' => ProcurementPresenter::taxRateOptions(),
             'states' => IndianState::options(),
+            'termsTemplates' => DocumentTermsTemplate::query()
+                ->where('document_type', 'purchase_order')
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get(['id', 'name', 'payment_terms', 'general_terms'])
+                ->map(fn (DocumentTermsTemplate $t) => [
+                    'value' => $t->id,
+                    'label' => $t->name,
+                    'payment_terms' => $t->payment_terms,
+                    'terms' => $t->general_terms,
+                ])->all(),
+            'invoiceTo' => [
+                'name' => $company->legal_name ?: $company->name,
+                'former_name' => $settings['former_name'],
+                'address' => collect([
+                    $company->address,
+                    trim(($company->city ?? '').($company->pincode ? ' - '.$company->pincode : '')),
+                ])->filter()->implode("\n"),
+                'pan' => $company->pan,
+                'gstin' => $company->gstin,
+                'state' => IndianState::tryFrom((string) $company->state_code)?->label(),
+                'state_code' => $company->state_code,
+                'cin' => $settings['cin'],
+                'email' => $company->email,
+            ],
             'defaults' => [
                 'place_of_supply_state' => $project->state_code,
                 'shipping_address' => collect([$project->name, $project->address, $project->city])->filter()->implode("\n"),
+                'consignee_name' => $project->name,
+                'destination' => collect([$project->name, $project->city])->filter()->implode(', '),
                 'today' => now()->toDateString(),
             ],
         ];

@@ -2,12 +2,14 @@
 
 namespace App\Services\Procurement;
 
+use App\Enums\IndianState;
 use App\Enums\Procurement\BidComparisonStatus;
 use App\Enums\Procurement\GrnStatus;
 use App\Enums\Procurement\PurchaseOrderStatus;
 use App\Enums\Procurement\RfqStatus;
 use App\Events\Procurement\PurchaseOrderApproved;
 use App\Models\Core\Company;
+use App\Models\Core\DocumentTermsTemplate;
 use App\Models\Masters\Material;
 use App\Models\Masters\TaxRate;
 use App\Models\Masters\Vendor;
@@ -23,6 +25,7 @@ use App\Services\Approval\ApprovalService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Services\Tax\GstCalculator;
 use App\Support\Math\Decimal;
+use App\Support\Pdf\DocumentPdfSettings;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -139,7 +142,11 @@ class PurchaseOrderService
         return DB::transaction(function () use ($po, $data) {
             $po = PurchaseOrder::query()->whereKey($po->id)->lockForUpdate()->firstOrFail();
             $po->assertEditable();
-            $po->fill($this->header($data));
+            $header = $this->header($data);
+            $po->fill($header);
+            if (array_key_exists('document_terms_template_id', $header)) {
+                $this->applyTermsTemplate($po, $header['document_terms_template_id']);
+            }
             if ($po->isDirect() && array_key_exists('direct_justification', $data)) {
                 $po->forceFill(['direct_justification' => $data['direct_justification']]);
             }
@@ -194,7 +201,15 @@ class PurchaseOrderService
 
             $this->assertWithinRemaining($po, $po->items()->get());
 
-            $po->forceFill(['status' => PurchaseOrderStatus::Approved, 'approved_by' => $approverId, 'approved_at' => now()])->save();
+            $po->loadMissing(['vendor', 'project', 'items.unit', 'items.materialRequestItem.materialRequest']);
+            $company = Company::query()->findOrFail($po->company_id);
+
+            $po->forceFill([
+                'status' => PurchaseOrderStatus::Approved,
+                'approved_by' => $approverId,
+                'approved_at' => now(),
+                'document_snapshot' => $this->buildDocumentSnapshot($po, $company),
+            ])->save();
             $po->writeAudit('approved', null, ['revision_no' => $po->revision_no, 'grand_total' => $po->grand_total]);
 
             $this->quantities->refreshPurchaseOrder($po);
@@ -265,7 +280,8 @@ class PurchaseOrderService
     {
         $rows = $po->items()->get()->map(fn (PurchaseOrderItem $item) => [
             'id' => $item->id,
-            ...$item->only(['quantity', 'rate', 'discount_percent', 'tax_rate_id', 'description', 'hsn_sac']),
+            ...$item->only(['quantity', 'rate', 'discount_percent', 'tax_rate_id', 'description', 'hsn_sac', 'brand', 'make', 'due_date']),
+            'due_date' => $item->due_date?->toDateString(),
         ])->all();
 
         $this->writeLines($po, $rows, Vendor::query()->findOrFail($po->vendor_id));
@@ -337,10 +353,17 @@ class PurchaseOrderService
             $discount = Decimal::of((string) ($row['discount_percent'] ?? '0'))->round(Decimal::PERCENT_SCALE)->toString();
             $calc = $this->gst->line($qty->toQuantity(), $rate, $discount, $tax, $taxType);
 
+            $dueDate = array_key_exists('due_date', $row)
+                ? ($row['due_date'] ?: null)
+                : ($line->due_date?->toDateString() ?? $po->delivery_date?->toDateString());
+
             $line->setRelation('purchaseOrder', $po);
             $line->forceFill([
                 'description' => filled($row['description'] ?? null) ? $row['description'] : $line->description,
                 'hsn_sac' => array_key_exists('hsn_sac', $row) ? ($row['hsn_sac'] ?: null) : $line->hsn_sac,
+                'brand' => array_key_exists('brand', $row) ? ($row['brand'] ?: null) : $line->brand,
+                'make' => array_key_exists('make', $row) ? ($row['make'] ?: null) : $line->make,
+                'due_date' => $dueDate,
                 'quantity' => $qty->toQuantity(),
                 'rate' => $rate,
                 'discount_percent' => $discount,
@@ -406,15 +429,19 @@ class PurchaseOrderService
     {
         $company = Company::query()->findOrFail($project->company_id);
 
+        $shipping = $this->projectAddress($project);
         $po = new PurchaseOrder([
             'billing_address' => $this->companyAddress($company),
-            'shipping_address' => $this->projectAddress($project),
+            'shipping_address' => $shipping,
+            'consignee_name' => $project->name,
+            'destination' => collect([$project->name, $project->city])->filter()->implode(', '),
             'place_of_supply_state' => $project->state_code ?? $company->state_code,
             'payment_terms' => $vendor->payment_terms,
             'freight_amount' => '0.00',
             'other_charges' => '0.00',
             ...array_filter($header, fn ($value) => $value !== null && $value !== ''),
         ]);
+        $this->applyTermsTemplate($po, $header['document_terms_template_id'] ?? null);
         $po->forceFill([
             'project_id' => $project->id,
             'vendor_id' => $vendor->id,
@@ -458,8 +485,10 @@ class PurchaseOrderService
     private function header(array $data): array
     {
         $header = array_intersect_key($data, array_flip([
-            'po_date', 'delivery_date', 'billing_address', 'shipping_address', 'place_of_supply_state',
-            'payment_terms', 'terms', 'remarks', 'freight_amount', 'other_charges',
+            'po_date', 'delivery_date', 'reference_number', 'reference_date', 'billing_address', 'shipping_address',
+            'consignee_name', 'consignee_email', 'consignee_gstin', 'place_of_supply_state', 'payment_terms',
+            'terms', 'document_terms_template_id', 'remarks', 'other_references', 'dispatched_through',
+            'destination', 'delivery_terms', 'freight_amount', 'other_charges',
         ]));
         foreach (['freight_amount', 'other_charges'] as $key) {
             if (array_key_exists($key, $header)) {
@@ -468,6 +497,101 @@ class PurchaseOrderService
         }
 
         return $header;
+    }
+
+    /**
+     * Copy PO terms from a company template into the document (never live-linked afterwards).
+     */
+    private function applyTermsTemplate(PurchaseOrder $po, mixed $templateId): void
+    {
+        if (blank($templateId)) {
+            $po->document_terms_template_id = null;
+
+            return;
+        }
+
+        $template = DocumentTermsTemplate::query()
+            ->whereKey((int) $templateId)
+            ->where('document_type', 'purchase_order')
+            ->where('is_active', true)
+            ->first()
+            ?? throw ValidationException::withMessages(['document_terms_template_id' => 'Choose an active purchase order terms template.']);
+
+        $po->document_terms_template_id = $template->id;
+        if (blank($po->terms) && filled($template->general_terms)) {
+            $po->terms = $template->general_terms;
+        }
+        if (blank($po->payment_terms) && filled($template->payment_terms)) {
+            $po->payment_terms = $template->payment_terms;
+        }
+    }
+
+    /**
+     * Freeze parties, bank, settings and terms at approval so master edits cannot rewrite the PDF.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildDocumentSnapshot(PurchaseOrder $po, Company $company): array
+    {
+        $vendor = $po->vendor;
+        $project = $po->project;
+        $settings = DocumentPdfSettings::for($company);
+        $stateLabel = fn (?string $code) => $code
+            ? (IndianState::tryFrom($code)?->label() ?? $code)
+            : null;
+
+        return [
+            'snapshotted_at' => now()->toIso8601String(),
+            'invoice_to' => [
+                'name' => $company->legal_name ?: $company->name,
+                'former_name' => $settings['former_name'],
+                'address' => $po->billing_address ?: $this->companyAddress($company),
+                'pan' => $company->pan,
+                'gstin' => $company->gstin,
+                'state' => $stateLabel($company->state_code),
+                'state_code' => $company->state_code,
+                'cin' => $settings['cin'],
+                'email' => $company->email,
+                'phone' => $company->phone,
+            ],
+            'consignee' => [
+                'name' => $po->consignee_name ?: $project?->name,
+                'address' => $po->shipping_address ?: $this->projectAddress($project),
+                'pan' => $company->pan,
+                'gstin' => $po->consignee_gstin ?: $company->gstin,
+                'email' => $po->consignee_email,
+                'state' => $stateLabel($po->place_of_supply_state ?: $project?->state_code),
+                'state_code' => $po->place_of_supply_state ?: $project?->state_code,
+                'project_code' => $project?->code,
+            ],
+            'supplier' => [
+                'name' => $vendor?->name,
+                'code' => $vendor?->code,
+                'address' => collect([$vendor?->address, collect([$vendor?->city, $vendor?->pincode])->filter()->implode(' - ')])->filter()->implode("\n"),
+                'gstin' => $vendor?->gstin,
+                'pan' => $vendor?->pan,
+                'state' => $stateLabel($po->vendor_state_code ?: $vendor?->state_code),
+                'state_code' => $po->vendor_state_code ?: $vendor?->state_code,
+                'contact' => $vendor?->contact_person,
+                'mobile' => $vendor?->mobile,
+                'email' => $vendor?->email,
+            ],
+            'bank' => array_filter([
+                'bank_name' => $vendor?->bank_name,
+                'account_no' => $vendor?->bank_account_no,
+                'ifsc' => $vendor?->bank_ifsc,
+            ], fn ($v) => filled($v)),
+            'settings' => $settings,
+            'terms' => $po->terms,
+            'payment_terms' => $po->payment_terms,
+            'delivery_terms' => $po->delivery_terms,
+            'reference_number' => $po->reference_number,
+            'reference_date' => $po->reference_date?->toDateString(),
+            'other_references' => $po->other_references,
+            'dispatched_through' => $po->dispatched_through,
+            'destination' => $po->destination,
+            'company_pan' => $company->pan,
+        ];
     }
 
     private function companyAddress(Company $company): string

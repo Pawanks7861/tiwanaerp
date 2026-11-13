@@ -43,6 +43,7 @@ class PurchaseOrderAmendmentService
                 'revision_no' => $from + 1,
                 'approved_by' => null,
                 'approved_at' => null,
+                'document_snapshot' => null,
             ])->save();
             $po->writeAudit('amended', ['revision_no' => $from], ['revision_no' => $from + 1, 'reason' => $reason]);
 

@@ -2,9 +2,11 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\Approval\ApprovalStatus;
 use App\Enums\Procurement\PurchaseOrderStatus;
 use App\Models\Procurement\Grn;
 use App\Models\Procurement\PurchaseOrder;
+use App\Models\User;
 use App\Support\Math\Decimal;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -24,12 +26,24 @@ class PurchaseOrderResource extends JsonResource
             'revision_no' => $this->revision_no,
             'po_date' => $this->po_date?->toDateString(),
             'delivery_date' => $this->delivery_date?->toDateString(),
+            'reference_number' => $this->reference_number,
+            'reference_date' => $this->reference_date?->toDateString(),
             'status' => $this->status->value,
             'status_label' => $this->status->label(),
             'tax_type' => $this->tax_type?->value,
             'place_of_supply_state' => $this->place_of_supply_state,
             'payment_terms' => $this->payment_terms,
+            'other_references' => $this->other_references,
+            'dispatched_through' => $this->dispatched_through,
+            'destination' => $this->destination,
+            'delivery_terms' => $this->delivery_terms,
+            'consignee_name' => $this->consignee_name,
+            'consignee_email' => $this->consignee_email,
+            'consignee_gstin' => $this->consignee_gstin,
+            'billing_address' => $this->billing_address,
+            'shipping_address' => $this->shipping_address,
             'remarks' => $this->remarks,
+            'terms' => $this->terms,
             'direct_justification' => $this->direct_justification,
             'is_direct' => $this->rfq_id === null,
             'subtotal' => $this->subtotal,
@@ -69,6 +83,9 @@ class PurchaseOrderResource extends JsonResource
                     'item_code' => $line->item_code,
                     'description' => $line->description,
                     'hsn_sac' => $line->hsn_sac,
+                    'brand' => $line->brand,
+                    'make' => $line->make,
+                    'due_date' => $line->due_date?->toDateString(),
                     'quantity' => $line->quantity,
                     'rate' => $line->rate,
                     'discount_percent' => $line->discount_percent,
@@ -107,7 +124,7 @@ class PurchaseOrderResource extends JsonResource
     /**
      * @return array<string, bool>
      */
-    private function abilities(\App\Models\User $user): array
+    private function abilities(User $user): array
     {
         $editable = $this->isEditable();
         $status = $this->status;
@@ -131,10 +148,10 @@ class PurchaseOrderResource extends JsonResource
             'download_pdf' => $export,
             'attach' => $user->can('update', $this->resource),
             'approve' => (bool) ($this->relationLoaded('latestApprovalRequest')
-                && $this->latestApprovalRequest?->status === \App\Enums\Approval\ApprovalStatus::Pending
+                && $this->latestApprovalRequest?->status === ApprovalStatus::Pending
                 && $user->can('approvals.view')),
             'reject' => (bool) ($this->relationLoaded('latestApprovalRequest')
-                && $this->latestApprovalRequest?->status === \App\Enums\Approval\ApprovalStatus::Pending
+                && $this->latestApprovalRequest?->status === ApprovalStatus::Pending
                 && $user->can('approvals.view')),
         ];
     }

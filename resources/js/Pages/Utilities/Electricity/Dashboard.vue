@@ -1,4 +1,5 @@
 <script setup>
+import FilterBar from '@/Components/Data/FilterBar.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import PageHeader from '@/Components/UI/PageHeader.vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -10,12 +11,28 @@ defineProps({
     cards: { type: Array, default: () => [] },
     alerts: { type: Array, default: () => [] },
     can_view_costs: { type: Boolean, default: false },
+    filters: { type: Object, default: () => ({}) },
+    available_months: { type: Array, default: () => [] },
+    sites: { type: Array, default: () => [] },
 });
 </script>
 
 <template>
     <AppLayout title="Electricity dashboard">
         <PageHeader title="Electricity dashboard" subtitle="Rolling view of consumption, demand and billing health." :back="route('utilities.electricity.hub')" />
+        <AppCard :padded="false" class="mb-4">
+            <FilterBar
+                :searchable="false"
+                :filters="{
+                    month: filters.month ?? available_months[0]?.value ?? '',
+                    utility_site_id: filters.utility_site_id ?? 'all',
+                }"
+                :selects="[
+                    { key: 'month', options: available_months },
+                    { key: 'utility_site_id', options: [{ value: 'all', label: 'All sites' }, ...sites] },
+                ]"
+            />
+        </AppCard>
         <div v-if="alerts.length" class="mb-4 space-y-2">
             <AppCard v-for="(alert, i) in alerts" :key="i" :padded="false" class="border-amber-200 bg-amber-50/80">
                 <p class="px-4 py-3 text-sm text-amber-900"><span class="font-medium">{{ alert.title }}</span><span v-if="alert.message"> — {{ alert.message }}</span></p>

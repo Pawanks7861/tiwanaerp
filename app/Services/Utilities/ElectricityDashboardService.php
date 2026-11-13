@@ -8,14 +8,13 @@ use App\Models\Utilities\ElectricityBillComponent;
 use App\Models\Utilities\ElectricityMeterReading;
 use App\Support\Math\Decimal;
 use Carbon\CarbonInterface;
-use Illuminate\Support\Facades\DB;
 
 final class ElectricityDashboardService
 {
     /**
      * @return array{cards: list<array{key: string, label: string, value: mixed, financial?: bool}>, alerts: list<array<string, mixed>>}
      */
-    public function summary(?CarbonInterface $month = null, bool $includeCosts = true): array
+    public function summary(?CarbonInterface $month = null, bool $includeCosts = true, ?int $utilitySiteId = null): array
     {
         $monthStart = ($month ?? now())->copy()->startOfMonth()->toDateString();
         $monthEnd = ($month ?? now())->copy()->endOfMonth()->toDateString();
@@ -24,12 +23,14 @@ final class ElectricityDashboardService
             ->with(['site:id,code,name', 'connection:id,connection_number,contract_demand,sanctioned_demand,low_pf_threshold'])
             ->whereBetween('billing_month', [$monthStart, $monthEnd])
             ->whereNotIn('status', [ElectricityBillStatus::Cancelled->value])
+            ->when($utilitySiteId, fn ($q) => $q->where('utility_site_id', $utilitySiteId))
             ->get();
 
         $readings = ElectricityMeterReading::query()
             ->with('connection:id,low_pf_threshold')
             ->whereBetween('billing_month', [$monthStart, $monthEnd])
             ->where('status', '!=', 'cancelled')
+            ->when($utilitySiteId, fn ($q) => $q->where('utility_site_id', $utilitySiteId))
             ->get();
 
         $totalKwh = Decimal::sum($readings->pluck('kwh_consumption'));
@@ -110,7 +111,7 @@ final class ElectricityDashboardService
 
         return [
             'cards' => $cards,
-            'alerts' => app(ElectricityAlertService::class)->forMonth($monthStart, $includeCosts),
+            'alerts' => app(ElectricityAlertService::class)->forMonth($monthStart, $includeCosts, $utilitySiteId),
         ];
     }
 }

@@ -55,6 +55,7 @@ class PurchaseOrderItem extends Model
             'igst_amount' => 'decimal:2',
             'amount' => 'decimal:2',
             'received_qty' => 'decimal:4',
+            'due_date' => 'date',
             'sort_order' => 'integer',
         ];
     }

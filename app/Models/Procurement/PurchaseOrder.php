@@ -4,8 +4,8 @@ namespace App\Models\Procurement;
 
 use App\Contracts\Approvable;
 use App\Enums\Procurement\PurchaseOrderStatus;
-use App\Models\Approval\ApprovalRequest;
 use App\Enums\Procurement\TaxType;
+use App\Models\Approval\ApprovalRequest;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
@@ -27,8 +27,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * GstCalculator; approved orders change only through an amendment (revision snapshot + re-approval).
  */
 #[Fillable([
-    'po_date', 'delivery_date', 'billing_address', 'shipping_address', 'place_of_supply_state',
-    'payment_terms', 'terms', 'remarks', 'freight_amount', 'other_charges',
+    'po_date', 'delivery_date', 'reference_number', 'reference_date', 'billing_address', 'shipping_address',
+    'consignee_name', 'consignee_email', 'consignee_gstin', 'place_of_supply_state', 'payment_terms', 'terms',
+    'document_terms_template_id', 'remarks', 'other_references', 'dispatched_through', 'destination',
+    'delivery_terms', 'freight_amount', 'other_charges',
 ])]
 class PurchaseOrder extends Model implements Approvable
 {
@@ -36,7 +38,7 @@ class PurchaseOrder extends Model implements Approvable
 
     public const LIFECYCLE_COLUMNS = [
         'status', 'revision_no', 'approved_by', 'approved_at', 'cancelled_reason', 'cancelled_by', 'cancelled_at',
-        'updated_by', 'updated_at',
+        'document_snapshot', 'updated_by', 'updated_at',
     ];
 
     public const MONEY_FIELDS = [
@@ -52,6 +54,8 @@ class PurchaseOrder extends Model implements Approvable
             'revision_no' => 'integer',
             'po_date' => 'date',
             'delivery_date' => 'date',
+            'reference_date' => 'date',
+            'document_snapshot' => 'array',
             'approved_at' => 'datetime',
             'cancelled_at' => 'datetime',
             ...array_fill_keys(self::MONEY_FIELDS, 'decimal:2'),
