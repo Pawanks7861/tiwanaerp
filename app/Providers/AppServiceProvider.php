@@ -50,6 +50,7 @@ use App\Models\Core\Company;
 use App\Models\Core\CompanySetting;
 use App\Models\Core\CompanyUser;
 use App\Models\Core\DocumentNumberFormat;
+use App\Models\Core\DocumentTermsTemplate;
 use App\Models\Core\FinancialYear;
 use App\Models\Core\Role;
 use App\Models\Crm\Client;
@@ -95,6 +96,14 @@ use App\Models\Inventory\StockTransfer;
 use App\Models\Inventory\StockTransferItem;
 use App\Models\Inventory\StockTransferReceipt;
 use App\Models\Inventory\StockTransferReceiptItem;
+use App\Models\Masters\ScrapCategory;
+use App\Models\Masters\ScrapType;
+use App\Models\Scrap\ScrapAdjustment;
+use App\Models\Scrap\ScrapAdjustmentItem;
+use App\Models\Scrap\ScrapBalance;
+use App\Models\Scrap\ScrapGeneration;
+use App\Models\Scrap\ScrapGenerationItem;
+use App\Models\Scrap\ScrapLedgerEntry;
 use App\Models\Labour\Labour;
 use App\Models\Labour\LabourAdvance;
 use App\Models\Labour\LabourAttendance;
@@ -154,6 +163,15 @@ use App\Models\Subcontract\WorkOrder;
 use App\Models\Subcontract\WorkOrderItem;
 use App\Models\Subcontract\WorkOrderMilestone;
 use App\Models\User;
+use App\Models\Utilities\ElectricityBill;
+use App\Models\Utilities\ElectricityBillComponent;
+use App\Models\Utilities\ElectricityConnection;
+use App\Models\Utilities\ElectricityMeter;
+use App\Models\Utilities\ElectricityMeterReading;
+use App\Models\Utilities\ElectricityMeterTodReading;
+use App\Models\Utilities\ElectricityTariff;
+use App\Models\Utilities\ElectricityTariffComponent;
+use App\Models\Utilities\UtilitySite;
 use App\Models\Imports\DataImport;
 use App\Policies\ApprovalWorkflowPolicy;
 use App\Policies\DataImportPolicy;
@@ -186,6 +204,8 @@ use App\Policies\MasterPolicy;
 use App\Policies\Procurement\BidComparisonPolicy;
 use App\Policies\Procurement\GrnPolicy;
 use App\Policies\Procurement\MaterialRequestPolicy;
+use App\Policies\Scrap\ScrapAdjustmentPolicy;
+use App\Policies\Scrap\ScrapGenerationPolicy;
 use App\Policies\Procurement\PurchaseOrderPolicy;
 use App\Policies\Procurement\RfqPolicy;
 use App\Policies\Procurement\VendorQuotationPolicy;
@@ -204,6 +224,12 @@ use App\Policies\SitePolicy;
 use App\Policies\Subcontract\SubcontractorBillPolicy;
 use App\Policies\Subcontract\WorkOrderPolicy;
 use App\Policies\UserPolicy;
+use App\Policies\Utilities\ElectricityBillPolicy;
+use App\Policies\Utilities\ElectricityConnectionPolicy;
+use App\Policies\Utilities\ElectricityMeterPolicy;
+use App\Policies\Utilities\ElectricityMeterReadingPolicy;
+use App\Policies\Utilities\ElectricityTariffPolicy;
+use App\Policies\Utilities\UtilitySitePolicy;
 use App\Services\Files\Cad\CadPreviewManager;
 use App\Services\Files\LocalPreviewConverter;
 use App\Services\Files\PreviewConverter;
@@ -251,6 +277,7 @@ class AppServiceProvider extends ServiceProvider
             'company' => Company::class,
             'company_user' => CompanyUser::class,
             'company_setting' => CompanySetting::class,
+            'document_terms_template' => DocumentTermsTemplate::class,
             'financial_year' => FinancialYear::class,
             'role' => Role::class,
             'permission' => Permission::class,
@@ -355,6 +382,14 @@ class AppServiceProvider extends ServiceProvider
             'gate_pass_item' => \App\Models\Gate\GatePassItem::class,
             'gate_pass_return' => \App\Models\Gate\GatePassReturn::class,
             'gate_pass_return_item' => \App\Models\Gate\GatePassReturnItem::class,
+            'scrap_category' => ScrapCategory::class,
+            'scrap_type' => ScrapType::class,
+            'scrap_generation' => ScrapGeneration::class,
+            'scrap_generation_item' => ScrapGenerationItem::class,
+            'scrap_ledger_entry' => ScrapLedgerEntry::class,
+            'scrap_balance' => ScrapBalance::class,
+            'scrap_adjustment' => ScrapAdjustment::class,
+            'scrap_adjustment_item' => ScrapAdjustmentItem::class,
             'department' => \App\Models\Masters\Department::class,
             'weighbridge_receipt' => \App\Models\Weighbridge\WeighbridgeReceipt::class,
             'equipment_repair' => EquipmentRepair::class,
@@ -389,6 +424,15 @@ class AppServiceProvider extends ServiceProvider
             'document_version' => DocumentVersion::class,
             'task_overdue_alert' => TaskOverdueAlert::class,
             'report_export' => ReportExport::class,
+            'utility_site' => UtilitySite::class,
+            'electricity_connection' => ElectricityConnection::class,
+            'electricity_meter' => ElectricityMeter::class,
+            'electricity_tariff' => ElectricityTariff::class,
+            'electricity_tariff_component' => ElectricityTariffComponent::class,
+            'electricity_meter_reading' => ElectricityMeterReading::class,
+            'electricity_meter_tod_reading' => ElectricityMeterTodReading::class,
+            'electricity_bill' => ElectricityBill::class,
+            'electricity_bill_component' => ElectricityBillComponent::class,
         ]);
 
         // Platform super admin bypasses permission checks (never tenant isolation).
@@ -430,6 +474,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(EquipmentUsageLog::class, EquipmentUsageLogPolicy::class);
         Gate::policy(EquipmentFuelLog::class, EquipmentFuelLogPolicy::class);
         Gate::policy(\App\Models\Gate\GatePass::class, \App\Policies\Gate\GatePassPolicy::class);
+        Gate::policy(ScrapGeneration::class, ScrapGenerationPolicy::class);
+        Gate::policy(ScrapAdjustment::class, ScrapAdjustmentPolicy::class);
         Gate::policy(\App\Models\Weighbridge\WeighbridgeReceipt::class, \App\Policies\Weighbridge\WeighbridgeReceiptPolicy::class);
         Gate::policy(EquipmentRepair::class, EquipmentRepairPolicy::class);
         Gate::policy(Expense::class, ExpensePolicy::class);
@@ -445,6 +491,12 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Ncr::class, NcrPolicy::class);
         Gate::policy(Drawing::class, DrawingPolicy::class);
         Gate::policy(Document::class, DocumentPolicy::class);
+        Gate::policy(UtilitySite::class, UtilitySitePolicy::class);
+        Gate::policy(ElectricityConnection::class, ElectricityConnectionPolicy::class);
+        Gate::policy(ElectricityMeter::class, ElectricityMeterPolicy::class);
+        Gate::policy(ElectricityTariff::class, ElectricityTariffPolicy::class);
+        Gate::policy(ElectricityMeterReading::class, ElectricityMeterReadingPolicy::class);
+        Gate::policy(ElectricityBill::class, ElectricityBillPolicy::class);
         foreach (MasterPolicy::PERMISSIONS as $model => $prefix) {
             Gate::policy($model, MasterPolicy::containerKey($prefix));
         }

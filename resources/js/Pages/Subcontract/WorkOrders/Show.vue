@@ -1,6 +1,7 @@
 <script setup>
 import AttachmentPanel from '@/Components/Attachments/AttachmentPanel.vue';
 import ReasonDialog from '@/Components/Inventory/ReasonDialog.vue';
+import PdfActions from '@/Components/Pdf/PdfActions.vue';
 import ApprovalActions from '@/Components/Procurement/ApprovalActions.vue';
 import SubcontractNav from '@/Components/Subcontract/SubcontractNav.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
@@ -81,6 +82,7 @@ const statusNote = computed(() => {
                             <StatusBadge :status="order.status" :label="order.status_label" />
                         </div>
                         <p class="mt-1 text-sm text-slate-800">{{ order.subcontractor?.name }}<span v-if="order.subcontractor?.gstin" class="ml-2 font-mono text-xs text-slate-500">{{ order.subcontractor.gstin }}</span></p>
+                        <p v-if="order.subject" class="mt-1 text-sm font-medium text-slate-800">{{ order.subject }}</p>
                         <dl class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
                             <div><dt class="text-slate-500">WO date</dt><dd>{{ formatDate(order.wo_date) }}</dd></div>
                             <div><dt class="text-slate-500">Period</dt><dd>{{ order.start_date ? formatDate(order.start_date) : '—' }} – {{ order.end_date ? formatDate(order.end_date) : '—' }}</dd></div>
@@ -98,6 +100,12 @@ const statusNote = computed(() => {
                         </p>
                     </div>
                     <div class="flex flex-wrap gap-2 lg:justify-end">
+                        <PdfActions
+                            v-if="can.export"
+                            :title="`${order.wo_number}.pdf`"
+                            :view-url="route('projects.work-orders.pdf.view', [project.id, order.id])"
+                            :download-url="route('projects.work-orders.pdf', [project.id, order.id])"
+                        />
                         <AppButton v-if="can.create_bill" size="sm" icon="plus" :href="route('projects.subcontractor-bills.create', { project: project.id, work_order_id: order.id })">New bill</AppButton>
                         <AppButton v-if="can.update" size="sm" variant="secondary" icon="pencil" :href="route('projects.work-orders.edit', [project.id, order.id])">Edit</AppButton>
                         <AppButton v-if="can.submit" size="sm" @click="confirming = 'submit'">Submit for approval</AppButton>

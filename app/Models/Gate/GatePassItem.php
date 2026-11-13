@@ -6,6 +6,7 @@ use App\Enums\Gate\GatePassItemType;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Equipment\Equipment;
 use App\Models\Masters\Material;
+use App\Models\Masters\ScrapType;
 use App\Models\Masters\Unit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -56,5 +57,13 @@ class GatePassItem extends Model
     public function unit(): BelongsTo
     {
         return $this->belongsTo(Unit::class);
+    }
+
+    /**
+     * @return BelongsTo<ScrapType, $this>
+     */
+    public function scrapTypeMaster(): BelongsTo
+    {
+        return $this->belongsTo(ScrapType::class, 'scrap_type_id');
     }
 }

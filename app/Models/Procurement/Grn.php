@@ -3,8 +3,8 @@
 namespace App\Models\Procurement;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
 use App\Enums\Procurement\GrnStatus;
+use App\Models\Approval\ApprovalRequest;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
@@ -147,29 +147,36 @@ class Grn extends Model implements Approvable
 
     public function onApprovalSubmitted(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => GrnStatus::Submitted])->save();
+        $this->recordApprovalAudit('submitted', $from, GrnStatus::Submitted, $this->pendingApprovalRequest());
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $approverId = $this->approvalRequests()->first()?->actions()
-            ->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(GrnService::class)->markApproved($this, $approverId);
+        $from = $this->status;
+        app(GrnService::class)->markApproved($this, $this->completingApproverId($request));
+        $this->recordApprovalAudit('approved', $from, GrnStatus::Approved, $request);
     }
 
     public function onApprovalRejected(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => GrnStatus::Rejected])->save();
+        $this->recordApprovalAudit('rejected', $from, GrnStatus::Rejected, $this->latestApprovalRequest);
     }
 
     public function onApprovalSentBack(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => GrnStatus::Draft])->save();
+        $this->recordApprovalAudit('sent_back', $from, GrnStatus::Draft, $this->latestApprovalRequest);
     }
 
     public function onApprovalCancelled(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => GrnStatus::Draft])->save();
+        $this->recordApprovalAudit('withdrawn', $from, GrnStatus::Draft, $this->latestApprovalRequest);
     }
 }

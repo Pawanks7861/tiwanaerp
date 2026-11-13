@@ -3,7 +3,7 @@
 namespace App\Models\Subcontract;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
+use App\Models\Approval\ApprovalRequest;
 use App\Enums\Subcontract\WorkOrderStatus;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
@@ -27,15 +27,18 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * approved order is locked. Amounts are server-calculated by WorkOrderService.
  */
 #[Fillable([
-    'subcontractor_id', 'wo_date', 'scope', 'start_date', 'end_date', 'retention_percent', 'advance_amount',
-    'tax_rate_id', 'tds_percent', 'terms',
+    'subcontractor_id', 'wo_date', 'subject', 'template_profile', 'pdf_hide_quantities', 'scope',
+    'contractor_scope', 'company_scope', 'payment_terms', 'start_date', 'end_date', 'retention_percent',
+    'advance_amount', 'tax_rate_id', 'tds_percent', 'terms', 'safety_terms', 'penalty_terms',
+    'delay_penalty_per_day', 'maximum_penalty_percent', 'document_terms_template_id',
 ])]
 class WorkOrder extends Model implements Approvable
 {
     use Auditable, BelongsToCompany, Blameable, HasApprovals, HasAttachments, LocksWhenNotEditable, SoftDeletes;
 
     public const LIFECYCLE_COLUMNS = [
-        'status', 'approved_by', 'approved_at', 'closed_by', 'closed_at', 'cancellation_reason', 'updated_by', 'updated_at',
+        'status', 'approved_by', 'approved_at', 'closed_by', 'closed_at', 'cancellation_reason',
+        'terms_snapshot', 'updated_by', 'updated_at',
     ];
 
     protected function casts(): array
@@ -45,13 +48,16 @@ class WorkOrder extends Model implements Approvable
             'wo_date' => 'date',
             'start_date' => 'date',
             'end_date' => 'date',
+            'pdf_hide_quantities' => 'boolean',
             'retention_percent' => 'decimal:4',
             'advance_amount' => 'decimal:2',
             'tax_percent' => 'decimal:4',
             'tds_percent' => 'decimal:4',
+            'maximum_penalty_percent' => 'decimal:4',
             'subtotal' => 'decimal:2',
             'tax_amount' => 'decimal:2',
             'total_value' => 'decimal:2',
+            'terms_snapshot' => 'array',
             'approved_at' => 'datetime',
             'closed_at' => 'datetime',
         ];
@@ -161,12 +167,9 @@ class WorkOrder extends Model implements Approvable
         $this->forceFill(['status' => WorkOrderStatus::Submitted])->save();
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $approverId = $this->approvalRequests()->first()?->actions()
-            ->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(WorkOrderService::class)->approve($this, $approverId);
+        app(WorkOrderService::class)->approve($this, $this->completingApproverId($request));
     }
 
     public function onApprovalRejected(): void

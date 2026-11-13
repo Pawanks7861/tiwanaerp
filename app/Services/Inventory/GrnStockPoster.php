@@ -77,6 +77,15 @@ class GrnStockPoster
         return array_values(array_filter($this->postableItems($grn), fn (GrnItem $item) => ! in_array($item->id, $posted, false)));
     }
 
+    /**
+     * True when the GRN is Approved but at least one accepted line still lacks a grn_in row.
+     * Detection is ledger-based (no extra status column).
+     */
+    public function hasIncompletePosting(Grn $grn): bool
+    {
+        return $this->unpostedItems($grn) !== [];
+    }
+
     public function unitCost(GrnItem $item): Decimal
     {
         $discount = PurchaseOrderItem::query()->whereKey($item->purchase_order_item_id)->value('discount_percent') ?? '0';

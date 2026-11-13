@@ -2,6 +2,8 @@
 
 namespace App\Contracts;
 
+use App\Models\Approval\ApprovalRequest;
+
 /**
  * A document that goes through the generic approval engine (architecture J.1).
  * The hooks are called by ApprovalService inside its transaction; the document's own service
@@ -26,7 +28,10 @@ interface Approvable
 
     public function onApprovalSubmitted(): void;
 
-    public function onApprovalCompleted(): void;
+    /**
+     * @param  ApprovalRequest|null  $request  Completing request from ApprovalService (R14).
+     */
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void;
 
     public function onApprovalRejected(): void;
 

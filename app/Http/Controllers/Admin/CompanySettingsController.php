@@ -9,6 +9,7 @@ use App\Services\Files\Cad\CadPreviewManager;
 use App\Support\Math\Decimal;
 use App\Support\Boq\BoqCompanySettings;
 use App\Support\Crm\DefaultClientResolver;
+use App\Support\Pdf\DocumentPdfSettings;
 use App\Support\Procurement\ProcurementSettings;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\RedirectResponse;
@@ -44,6 +45,7 @@ class CompanySettingsController extends Controller
             'boq' => [
                 'advanced_calculations_enabled' => BoqCompanySettings::enabled($company),
             ],
+            'pdf' => DocumentPdfSettings::for($company),
             'crm' => [
                 'default_client' => app(DefaultClientResolver::class)->payload($company),
             ],
@@ -98,6 +100,38 @@ class CompanySettingsController extends Controller
         $client = app(DefaultClientResolver::class)->ensure($company);
 
         return back()->with('success', "Default client set to {$client->company_name}.");
+    }
+
+    public function updatePdf(Request $request): RedirectResponse
+    {
+        $company = $this->tenancy->require();
+        Gate::authorize('manageSettings', $company);
+
+        $data = $request->validate([
+            'signatory_name' => ['nullable', 'string', 'max:120'],
+            'signatory_designation' => ['nullable', 'string', 'max:120'],
+            'former_name' => ['nullable', 'string', 'max:200'],
+            'cin' => ['nullable', 'string', 'max:40'],
+            'computer_generated' => ['required', 'boolean'],
+        ]);
+
+        $map = [
+            DocumentPdfSettings::SIGNATORY_NAME => $data['signatory_name'] ?? null,
+            DocumentPdfSettings::SIGNATORY_DESIGNATION => $data['signatory_designation'] ?? null,
+            DocumentPdfSettings::FORMER_NAME => $data['former_name'] ?? null,
+            DocumentPdfSettings::CIN => $data['cin'] ?? null,
+            DocumentPdfSettings::COMPUTER_GENERATED => $data['computer_generated'] ? '1' : '0',
+        ];
+
+        foreach ($map as $key => $value) {
+            if ($value === null || $value === '') {
+                $company->settings()->where('key', $key)->delete();
+            } else {
+                $company->settings()->updateOrCreate(['key' => $key], ['value' => $value]);
+            }
+        }
+
+        return back()->with('success', 'PDF document settings updated.');
     }
 
     public function update(CompanyRequest $request): RedirectResponse

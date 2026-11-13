@@ -13,6 +13,7 @@ use App\Services\Procurement\MaterialRequestService;
 use App\Services\Projects\ProjectService;
 use App\Services\Quality\QualityChecklistService;
 use App\Support\Imports\Definitions\BoqItemsImportDefinition;
+use App\Support\Imports\Definitions\ElectricityMonthlyComparisonImportDefinition;
 use App\Support\Imports\Definitions\ExpenseImportDefinition;
 use App\Support\Imports\Definitions\InventoryOpeningImportDefinition;
 use App\Support\Imports\Definitions\LabourRegisterImportDefinition;
@@ -21,6 +22,8 @@ use App\Support\Imports\Definitions\MaterialRequestItemsImportDefinition;
 use App\Support\Imports\Definitions\PlanningTaskImportDefinition;
 use App\Support\Imports\Definitions\ProjectImportDefinition;
 use App\Support\Imports\Definitions\QualityChecklistImportDefinition;
+use App\Services\Utilities\ElectricityBillService;
+use App\Services\Utilities\ElectricityMeterReadingService;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 final class ImportCatalog
@@ -68,6 +71,10 @@ final class ImportCatalog
         $definitions['inventory.opening'] = new InventoryOpeningImportDefinition(app(StockAdjustmentService::class));
         $definitions['expenses'] = new ExpenseImportDefinition(app(ExpenseService::class));
         $definitions['labour'] = new LabourRegisterImportDefinition(app(MasterService::class));
+        $definitions['electricity.monthly_comparison'] = new ElectricityMonthlyComparisonImportDefinition(
+            app(ElectricityMeterReadingService::class),
+            app(ElectricityBillService::class),
+        );
 
         return $definitions;
     }

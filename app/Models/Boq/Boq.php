@@ -3,8 +3,8 @@
 namespace App\Models\Boq;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
 use App\Enums\Boq\BoqStatus;
+use App\Models\Approval\ApprovalRequest;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
@@ -174,29 +174,36 @@ class Boq extends Model implements Approvable
 
     public function onApprovalSubmitted(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => BoqStatus::Submitted])->save();
+        $this->recordApprovalAudit('submitted', $from, BoqStatus::Submitted, $this->pendingApprovalRequest());
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $request = $this->approvalRequests()->first();
-        $approverId = $request?->actions()->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(BoqService::class)->markApproved($this, $approverId);
+        $from = $this->status;
+        app(BoqService::class)->markApproved($this, $this->completingApproverId($request));
+        $this->recordApprovalAudit('approved', $from, BoqStatus::Approved, $request);
     }
 
     public function onApprovalRejected(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => BoqStatus::Rejected])->save();
+        $this->recordApprovalAudit('rejected', $from, BoqStatus::Rejected, $this->latestApprovalRequest);
     }
 
     public function onApprovalSentBack(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => BoqStatus::Draft])->save();
+        $this->recordApprovalAudit('sent_back', $from, BoqStatus::Draft, $this->latestApprovalRequest);
     }
 
     public function onApprovalCancelled(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => BoqStatus::Draft])->save();
+        $this->recordApprovalAudit('withdrawn', $from, BoqStatus::Draft, $this->latestApprovalRequest);
     }
 }

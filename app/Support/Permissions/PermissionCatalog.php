@@ -44,9 +44,10 @@ final class PermissionCatalog
             'inventory' => ['label' => 'Inventory', 'group' => 'Inventory', 'actions' => ['view', 'issue', 'transfer', 'return', 'adjust', 'approve_adjustment', 'view_valuation', 'import']],
 
             'labour' => ['label' => 'Labour', 'group' => 'Resources', 'actions' => [...$std, 'mark_attendance', 'approve_attendance', 'manage_payments', 'import']],
-            'subcontract' => ['label' => 'Subcontract', 'group' => 'Resources', 'actions' => [...$std, 'approve_wo', 'certify_bill', 'process', 'import']],
+            'subcontract' => ['label' => 'Subcontract', 'group' => 'Resources', 'actions' => [...$std, 'approve_wo', 'certify_bill', 'process', 'import', 'export']],
             'equipment' => ['label' => 'Equipment', 'group' => 'Resources', 'actions' => [...$std, 'assign', 'log_usage', 'import']],
             'gate_pass' => ['label' => 'Gate Pass', 'group' => 'Site', 'actions' => ['view', 'create', 'approve', 'verify']],
+            'scrap' => ['label' => 'Scrap', 'group' => 'Site', 'actions' => ['view', 'create', 'update', 'submit', 'approve', 'adjust', 'export', 'manage_master']],
 
             'expenses' => ['label' => 'Expenses', 'group' => 'Finance', 'actions' => [...$std, 'submit', 'approve', 'import']],
             'petty_cash' => ['label' => 'Petty Cash', 'group' => 'Finance', 'actions' => ['view', 'fund', 'spend']],
@@ -57,6 +58,25 @@ final class PermissionCatalog
             'quality' => ['label' => 'Quality', 'group' => 'Quality & Documents', 'actions' => ['view', 'create_inspection', 'perform_inspection', 'raise_ncr', 'close_ncr', 'import']],
             'drawings' => ['label' => 'Drawings', 'group' => 'Quality & Documents', 'actions' => ['view', 'upload', 'review', 'approve']],
             'documents' => ['label' => 'Documents', 'group' => 'Quality & Documents', 'actions' => ['view', 'upload', 'delete', 'manage_folders']],
+
+            'utilities' => ['label' => 'Utilities', 'group' => 'Utilities', 'actions' => ['view']],
+            'utilities.electricity' => [
+                'label' => 'Electricity Management',
+                'group' => 'Utilities',
+                'actions' => [
+                    'view',
+                    'manage_sites',
+                    'manage_connections',
+                    'manage_tariffs',
+                    'enter_readings',
+                    'create_bill',
+                    'review',
+                    'approve',
+                    'view_costs',
+                    'export',
+                    'import',
+                ],
+            ],
 
             'reports' => ['label' => 'Reports', 'group' => 'Reports', 'actions' => ['view', 'view_financial', 'export']],
 
@@ -71,6 +91,8 @@ final class PermissionCatalog
             'masters.warehouses' => ['label' => 'Warehouses', 'group' => 'Masters', 'actions' => $std],
             'masters.expense_categories' => ['label' => 'Expense Categories', 'group' => 'Masters', 'actions' => $std],
             'masters.departments' => ['label' => 'Departments', 'group' => 'Masters', 'actions' => $std],
+            'masters.scrap_categories' => ['label' => 'Scrap Categories', 'group' => 'Masters', 'actions' => $std],
+            'masters.scrap_types' => ['label' => 'Scrap Types', 'group' => 'Masters', 'actions' => $std],
 
             'admin.users' => ['label' => 'Users', 'group' => 'Administration', 'actions' => ['view', 'manage']],
             'admin.roles' => ['label' => 'Roles & Permissions', 'group' => 'Administration', 'actions' => ['view', 'manage']],

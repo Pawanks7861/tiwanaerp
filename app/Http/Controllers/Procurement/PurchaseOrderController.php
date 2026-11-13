@@ -21,8 +21,8 @@ use App\Models\User;
 use App\Services\Procurement\ProcurementQuantityService;
 use App\Services\Procurement\PurchaseOrderAmendmentService;
 use App\Services\Procurement\PurchaseOrderService;
-use App\Support\Format\IndianNumber;
 use App\Support\Pdf\PdfResponder;
+use App\Support\Pdf\PurchaseOrderPdfDataBuilder;
 use App\Support\Procurement\ProcurementSettings;
 use App\Support\Math\Decimal;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -273,23 +273,11 @@ class PurchaseOrderController extends Controller
     {
         Gate::authorize('export', $purchaseOrder);
 
-        $po = $purchaseOrder->load(['vendor', 'approver:id,name']);
-        $company = Company::query()->findOrFail($po->company_id);
-        $items = $po->items()->with('unit:id,symbol')->get();
+        $company = Company::query()->findOrFail($purchaseOrder->company_id);
+        $data = app(PurchaseOrderPdfDataBuilder::class)->build($purchaseOrder, $project, $company);
+        $pdf = Pdf::loadView('pdf.purchase-order', $data)->setPaper('a4');
 
-        $pdf = Pdf::loadView('pdf.purchase-order', [
-            'po' => $po,
-            'items' => $items,
-            'company' => $company,
-            'project' => $project,
-            'money' => fn ($v) => IndianNumber::money($v),
-            'qty' => fn ($v) => IndianNumber::quantity($v),
-            'words' => IndianNumber::rupeesInWords((string) $po->grand_total),
-            'placeOfSupply' => IndianState::tryFrom((string) $po->place_of_supply_state)?->label(),
-            'vendorState' => IndianState::tryFrom((string) $po->vendor_state_code)?->label(),
-        ])->setPaper('a4');
-
-        $name = $po->po_number.($po->revision_no > 0 ? '-R'.$po->revision_no : '').'.pdf';
+        $name = $purchaseOrder->po_number.($purchaseOrder->revision_no > 0 ? '-R'.$purchaseOrder->revision_no : '').'.pdf';
 
         return PdfResponder::send($pdf, $name, $request->routeIs('projects.purchase-orders.pdf.view'));
     }

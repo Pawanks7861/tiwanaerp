@@ -16,11 +16,26 @@ const props = defineProps({
     items: { type: Array, default: () => [] },
     weighbridge: { type: Object, default: null },
     options: { type: Object, required: true },
+    scrapBalances: { type: Object, default: () => ({}) },
 });
 
 const editing = computed(() => !!props.pass);
 let temp = 0;
-const blank = () => ({ _key: `n${++temp}`, item_type: 'material', material_id: null, equipment_id: null, description: '', quantity: null, unit_id: null, weight: null, scrap_type: '', rate: null, destination: '', remarks: '' });
+const blank = () => ({
+    _key: `n${++temp}`,
+    item_type: 'material',
+    material_id: null,
+    equipment_id: null,
+    description: '',
+    quantity: null,
+    unit_id: null,
+    weight: null,
+    scrap_category_id: null,
+    scrap_type_id: null,
+    rate: null,
+    destination: '',
+    remarks: '',
+});
 const form = useForm({
     site_id: props.pass?.site_id ?? null,
     direction: props.pass?.direction ?? 'out',
@@ -36,7 +51,7 @@ const form = useForm({
     reference_type: props.pass?.reference_type ?? '',
     reference_no: props.pass?.reference_no ?? '',
     remarks: props.pass?.remarks ?? '',
-    items: props.items.length ? props.items.map((i) => ({ _key: `i${++temp}`, ...i, scrap_type: i.scrap_type ?? '', destination: i.destination ?? '', remarks: i.remarks ?? '' })) : [blank()],
+    items: props.items.length ? props.items.map((i) => ({ _key: `i${++temp}`, ...i, scrap_category_id: i.scrap_category_id ?? null, scrap_type_id: i.scrap_type_id ?? null, destination: i.destination ?? '', remarks: i.remarks ?? '' })) : [blank()],
     weighbridge: {
         name: props.weighbridge?.name ?? '',
         slip_no: props.weighbridge?.slip_no ?? '',
@@ -63,13 +78,38 @@ function submit() {
         reference_type: d.reference_type || null,
         reference_no: d.reference_no || null,
         remarks: d.remarks || null,
-        items: d.items.map(({ _key, ...line }) => ({ ...line, scrap_type: line.scrap_type || null, destination: line.destination || null, remarks: line.remarks || null, rate: line.rate || null, weight: line.weight || null })),
+        items: d.items.map(({ _key, scrap_category_id, ...line }) => ({ ...line, scrap_type_id: line.scrap_type_id || null, destination: line.destination || null, remarks: line.remarks || null, rate: line.rate || null, weight: line.weight || null })),
     });
     const options = { preserveScroll: true };
     editing.value
         ? form.transform(transform).put(route('projects.gate-passes.update', [props.project.id, props.pass.id]), options)
         : form.transform(transform).post(route('projects.gate-passes.store', props.project.id), options);
 }
+
+const scrapTypesFor = (line) => {
+    const cat = line.scrap_category_id;
+
+    return cat ? props.options.scrapTypes.filter((t) => t.scrap_category_id === cat) : props.options.scrapTypes;
+};
+
+const onScrapType = (line) => {
+    const type = props.options.scrapTypes.find((t) => t.value === line.scrap_type_id);
+    if (type) {
+        line.unit_id = type.unit_id;
+        line.scrap_category_id = type.scrap_category_id;
+        if (!line.description) {
+            line.description = type.label;
+        }
+    }
+};
+
+const scrapAvailable = (line) => {
+    if (!line.scrap_type_id || !line.unit_id) {
+        return null;
+    }
+
+    return props.scrapBalances[`${line.scrap_type_id}|${line.unit_id}`] ?? '0';
+};
 </script>
 
 <template>
@@ -102,7 +142,11 @@ function submit() {
                         <DecimalInput v-model="line.quantity" label="Qty" required :decimals="4" :error="form.errors[`items.${index}.quantity`]" />
                         <FormSelect v-model="line.unit_id" label="Unit" :options="options.units" :error="form.errors[`items.${index}.unit_id`]" />
                         <DecimalInput v-model="line.weight" label="Weight" :decimals="4" :error="form.errors[`items.${index}.weight`]" />
-                        <FormInput v-if="line.item_type === 'scrap'" v-model="line.scrap_type" label="Scrap type" :error="form.errors[`items.${index}.scrap_type`]" />
+                        <template v-if="line.item_type === 'scrap'">
+                            <FormSelect v-model="line.scrap_category_id" label="Scrap category" :options="options.scrapCategories" :error="form.errors[`items.${index}.scrap_category_id`]" />
+                            <SearchSelect v-model="line.scrap_type_id" label="Scrap type" required :options="scrapTypesFor(line)" :error="form.errors[`items.${index}.scrap_type_id`]" @update:model-value="onScrapType(line)" />
+                            <p v-if="line.scrap_type_id" class="text-xs text-slate-500">Available: {{ scrapAvailable(line) ?? '—' }}</p>
+                        </template>
                         <FormInput v-if="line.item_type === 'steel' || line.item_type === 'scrap'" v-model="line.destination" label="Destination" :error="form.errors[`items.${index}.destination`]" />
                         <button v-if="form.items.length > 1" type="button" class="text-xs text-red-600" @click="form.items.splice(index, 1)">Remove</button>
                     </li>

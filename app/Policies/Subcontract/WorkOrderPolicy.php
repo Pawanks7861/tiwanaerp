@@ -68,6 +68,11 @@ class WorkOrderPolicy
         return $this->manages($user, $order) && in_array($order->status, [WorkOrderStatus::Approved, WorkOrderStatus::InProgress], true);
     }
 
+    public function export(User $user, WorkOrder $order): bool
+    {
+        return $user->can('subcontract.export') && $this->projects->view($user, $order->project);
+    }
+
     private function manages(User $user, WorkOrder $order): bool
     {
         return $user->can('subcontract.approve_wo') && $this->projects->view($user, $order->project);

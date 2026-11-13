@@ -102,12 +102,17 @@ class MaterialIssueService
     }
 
     /**
-     * Final approval (inside the approval engine's transaction). Insufficient stock aborts the
-     * whole approval. Repeating it on a posted issue changes nothing.
-     */
-    /**
-     * Fuel drawn for equipment. Posts an approved material issue (stock and project cost once)
-     * and returns the posted line so the fuel log can point at it.
+     * Privileged fuel path (R4 / Phase 1): creates Draft → Submitted → Approved issue and posts
+     * stock + project cost in one DB transaction **without** ApprovalService.
+     *
+     * Authorization today:
+     * - HTTP/API: `EquipmentFuelLogPolicy::create` requires `equipment.log_usage` + project view.
+     * - Called only from `EquipmentFuelService` when `fuel_added` is positive.
+     * - No material-issue approval workflow step; the acting user id is stored as `approved_by`.
+     *
+     * Do not expand this bypass to general issues. Do not add an approval requirement here without
+     * an explicit product decision. Idempotency of stock still relies on `StockLedgerService` and
+     * `post()` early-return when the issue is already Approved.
      *
      * @param  array{material_id: int, quantity: string, issue_date: string, issued_to_name: string, warehouse_id: int, remarks?: string|null}  $data
      */

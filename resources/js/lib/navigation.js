@@ -15,6 +15,8 @@ export const masters = [
     { slug: 'equipment', label: 'Equipment Register', icon: 'wrench', permission: 'equipment.view' },
     { slug: 'equipment-types', label: 'Equipment Types', icon: 'cog', permission: 'masters.equipment_types.view' },
     { slug: 'warehouses', label: 'Warehouses', icon: 'archive', permission: 'masters.warehouses.view' },
+    { slug: 'scrap-categories', label: 'Scrap Categories', icon: 'tag', permission: 'masters.scrap_categories.view' },
+    { slug: 'scrap-types', label: 'Scrap Types', icon: 'cube', permission: 'masters.scrap_types.view' },
     { slug: 'expense-categories', label: 'Expense Categories', icon: 'banknotes', permission: 'masters.expense_categories.view' },
 ];
 
@@ -86,13 +88,30 @@ export function buildNavigation({ can, isSuperAdmin, multiCompany = false, advan
                     href: route('gate-passes.index'),
                     active: route().current('gate-passes.*') || route().current('projects.gate-passes.*'),
                 },
+                can('scrap.view') && {
+                    label: 'Scrap Management',
+                    icon: 'archive',
+                    href: route('scrap.dashboard'),
+                    active: route().current('scrap.*') || route().current('projects.scrap.*'),
+                },
+            ],
+        },
+        {
+            title: 'Utilities',
+            items: [
+                (can('utilities.view') || can('utilities.electricity.view')) && {
+                    label: 'Electricity',
+                    icon: 'cog',
+                    href: route('utilities.electricity.hub'),
+                    active: route().current('utilities.electricity.*'),
+                },
             ],
         },
         {
             title: 'Masters',
             items: [
                 ...masters
-                    .filter((m) => can(m.permission))
+                    .filter((m) => can(m.permission) || (m.slug.startsWith('scrap-') && can('scrap.manage_master')))
                     .map((m) => ({
                         label: m.label,
                         icon: m.icon,
@@ -157,6 +176,12 @@ export function buildNavigation({ can, isSuperAdmin, multiCompany = false, advan
                     icon: 'cog',
                     href: route('admin.company.edit'),
                     active: route().current('admin.company.*'),
+                },
+                can('admin.settings.view') && {
+                    label: 'Document Terms',
+                    icon: 'document',
+                    href: route('admin.document-terms.index'),
+                    active: route().current('admin.document-terms.*'),
                 },
                 can('tally.view') && {
                     label: 'TallyPrime',

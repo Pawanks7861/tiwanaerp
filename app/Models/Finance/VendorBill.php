@@ -3,7 +3,7 @@
 namespace App\Models\Finance;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
+use App\Models\Approval\ApprovalRequest;
 use App\Enums\CostHead;
 use App\Enums\Finance\VendorBillStatus;
 use App\Enums\Finance\VendorBillType;
@@ -165,12 +165,9 @@ class VendorBill extends Model implements Approvable
         $this->forceFill(['status' => VendorBillStatus::Submitted])->save();
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $approverId = $this->approvalRequests()->first()?->actions()
-            ->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(VendorBillService::class)->approve($this, $approverId);
+        app(VendorBillService::class)->approve($this, $this->completingApproverId($request));
     }
 
     public function onApprovalRejected(): void

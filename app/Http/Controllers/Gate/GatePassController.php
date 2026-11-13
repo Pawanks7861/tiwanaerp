@@ -8,6 +8,7 @@ use App\Enums\Gate\GatePassStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
+use App\Http\Controllers\Scrap\ScrapPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Equipment\Equipment;
 use App\Models\Gate\GatePass;
@@ -87,6 +88,8 @@ class GatePassController extends Controller
                 'unit' => $item->unit?->symbol,
                 'weight' => $item->weight,
                 'scrap_type' => $item->scrap_type,
+                'scrap_type_id' => $item->scrap_type_id,
+                'scrap_category_id' => $item->scrapType?->scrap_category_id,
                 'rate' => $item->rate,
                 'destination' => $item->destination,
                 'material' => $item->material?->name,
@@ -220,7 +223,7 @@ class GatePassController extends Controller
 
     private function form(Project $project, ?GatePass $pass): Response
     {
-        $pass?->load(['items', 'weighbridgeReceipt']);
+        $pass?->load(['items.scrapType', 'weighbridgeReceipt']);
 
         return Inertia::render('Gate/Form', [
             'project' => ProjectHeader::for($project),
@@ -234,6 +237,8 @@ class GatePassController extends Controller
                 'unit_id' => $item->unit_id,
                 'weight' => $item->weight,
                 'scrap_type' => $item->scrap_type,
+                'scrap_type_id' => $item->scrap_type_id,
+                'scrap_category_id' => $item->scrapType?->scrap_category_id,
                 'rate' => $item->rate,
                 'destination' => $item->destination,
                 'remarks' => $item->remarks,
@@ -248,7 +253,10 @@ class GatePassController extends Controller
                 'vendors' => ProcurementPresenter::vendorOptions(),
                 'equipment' => Equipment::query()->active()->orderBy('name')->get(['id', 'code', 'name'])
                     ->map(fn (Equipment $e) => ['value' => $e->id, 'label' => $e->name, 'description' => $e->code])->all(),
+                'scrapCategories' => ScrapPresenter::categoryOptions(),
+                'scrapTypes' => ScrapPresenter::typeOptions(),
             ],
+            'scrapBalances' => ScrapPresenter::balanceMap($project),
         ]);
     }
 
@@ -340,6 +348,7 @@ class GatePassController extends Controller
             'items.*.unit_id' => ['nullable', 'integer'],
             'items.*.weight' => ['nullable', 'numeric', 'decimal:0,4', 'min:0'],
             'items.*.scrap_type' => ['nullable', 'string', 'max:80'],
+            'items.*.scrap_type_id' => ['nullable', 'integer'],
             'items.*.rate' => ['nullable', 'numeric', 'decimal:0,4', 'min:0'],
             'items.*.destination' => ['nullable', 'string', 'max:150'],
             'items.*.remarks' => ['nullable', 'string', 'max:500'],

@@ -16,6 +16,7 @@ use App\Models\Masters\LabourTrade;
 use App\Models\Masters\TaxRate;
 use App\Models\Masters\Unit;
 use App\Services\Numbering\DocumentNumberService;
+use App\Services\Scrap\ScrapMasterBootstrapper;
 use App\Support\Math\Decimal;
 use App\Support\Permissions\DefaultRoles;
 use App\Support\Permissions\PermissionCatalog;
@@ -49,6 +50,7 @@ class CompanyProvisioner
                     $roles = $this->seedRoles($company);
                     $this->grantMissingSystemRoleDefaults($company);
                     $this->seedMasters();
+                    app(ScrapMasterBootstrapper::class)->seedForCompany($company);
                     $this->seedFinancialYear($company);
                     $this->seedApprovalWorkflows($roles);
                 });
@@ -263,6 +265,8 @@ class CompanyProvisioner
             'retention_release' => ['Retention Release', [$pm, $role(DefaultRoles::DIRECTOR)]],
             'boq' => ['BOQ', [$pm, $role(DefaultRoles::DIRECTOR)]],
             'gate_pass' => ['Gate Pass', [$pm]],
+            'scrap_generation' => ['Scrap Generation', [$pm]],
+            'scrap_adjustment' => ['Scrap Adjustment', [$pm]],
         ];
 
         foreach ($workflows as $type => [$name, $steps]) {

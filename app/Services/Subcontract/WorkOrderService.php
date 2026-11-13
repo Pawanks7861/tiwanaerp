@@ -5,6 +5,8 @@ namespace App\Services\Subcontract;
 use App\Enums\Subcontract\MilestoneStatus;
 use App\Enums\Subcontract\SubcontractorBillStatus;
 use App\Enums\Subcontract\WorkOrderStatus;
+use App\Enums\Subcontract\WorkOrderTemplateProfile;
+use App\Models\Core\DocumentTermsTemplate;
 use App\Models\Masters\Subcontractor;
 use App\Models\Masters\TaxRate;
 use App\Models\Masters\Unit;
@@ -19,6 +21,7 @@ use App\Services\Numbering\DocumentNumberService;
 use App\Services\Resources\Concerns\ResolvesProjectRefs;
 use App\Support\Math\Decimal;
 use App\Support\Permissions\CompanyPermission;
+use App\Support\Transitions\DocumentTransition;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -125,6 +128,7 @@ class WorkOrderService
                 'status' => WorkOrderStatus::Approved,
                 'approved_by' => $approverId,
                 'approved_at' => now(),
+                'terms_snapshot' => $this->buildTermsSnapshot($locked),
             ])->save();
             $order->setRawAttributes($locked->getAttributes(), true);
         });
@@ -207,15 +211,18 @@ class WorkOrderService
     private function transition(WorkOrder $order, array $from, WorkOrderStatus $to, User $user, array $extra = []): void
     {
         DB::transaction(function () use ($order, $from, $to, $extra) {
-            $locked = WorkOrder::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $locked = DocumentTransition::lock($order);
             if ($locked->status === $to) {
                 return;
             }
-            if (! in_array($locked->status, $from, true)) {
-                throw ValidationException::withMessages(['work_order' => "A {$locked->status->label()} work order cannot be marked {$to->label()}."]);
-            }
+            DocumentTransition::assertStatus(
+                $locked,
+                $from,
+                'work_order',
+                "A {$locked->status->label()} work order cannot be marked {$to->label()}.",
+            );
 
-            $locked->forceFill(['status' => $to, ...$extra])->save();
+            DocumentTransition::apply($locked, $to, $extra);
             $order->setRawAttributes($locked->getAttributes(), true);
         });
     }
@@ -244,17 +251,72 @@ class WorkOrderService
             throw ValidationException::withMessages(['end_date' => 'The end date cannot be before the start date.']);
         }
 
+        $profile = blank($data['template_profile'] ?? null)
+            ? null
+            : (WorkOrderTemplateProfile::tryFrom((string) $data['template_profile'])?->value
+                ?? throw ValidationException::withMessages(['template_profile' => 'Choose a valid work order profile.']));
+
+        $templateId = blank($data['document_terms_template_id'] ?? null) ? null : (int) $data['document_terms_template_id'];
+        $template = null;
+        if ($templateId !== null) {
+            $template = DocumentTermsTemplate::query()
+                ->whereKey($templateId)
+                ->where('document_type', 'work_order')
+                ->where('is_active', true)
+                ->first()
+                ?? throw ValidationException::withMessages(['document_terms_template_id' => 'Choose an active work order terms template.']);
+        }
+
+        $fill = static fn (?string $incoming, ?string $fromTemplate): ?string => blank($incoming) ? $fromTemplate : $incoming;
+
         return [
             'subcontractor_id' => $subcontractor->id,
             'wo_date' => $data['wo_date'],
+            'subject' => blank($data['subject'] ?? null) ? null : mb_substr(trim((string) $data['subject']), 0, 255),
+            'template_profile' => $profile ?? $template?->template_profile,
+            'pdf_hide_quantities' => (bool) ($data['pdf_hide_quantities'] ?? false),
             'scope' => $data['scope'] ?? null,
+            'contractor_scope' => $fill($data['contractor_scope'] ?? null, $template?->contractor_scope),
+            'company_scope' => $fill($data['company_scope'] ?? null, $template?->company_scope),
+            'payment_terms' => $fill($data['payment_terms'] ?? null, $template?->payment_terms),
             'start_date' => $data['start_date'] ?? null,
             'end_date' => $data['end_date'] ?? null,
             'retention_percent' => $this->percent($data['retention_percent'] ?? null, 'retention_percent')->toString(),
             'advance_amount' => $this->amount($data['advance_amount'] ?? null, 'advance_amount')->toMoney(),
             'tax_rate_id' => blank($data['tax_rate_id'] ?? null) ? null : (int) $data['tax_rate_id'],
             'tds_percent' => $this->percent($data['tds_percent'] ?? null, 'tds_percent')->toString(),
-            'terms' => $data['terms'] ?? null,
+            'terms' => $fill($data['terms'] ?? null, $template?->general_terms),
+            'safety_terms' => $fill($data['safety_terms'] ?? null, $template?->safety_terms),
+            'penalty_terms' => $fill($data['penalty_terms'] ?? null, $template?->penalty_terms),
+            'delay_penalty_per_day' => blank($data['delay_penalty_per_day'] ?? null) ? null : mb_substr(trim((string) $data['delay_penalty_per_day']), 0, 40),
+            'maximum_penalty_percent' => blank($data['maximum_penalty_percent'] ?? null)
+                ? null
+                : $this->percent($data['maximum_penalty_percent'], 'maximum_penalty_percent')->toString(),
+            'document_terms_template_id' => $templateId,
+        ];
+    }
+
+    /**
+     * Freeze document wording at approval so later template edits cannot rewrite history.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildTermsSnapshot(WorkOrder $order): array
+    {
+        return [
+            'subject' => $order->subject,
+            'template_profile' => $order->template_profile,
+            'introduction' => $order->scope,
+            'contractor_scope' => $order->contractor_scope,
+            'company_scope' => $order->company_scope,
+            'payment_terms' => $order->payment_terms,
+            'safety_terms' => $order->safety_terms,
+            'general_terms' => $order->terms,
+            'penalty_terms' => $order->penalty_terms,
+            'delay_penalty_per_day' => $order->delay_penalty_per_day,
+            'maximum_penalty_percent' => $order->maximum_penalty_percent,
+            'document_terms_template_id' => $order->document_terms_template_id,
+            'snapshotted_at' => now()->toIso8601String(),
         ];
     }
 

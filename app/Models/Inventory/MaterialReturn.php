@@ -3,8 +3,8 @@
 namespace App\Models\Inventory;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
 use App\Enums\Inventory\InventoryDocumentStatus;
+use App\Models\Approval\ApprovalRequest;
 use App\Enums\Inventory\MaterialReturnType;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
@@ -144,12 +144,9 @@ class MaterialReturn extends Model implements Approvable
         $this->forceFill(['status' => InventoryDocumentStatus::Submitted])->save();
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $approverId = $this->approvalRequests()->first()?->actions()
-            ->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(MaterialReturnService::class)->post($this, $approverId);
+        app(MaterialReturnService::class)->post($this, $this->completingApproverId($request));
     }
 
     public function onApprovalRejected(): void

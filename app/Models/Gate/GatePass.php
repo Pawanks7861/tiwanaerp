@@ -3,8 +3,8 @@
 namespace App\Models\Gate;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
 use App\Enums\Gate\GatePassDirection;
+use App\Models\Approval\ApprovalRequest;
 use App\Enums\Gate\GatePassStatus;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
@@ -138,29 +138,36 @@ class GatePass extends Model implements Approvable
 
     public function onApprovalSubmitted(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => GatePassStatus::Submitted])->save();
+        $this->recordApprovalAudit('submitted', $from, GatePassStatus::Submitted, $this->pendingApprovalRequest());
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $approverId = $this->approvalRequests()->first()?->actions()
-            ->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(GatePassService::class)->markApproved($this, $approverId);
+        $from = $this->status;
+        app(GatePassService::class)->markApproved($this, $this->completingApproverId($request));
+        $this->recordApprovalAudit('approved', $from, GatePassStatus::Approved, $request);
     }
 
     public function onApprovalRejected(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => GatePassStatus::Rejected])->save();
+        $this->recordApprovalAudit('rejected', $from, GatePassStatus::Rejected, $this->latestApprovalRequest);
     }
 
     public function onApprovalSentBack(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => GatePassStatus::Draft])->save();
+        $this->recordApprovalAudit('sent_back', $from, GatePassStatus::Draft, $this->latestApprovalRequest);
     }
 
     public function onApprovalCancelled(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => GatePassStatus::Draft])->save();
+        $this->recordApprovalAudit('withdrawn', $from, GatePassStatus::Draft, $this->latestApprovalRequest);
     }
 }

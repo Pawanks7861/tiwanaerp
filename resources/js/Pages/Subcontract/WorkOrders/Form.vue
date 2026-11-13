@@ -2,6 +2,7 @@
 import DecimalInput from '@/Components/Form/DecimalInput.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
 import FormSelect from '@/Components/Form/FormSelect.vue';
+import FormSwitch from '@/Components/Form/FormSwitch.vue';
 import SearchSelect from '@/Components/Form/SearchSelect.vue';
 import SubcontractNav from '@/Components/Subcontract/SubcontractNav.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
@@ -26,7 +27,14 @@ let tempId = 0;
 const form = useForm({
     subcontractor_id: props.order?.subcontractor_id ?? null,
     wo_date: props.order?.wo_date ?? props.today,
+    subject: props.order?.subject ?? '',
+    template_profile: props.order?.template_profile ?? null,
+    pdf_hide_quantities: props.order?.pdf_hide_quantities ?? false,
+    document_terms_template_id: props.order?.document_terms_template_id ?? null,
     scope: props.order?.scope ?? '',
+    contractor_scope: props.order?.contractor_scope ?? '',
+    company_scope: props.order?.company_scope ?? '',
+    payment_terms: props.order?.payment_terms ?? '',
     start_date: props.order?.start_date ?? null,
     end_date: props.order?.end_date ?? null,
     retention_percent: props.order?.retention_percent ?? null,
@@ -34,9 +42,31 @@ const form = useForm({
     tax_rate_id: props.order?.tax_rate_id ?? null,
     tds_percent: props.order?.tds_percent ?? null,
     terms: props.order?.terms ?? '',
+    safety_terms: props.order?.safety_terms ?? '',
+    penalty_terms: props.order?.penalty_terms ?? '',
+    delay_penalty_per_day: props.order?.delay_penalty_per_day ?? '',
+    maximum_penalty_percent: props.order?.maximum_penalty_percent ?? null,
     items: (props.order?.items ?? []).map((i) => ({ _key: `i${++tempId}`, ...i })),
     milestones: (props.order?.milestones ?? []).map((m) => ({ _key: `m${++tempId}`, ...m })),
 });
+
+const templatesById = Object.fromEntries((props.options.terms_templates ?? []).map((t) => [t.value, t]));
+function onTemplate(id) {
+    form.document_terms_template_id = id;
+    const t = templatesById[id];
+    if (!t) {
+        return;
+    }
+    if (t.template_profile) {
+        form.template_profile = t.template_profile;
+    }
+    form.contractor_scope = t.contractor_scope || form.contractor_scope;
+    form.company_scope = t.company_scope || form.company_scope;
+    form.payment_terms = t.payment_terms || form.payment_terms;
+    form.safety_terms = t.safety_terms || form.safety_terms;
+    form.terms = t.general_terms || form.terms;
+    form.penalty_terms = t.penalty_terms || form.penalty_terms;
+}
 
 const boqById = Object.fromEntries(props.options.boq_items.map((b) => [b.value, b]));
 function addItem() {
@@ -73,8 +103,17 @@ const err = (prefix, index, field) => form.errors[`${prefix}.${index}.${field}`]
 function submit() {
     const transform = (d) => ({
         ...d,
+        subject: d.subject || null,
+        template_profile: d.template_profile || null,
+        document_terms_template_id: d.document_terms_template_id || null,
         scope: d.scope || null,
+        contractor_scope: d.contractor_scope || null,
+        company_scope: d.company_scope || null,
+        payment_terms: d.payment_terms || null,
         terms: d.terms || null,
+        safety_terms: d.safety_terms || null,
+        penalty_terms: d.penalty_terms || null,
+        delay_penalty_per_day: d.delay_penalty_per_day || null,
         items: d.items.map(({ _key, ...i }) => ({ ...i, description: i.description || null })),
         milestones: d.milestones.map(({ _key, ...m }) => m),
     });
@@ -92,24 +131,35 @@ function submit() {
                 <div class="p-4 sm:p-5">
                     <Link :href="route('projects.work-orders.index', project.id)" class="text-xs font-medium text-slate-500 hover:text-slate-700">Work orders</Link>
                     <h2 class="text-lg font-semibold text-slate-900">{{ editing ? `Edit ${order.wo_number}` : 'New work order' }}</h2>
-                    <p class="text-xs text-slate-500">Items link to the current approved BOQ so certified work is costed against the right BOQ line.</p>
+                    <p class="text-xs text-slate-500">PDF sections use the fields below. Choosing a terms template copies defaults you can still edit for this order.</p>
                 </div>
                 <p v-if="form.errors.work_order" class="border-t border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 sm:px-5">{{ form.errors.work_order }}</p>
                 <div class="grid gap-4 border-t border-line p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-4">
                     <SearchSelect v-model="form.subcontractor_id" label="Subcontractor" required :options="options.subcontractors" class="sm:col-span-2" :error="form.errors.subcontractor_id" />
                     <FormInput v-model="form.wo_date" type="date" label="WO date" required :error="form.errors.wo_date" />
-                    <div />
+                    <FormSelect v-model="form.template_profile" label="PDF profile" placeholder="General" :options="options.profiles" :error="form.errors.template_profile" />
+                    <FormInput v-model="form.subject" label="Subject" maxlength="255" class="sm:col-span-2 lg:col-span-4" :error="form.errors.subject" />
+                    <FormSelect
+                        v-model="form.document_terms_template_id"
+                        label="Terms template"
+                        placeholder="None"
+                        :options="options.terms_templates"
+                        class="sm:col-span-2"
+                        :error="form.errors.document_terms_template_id"
+                        @update:model-value="onTemplate"
+                    />
+                    <FormSwitch v-model="form.pdf_hide_quantities" label="Rate-only PDF" help="Hide quantity and amount columns (rate contract)." class="sm:col-span-2" />
                     <FormInput v-model="form.start_date" type="date" label="Start" :error="form.errors.start_date" />
                     <FormInput v-model="form.end_date" type="date" label="End" :min="form.start_date" :error="form.errors.end_date" />
                     <FormSelect v-model="form.tax_rate_id" label="GST" placeholder="No GST" :options="options.tax_rates" :error="form.errors.tax_rate_id" />
                     <DecimalInput v-model="form.tds_percent" label="TDS" suffix="%" :decimals="4" :error="form.errors.tds_percent" />
                     <DecimalInput v-model="form.retention_percent" label="Retention" suffix="%" :decimals="4" :error="form.errors.retention_percent" />
                     <DecimalInput v-model="form.advance_amount" label="Mobilisation advance" prefix="₹" :error="form.errors.advance_amount" />
-                    <FormInput v-model="form.scope" label="Scope of work" multiline :rows="3" maxlength="5000" class="sm:col-span-2 lg:col-span-4" :error="form.errors.scope" />
+                    <FormInput v-model="form.scope" label="Introduction / scope" multiline :rows="3" maxlength="10000" class="sm:col-span-2 lg:col-span-4" :error="form.errors.scope" />
                 </div>
             </AppCard>
 
-            <AppCard title="Items" :subtitle="`${form.items.length} item(s) · amounts are a preview`" :padded="false">
+            <AppCard title="Items / BOQ scope" :subtitle="`${form.items.length} item(s) · amounts are a preview`" :padded="false">
                 <template #actions><AppButton size="sm" variant="secondary" icon="plus" @click="addItem">Add item</AppButton></template>
                 <p v-if="form.errors.items" class="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ form.errors.items }}</p>
                 <EmptyState v-if="!form.items.length" icon="clipboard" title="No items" description="Add the work items this subcontractor will execute." />
@@ -134,6 +184,37 @@ function submit() {
             </AppCard>
 
             <div class="grid gap-4 lg:grid-cols-2">
+                <AppCard title="Contractor scope">
+                    <FormInput v-model="form.contractor_scope" label="Contractor responsibilities" multiline :rows="5" maxlength="10000" :error="form.errors.contractor_scope" />
+                </AppCard>
+                <AppCard title="Company scope">
+                    <FormInput v-model="form.company_scope" label="Company-supplied items / responsibilities" multiline :rows="5" maxlength="10000" :error="form.errors.company_scope" />
+                </AppCard>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+                <AppCard title="Payment terms">
+                    <FormInput v-model="form.payment_terms" label="Billing / payment terms" multiline :rows="4" maxlength="10000" :error="form.errors.payment_terms" />
+                </AppCard>
+                <AppCard title="Penalty">
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <FormInput v-model="form.delay_penalty_per_day" label="Delay penalty / day" maxlength="40" :error="form.errors.delay_penalty_per_day" />
+                        <DecimalInput v-model="form.maximum_penalty_percent" label="Max penalty" suffix="%" :decimals="4" :error="form.errors.maximum_penalty_percent" />
+                        <FormInput v-model="form.penalty_terms" label="Penalty notes" multiline :rows="3" maxlength="10000" class="sm:col-span-2" :error="form.errors.penalty_terms" />
+                    </div>
+                </AppCard>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+                <AppCard title="Safety / compliance">
+                    <FormInput v-model="form.safety_terms" label="Safety terms" multiline :rows="4" maxlength="10000" :error="form.errors.safety_terms" />
+                </AppCard>
+                <AppCard title="General terms">
+                    <FormInput v-model="form.terms" label="General terms & conditions" multiline :rows="4" maxlength="10000" :error="form.errors.terms" />
+                </AppCard>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
                 <AppCard title="Payment milestones" :subtitle="`Total ${formatPercent(milestoneTotal.toString())} of 100%`" :padded="false">
                     <template #actions><AppButton size="sm" variant="secondary" icon="plus" @click="addMilestone">Add</AppButton></template>
                     <p v-if="form.errors.milestones" class="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ form.errors.milestones }}</p>
@@ -155,7 +236,6 @@ function submit() {
                         <div class="flex justify-between"><dt class="text-slate-500">GST {{ formatPercent(taxPercent) }}</dt><dd class="tabular">{{ formatMoney(tax.toFixed(2)) }}</dd></div>
                         <div class="flex justify-between border-t border-line pt-2 text-base font-semibold"><dt>Work order value</dt><dd class="tabular">{{ formatMoney(total.toFixed(2)) }}</dd></div>
                     </dl>
-                    <FormInput v-model="form.terms" label="Terms & conditions" multiline :rows="4" maxlength="5000" class="mt-4" :error="form.errors.terms" />
                 </AppCard>
             </div>
 

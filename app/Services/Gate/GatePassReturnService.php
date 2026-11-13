@@ -4,16 +4,21 @@ namespace App\Services\Gate;
 
 use App\Enums\Equipment\EquipmentLocationType;
 use App\Enums\Gate\GatePassDirection;
+use App\Enums\Gate\GatePassItemType;
 use App\Enums\Gate\GatePassReturnCondition;
 use App\Enums\Gate\GatePassReturnStatus;
 use App\Enums\Gate\GatePassStatus;
+use App\Enums\Scrap\ScrapLedgerTxnType;
 use App\Models\Equipment\Equipment;
 use App\Models\Gate\GatePass;
 use App\Models\Gate\GatePassItem;
 use App\Models\Gate\GatePassReturn;
 use App\Models\Gate\GatePassReturnItem;
+use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Equipment\EquipmentLocationService;
+use App\Services\Scrap\ScrapLedgerService;
+use App\Services\Scrap\ScrapMovement;
 use App\Support\Math\Decimal;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -23,7 +28,10 @@ use Illuminate\Validation\ValidationException;
  */
 class GatePassReturnService
 {
-    public function __construct(private readonly EquipmentLocationService $locations) {}
+    public function __construct(
+        private readonly EquipmentLocationService $locations,
+        private readonly ScrapLedgerService $scrapLedger,
+    ) {}
 
     /**
      * @param  list<array{gate_pass_item_id:int, quantity:numeric-string|float|int, condition?:string, condition_notes?:?string}>  $lines
@@ -98,6 +106,8 @@ class GatePassReturnService
                 'verified_at' => now(),
             ])->save();
 
+            $project = Project::query()->findOrFail($pass->project_id);
+
             foreach ($return->items()->with('gatePassItem')->get() as $line) {
                 $item = $line->gatePassItem;
                 if ($item?->equipment_id) {
@@ -110,6 +120,25 @@ class GatePassReturnService
                             'remarks' => "Returned on {$pass->pass_number}",
                         ], $user);
                     }
+                }
+
+                if ($item
+                    && $item->item_type === GatePassItemType::Scrap
+                    && $item->scrap_type_id
+                    && $item->unit_id) {
+                    $this->scrapLedger->post(new ScrapMovement(
+                        reference: $line,
+                        type: ScrapLedgerTxnType::GatePassReturnIn,
+                        project: $project,
+                        scrapTypeId: (int) $item->scrap_type_id,
+                        unitId: (int) $item->unit_id,
+                        quantity: Decimal::of($line->quantity),
+                        date: $return->return_date,
+                        referenceNumber: $pass->pass_number,
+                        remarks: "Return on {$pass->pass_number}",
+                        userId: $user->id,
+                        errorKey: 'return',
+                    ));
                 }
             }
 
@@ -176,11 +205,13 @@ class GatePassReturnService
         if (! $pass->returnable || $pass->direction !== GatePassDirection::Out) {
             throw ValidationException::withMessages(['gate_pass' => 'Only a returnable outward pass can record returns.']);
         }
-        if (! in_array($pass->status, [GatePassStatus::Verified, GatePassStatus::Approved], true)) {
-            throw ValidationException::withMessages(['gate_pass' => 'Verify the outward pass before recording returns.']);
-        }
+        // Closed must be checked before the Approved/Verified allow-list (otherwise the message was unreachable).
         if ($pass->status === GatePassStatus::Closed) {
             throw ValidationException::withMessages(['gate_pass' => 'This gate pass is already closed.']);
+        }
+        // Existing rule: returns may be recorded against Approved or Verified outward RGPs (not Draft/Submitted/Rejected).
+        if (! in_array($pass->status, [GatePassStatus::Verified, GatePassStatus::Approved], true)) {
+            throw ValidationException::withMessages(['gate_pass' => 'Verify the outward pass before recording returns.']);
         }
     }
 }

@@ -15,6 +15,7 @@ const props = defineProps({
     states: { type: Array, required: true },
     procurement: { type: Object, default: null },
     boq: { type: Object, default: null },
+    pdf: { type: Object, default: null },
     crm: { type: Object, default: null },
     can: { type: Object, required: true },
     branding: { type: Object, default: () => ({ logo_url: null, favicon_url: null, max_kb: 2048 }) },
@@ -49,6 +50,23 @@ function saveProcurement() {
 const boqForm = useForm({ advanced_calculations_enabled: props.boq?.advanced_calculations_enabled === true });
 function saveBoq() {
     boqForm.post(route('admin.company.boq'), { preserveScroll: true });
+}
+
+const pdfForm = useForm({
+    signatory_name: props.pdf?.signatory_name ?? '',
+    signatory_designation: props.pdf?.signatory_designation ?? '',
+    former_name: props.pdf?.former_name ?? '',
+    cin: props.pdf?.cin ?? '',
+    computer_generated: props.pdf?.computer_generated !== false,
+});
+function savePdf() {
+    pdfForm.transform((d) => ({
+        ...d,
+        signatory_name: d.signatory_name || null,
+        signatory_designation: d.signatory_designation || null,
+        former_name: d.former_name || null,
+        cin: d.cin || null,
+    })).put(route('admin.company.pdf'), { preserveScroll: true });
 }
 
 const ensuringClient = ref(false);
@@ -200,6 +218,29 @@ function removeBrand(kind) {
                 <template v-if="can.update" #footer>
                     <div class="flex justify-end">
                         <AppButton type="submit" size="sm" :loading="boqForm.processing">Save BOQ settings</AppButton>
+                    </div>
+                </template>
+            </AppCard>
+        </form>
+
+        <form class="mt-4" @submit.prevent="savePdf">
+            <AppCard title="PDF documents" subtitle="Signatory and legal lines printed on Purchase Orders and Work Orders.">
+                <fieldset :disabled="!can.update" class="grid gap-4 sm:grid-cols-2">
+                    <FormInput v-model="pdfForm.signatory_name" label="Authorised signatory" maxlength="120" :error="pdfForm.errors.signatory_name" />
+                    <FormInput v-model="pdfForm.signatory_designation" label="Designation" maxlength="120" :error="pdfForm.errors.signatory_designation" />
+                    <FormInput v-model="pdfForm.former_name" label="Former company name" maxlength="200" :error="pdfForm.errors.former_name" />
+                    <FormInput v-model="pdfForm.cin" label="CIN" maxlength="40" :error="pdfForm.errors.cin" />
+                    <FormSwitch
+                        v-model="pdfForm.computer_generated"
+                        label="Computer generated footer"
+                        help="Adds “This is a Computer Generated Document” on PDFs."
+                        class="sm:col-span-2"
+                        :error="pdfForm.errors.computer_generated"
+                    />
+                </fieldset>
+                <template v-if="can.update" #footer>
+                    <div class="flex justify-end">
+                        <AppButton type="submit" size="sm" :loading="pdfForm.processing">Save PDF settings</AppButton>
                     </div>
                 </template>
             </AppCard>

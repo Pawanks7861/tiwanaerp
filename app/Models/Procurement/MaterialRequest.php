@@ -3,7 +3,7 @@
 namespace App\Models\Procurement;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
+use App\Models\Approval\ApprovalRequest;
 use App\Enums\Procurement\MaterialRequestStatus;
 use App\Enums\Procurement\RequestPriority;
 use App\Models\Concerns\Auditable;
@@ -127,12 +127,9 @@ class MaterialRequest extends Model implements Approvable
         app(MaterialRequestService::class)->submitted($this);
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $approverId = $this->approvalRequests()->first()?->actions()
-            ->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(MaterialRequestService::class)->markApproved($this, $approverId);
+        app(MaterialRequestService::class)->markApproved($this, $this->completingApproverId($request));
     }
 
     public function onApprovalRejected(): void

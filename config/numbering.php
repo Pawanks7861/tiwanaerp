@@ -35,6 +35,8 @@ return [
         'labour' => ['pattern' => 'LAB-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
         'equipment' => ['pattern' => 'EQP-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
         'gate_pass' => ['pattern' => 'GP-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
+        'scrap_generation' => ['pattern' => 'SCRAP-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
+        'scrap_adjustment' => ['pattern' => 'SCRAP-ADJ-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
         'client_invoice' => ['pattern' => 'INV-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'approve'],
         'dpr' => ['pattern' => 'DPR-{PROJECT_CODE}-{DATE:Ymd}', 'reset' => 'never', 'assign_on' => 'create'],
 
@@ -49,6 +51,8 @@ return [
         'quality_inspection' => ['pattern' => 'INS-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
         'ncr' => ['pattern' => 'NCR-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
         'document' => ['pattern' => 'DOC-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
+
+        'electricity_bill' => ['pattern' => 'ELB-{YYYY}-{SEQ:4}', 'reset' => 'yearly', 'assign_on' => 'create'],
     ],
 
 ];

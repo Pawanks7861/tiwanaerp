@@ -3,7 +3,7 @@
 namespace App\Models\Finance;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
+use App\Models\Approval\ApprovalRequest;
 use App\Enums\Finance\ClientInvoiceStatus;
 use App\Enums\Procurement\TaxType;
 use App\Models\Boq\Boq;
@@ -163,12 +163,9 @@ class ClientInvoice extends Model implements Approvable
         $this->forceFill(['status' => ClientInvoiceStatus::Submitted])->save();
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $approverId = $this->approvalRequests()->first()?->actions()
-            ->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(ClientInvoiceService::class)->certify($this, $approverId);
+        app(ClientInvoiceService::class)->certify($this, $this->completingApproverId($request));
     }
 
     public function onApprovalRejected(): void

@@ -427,6 +427,20 @@ class BoqService
     public function markApproved(Boq $boq, ?int $approverId): void
     {
         DB::transaction(function () use ($boq, $approverId) {
+            $boq = Boq::query()->whereKey($boq->id)->lockForUpdate()->firstOrFail();
+
+            // Idempotent finalize: already current approved BOQ is a no-op.
+            if ($boq->status === BoqStatus::Approved && $boq->is_current) {
+                return;
+            }
+
+            // Enforce BoqStatus::allowedTransitions() at the service boundary (R6).
+            if (! $boq->status->canTransitionTo(BoqStatus::Approved)) {
+                throw ValidationException::withMessages([
+                    'boq' => "A {$boq->status->label()} BOQ cannot be approved.",
+                ]);
+            }
+
             $previous = Boq::query()
                 ->where('project_id', $boq->project_id)
                 ->where('boq_number', $boq->boq_number)
@@ -436,6 +450,13 @@ class BoqService
                 ->get();
 
             foreach ($previous as $old) {
+                // Superseding an approved current revision uses Approved → Revised (declared).
+                if ($old->status === BoqStatus::Approved && ! $old->status->canTransitionTo(BoqStatus::Revised)) {
+                    throw ValidationException::withMessages([
+                        'boq' => "Previous BOQ revision {$old->version} cannot be marked revised.",
+                    ]);
+                }
+
                 $old->forceFill(['status' => BoqStatus::Revised, 'is_current' => false])->save();
                 $this->relinkTasks($old, $boq);
             }

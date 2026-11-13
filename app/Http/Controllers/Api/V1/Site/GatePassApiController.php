@@ -222,6 +222,7 @@ class GatePassApiController extends Controller
             'items.*.unit_id' => ['nullable', 'integer'],
             'items.*.weight' => ['nullable', 'numeric', 'decimal:0,4', 'min:0'],
             'items.*.scrap_type' => ['nullable', 'string', 'max:80'],
+            'items.*.scrap_type_id' => ['nullable', 'integer'],
             'items.*.rate' => ['nullable', 'numeric', 'decimal:0,4', 'min:0'],
             'items.*.destination' => ['nullable', 'string', 'max:150'],
             'items.*.remarks' => ['nullable', 'string', 'max:500'],

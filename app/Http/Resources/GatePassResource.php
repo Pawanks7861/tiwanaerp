@@ -58,6 +58,7 @@ class GatePassResource extends JsonResource
                 'unit_id' => $item->unit_id,
                 'weight' => $item->weight,
                 'scrap_type' => $item->scrap_type,
+                'scrap_type_id' => $item->scrap_type_id,
                 'rate' => $item->rate,
                 'destination' => $item->destination,
                 'remarks' => $item->remarks,

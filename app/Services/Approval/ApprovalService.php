@@ -92,7 +92,8 @@ class ApprovalService
 
             if ($request->isLastLevel()) {
                 $request->forceFill(['status' => ApprovalStatus::Approved, 'completed_at' => now()])->save();
-                $request->approvable->onApprovalCompleted();
+                // Pass the completing request so models do not guess via approvalRequests()->first() (R14).
+                $request->approvable->onApprovalCompleted($request);
                 $event = new ApprovalCompleted($request);
             } else {
                 $nextLevel = (int) collect($request->steps)->pluck('level')->filter(fn ($l) => $l > $level)->min();

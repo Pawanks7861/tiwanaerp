@@ -43,6 +43,10 @@ use App\Http\Controllers\Api\V1\Site\FinanceSummaryApiController;
 use App\Http\Controllers\Api\V1\Site\GatePassApiController;
 use App\Http\Controllers\Api\V1\Site\PaymentApiController;
 use App\Http\Controllers\Api\V1\Site\RetentionReleaseApiController;
+use App\Http\Controllers\Api\V1\Scrap\ScrapBalanceApiController;
+use App\Http\Controllers\Api\V1\Scrap\ScrapGenerationApiController;
+use App\Http\Controllers\Api\V1\Scrap\ScrapLedgerApiController;
+use App\Http\Controllers\Api\V1\Scrap\ScrapLookupController;
 use App\Http\Controllers\Api\V1\Site\VendorBillApiController;
 use App\Http\Controllers\Api\V1\Site\VendorLedgerApiController;
 use App\Http\Controllers\Api\V1\Site\MilestoneApiController;
@@ -52,6 +56,14 @@ use App\Http\Controllers\Api\V1\Site\SiteSummaryController;
 use App\Http\Controllers\Api\V1\Site\StockAdjustmentController;
 use App\Http\Controllers\Api\V1\Site\StockTransferController;
 use App\Http\Controllers\Api\V1\Site\TaskController;
+use App\Http\Controllers\Api\V1\Utilities\ElectricityBillApiController;
+use App\Http\Controllers\Api\V1\Utilities\ElectricityComparisonApiController;
+use App\Http\Controllers\Api\V1\Utilities\ElectricityConnectionApiController;
+use App\Http\Controllers\Api\V1\Utilities\ElectricityMeterApiController;
+use App\Http\Controllers\Api\V1\Utilities\ElectricityMeterReadingApiController;
+use App\Http\Controllers\Api\V1\Utilities\ElectricitySummaryApiController;
+use App\Http\Controllers\Api\V1\Utilities\ElectricityTariffApiController;
+use App\Http\Controllers\Api\V1\Utilities\UtilitySiteApiController;
 use App\Http\Controllers\Core\DeviceTokenController;
 use App\Http\Controllers\Uploads\UploadController;
 use App\Services\Files\FileSourceResolver;
@@ -78,6 +90,10 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::get('/lookups/warehouses', [LookupController::class, 'warehouses'])->name('lookups.warehouses');
         Route::get('/lookups/tax-rates', [LookupController::class, 'taxRates'])->name('lookups.tax-rates');
         Route::get('/lookups/units', [LookupController::class, 'units'])->name('lookups.units');
+
+        Route::get('/scrap/categories', [ScrapLookupController::class, 'categories'])->name('scrap.categories');
+        Route::get('/scrap/types', [ScrapLookupController::class, 'types'])->name('scrap.types');
+        Route::get('/scrap/type-options', [ScrapLookupController::class, 'typeOptions'])->name('scrap.type-options');
         Route::get('/lookups/grn-extra-reasons', [LookupController::class, 'grnExtraReasons'])->name('lookups.grn-extra-reasons');
         Route::get('/lookups/adjustment-reasons', [LookupController::class, 'adjustmentReasons'])->name('lookups.adjustment-reasons');
         Route::get('/lookups/material-return-types', [LookupController::class, 'materialReturnTypes'])->name('lookups.material-return-types');
@@ -111,6 +127,24 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount'])->name('notifications.unread-count');
         Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead'])->name('notifications.read-all');
         Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
+
+        Route::prefix('/utilities/electricity')->name('utilities.electricity.')->group(function () {
+            Route::get('/summary', ElectricitySummaryApiController::class)->name('summary');
+            Route::get('/sites', [UtilitySiteApiController::class, 'index'])->name('sites.index');
+            Route::get('/sites/{utilitySite}', [UtilitySiteApiController::class, 'show'])->whereNumber('utilitySite')->name('sites.show');
+            Route::get('/connections', [ElectricityConnectionApiController::class, 'index'])->name('connections.index');
+            Route::get('/connections/{electricityConnection}', [ElectricityConnectionApiController::class, 'show'])->whereNumber('electricityConnection')->name('connections.show');
+            Route::get('/meters', [ElectricityMeterApiController::class, 'index'])->name('meters.index');
+            Route::get('/meters/{electricityMeter}', [ElectricityMeterApiController::class, 'show'])->whereNumber('electricityMeter')->name('meters.show');
+            Route::get('/tariffs', [ElectricityTariffApiController::class, 'index'])->name('tariffs.index');
+            Route::get('/tariffs/{electricityTariff}', [ElectricityTariffApiController::class, 'show'])->whereNumber('electricityTariff')->name('tariffs.show');
+            Route::get('/readings', [ElectricityMeterReadingApiController::class, 'index'])->name('readings.index');
+            Route::get('/readings/{electricityMeterReading}', [ElectricityMeterReadingApiController::class, 'show'])->whereNumber('electricityMeterReading')->name('readings.show');
+            Route::get('/bills', [ElectricityBillApiController::class, 'index'])->name('bills.index');
+            Route::get('/bills/{electricityBill}', [ElectricityBillApiController::class, 'show'])->whereNumber('electricityBill')->name('bills.show');
+            Route::get('/comparison/monthly', [ElectricityComparisonApiController::class, 'monthly'])->name('comparison.monthly');
+            Route::get('/comparison/tariffs', [ElectricityComparisonApiController::class, 'tariffs'])->name('comparison.tariffs');
+        });
 
         Route::prefix('/files/{source}/{id}')
             ->whereNumber('id')
@@ -215,6 +249,41 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
                 ->whereNumber('equipmentRepair')
                 ->middleware('throttle:10,1')
                 ->name('projects.equipment-repairs.cancel');
+            Route::get('/projects/{project}/scrap/available', [ScrapBalanceApiController::class, 'available'])
+                ->name('projects.scrap.available');
+            Route::get('/projects/{project}/scrap/balances', [ScrapBalanceApiController::class, 'index'])
+                ->name('projects.scrap.balances.index');
+            Route::get('/projects/{project}/scrap/balances/summary', [ScrapBalanceApiController::class, 'summary'])
+                ->name('projects.scrap.balances.summary');
+            Route::get('/projects/{project}/scrap/ledger', [ScrapLedgerApiController::class, 'index'])
+                ->name('projects.scrap.ledger.index');
+            Route::get('/projects/{project}/scrap/generations', [ScrapGenerationApiController::class, 'index'])
+                ->name('projects.scrap.generations.index');
+            Route::post('/projects/{project}/scrap/generations', [ScrapGenerationApiController::class, 'store'])
+                ->middleware('throttle:20,1')
+                ->name('projects.scrap.generations.store');
+            Route::get('/projects/{project}/scrap/generations/{scrapGeneration}', [ScrapGenerationApiController::class, 'show'])
+                ->whereNumber('scrapGeneration')
+                ->name('projects.scrap.generations.show');
+            Route::match(['put', 'patch'], '/projects/{project}/scrap/generations/{scrapGeneration}', [ScrapGenerationApiController::class, 'update'])
+                ->whereNumber('scrapGeneration')
+                ->name('projects.scrap.generations.update');
+            Route::delete('/projects/{project}/scrap/generations/{scrapGeneration}', [ScrapGenerationApiController::class, 'destroy'])
+                ->whereNumber('scrapGeneration')
+                ->name('projects.scrap.generations.destroy');
+            Route::post('/projects/{project}/scrap/generations/{scrapGeneration}/submit', [ScrapGenerationApiController::class, 'submit'])
+                ->whereNumber('scrapGeneration')
+                ->middleware('throttle:10,1')
+                ->name('projects.scrap.generations.submit');
+            Route::post('/projects/{project}/scrap/generations/{scrapGeneration}/approve', [ScrapGenerationApiController::class, 'approve'])
+                ->whereNumber('scrapGeneration')
+                ->middleware('throttle:10,1')
+                ->name('projects.scrap.generations.approve');
+            Route::post('/projects/{project}/scrap/generations/{scrapGeneration}/cancel', [ScrapGenerationApiController::class, 'cancel'])
+                ->whereNumber('scrapGeneration')
+                ->middleware('throttle:10,1')
+                ->name('projects.scrap.generations.cancel');
+
             Route::get('/projects/{project}/gate-passes/summary', [GatePassApiController::class, 'summary'])
                 ->name('projects.gate-passes.summary');
             Route::get('/projects/{project}/gate-passes', [GatePassApiController::class, 'index'])
@@ -350,6 +419,12 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             Route::get('/projects/{project}/work-orders/{workOrder}/billable-lines', [WorkOrderApiController::class, 'billableLines'])
                 ->whereNumber('workOrder')
                 ->name('projects.work-orders.billable-lines');
+            Route::get('/projects/{project}/work-orders/{workOrder}/pdf/view', [WorkOrderApiController::class, 'pdf'])
+                ->whereNumber('workOrder')
+                ->name('projects.work-orders.pdf.view');
+            Route::get('/projects/{project}/work-orders/{workOrder}/pdf/download', [WorkOrderApiController::class, 'pdf'])
+                ->whereNumber('workOrder')
+                ->name('projects.work-orders.pdf.download');
             Route::get('/projects/{project}/subcontractor-bills', [SubcontractorBillApiController::class, 'index'])
                 ->name('projects.subcontractor-bills.index');
             Route::get('/projects/{project}/subcontractor-bills/prefill/{workOrder}', [SubcontractorBillApiController::class, 'prefill'])

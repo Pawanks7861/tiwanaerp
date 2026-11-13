@@ -23,6 +23,14 @@ final class IndianNumber
         return self::group($fixed);
     }
 
+    public static function rate(string|int|null $value): string
+    {
+        $fixed = Decimal::of($value === null ? '0' : (string) $value)->toRate();
+        $fixed = str_contains($fixed, '.') ? rtrim(rtrim($fixed, '0'), '.') : $fixed;
+
+        return self::group($fixed);
+    }
+
     public static function rupeesInWords(string $amount): string
     {
         $fixed = Decimal::of($amount)->abs()->toMoney();

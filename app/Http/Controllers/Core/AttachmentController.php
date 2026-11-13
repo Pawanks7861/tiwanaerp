@@ -26,6 +26,8 @@ class AttachmentController extends Controller
         'expense', 'client_invoice', 'vendor_bill', 'payment', 'retention_release', 'quotation',
         'quality_inspection', 'ncr',
         'gate_pass', 'weighbridge_receipt',
+        'scrap_generation', 'scrap_adjustment',
+        'electricity_bill', 'electricity_meter_reading',
         'boq_item',
     ];
 

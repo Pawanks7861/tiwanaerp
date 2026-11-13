@@ -6,17 +6,21 @@ use App\Enums\Subcontract\MilestoneStatus;
 use App\Enums\Subcontract\WorkOrderStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\WorkOrderResource;
+use App\Models\Core\Company;
 use App\Models\Projects\Project;
 use App\Models\Subcontract\WorkOrder;
-use App\Rules\ExistsInCompany;
-use App\Models\Masters\Subcontractor;
 use App\Services\Subcontract\SubcontractorBillService;
 use App\Services\Subcontract\WorkOrderService;
+use App\Support\Pdf\PdfResponder;
+use App\Support\Pdf\WorkOrderPdfDataBuilder;
+use App\Support\Subcontract\WorkOrderValidation;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use Symfony\Component\HttpFoundation\Response;
 
 class WorkOrderApiController extends Controller
 {
@@ -150,44 +154,34 @@ class WorkOrderApiController extends Controller
         ]);
     }
 
+    public function pdf(Request $request, Project $project, WorkOrder $workOrder): Response
+    {
+        abort_unless((int) $workOrder->project_id === (int) $project->id, 404);
+        Gate::authorize('export', $workOrder);
+
+        $company = Company::query()->findOrFail($workOrder->company_id);
+        $data = app(WorkOrderPdfDataBuilder::class)->build($workOrder, $project, $company);
+        $pdf = Pdf::loadView('pdf.work-order', $data)->setPaper('a4');
+
+        return PdfResponder::send(
+            $pdf,
+            $workOrder->wo_number.'.pdf',
+            $request->routeIs('api.v1.projects.work-orders.pdf.view')
+        );
+    }
+
     /**
      * @return array<string, mixed>
      */
     private function validated(Request $request): array
     {
-        return $request->validate([
-            'subcontractor_id' => ['required', 'integer', new ExistsInCompany(Subcontractor::class)],
-            'wo_date' => ['required', 'date'],
-            'scope' => ['nullable', 'string', 'max:5000'],
-            'start_date' => ['nullable', 'date'],
-            'end_date' => ['nullable', 'date'],
-            'retention_percent' => ['nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
-            'advance_amount' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999'],
-            'tax_rate_id' => ['nullable', 'integer'],
-            'tds_percent' => ['nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
-            'terms' => ['nullable', 'string', 'max:5000'],
-            'items' => ['required', 'array', 'min:1', 'max:300'],
-            'items.*.boq_item_id' => ['nullable', 'integer'],
-            'items.*.task_id' => ['nullable', 'integer'],
-            'items.*.description' => ['nullable', 'string', 'max:500'],
-            'items.*.unit_id' => ['nullable', 'integer'],
-            'items.*.quantity' => ['required', 'numeric', 'decimal:0,4', 'gt:0', 'max:9999999999'],
-            'items.*.rate' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999'],
-            'milestones' => ['nullable', 'array', 'max:50'],
-            'milestones.*.name' => ['required', 'string', 'max:200'],
-            'milestones.*.due_date' => ['nullable', 'date'],
-            'milestones.*.amount_percent' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
-        ], [], [
-            'subcontractor_id' => 'subcontractor',
-            'items.*.quantity' => 'quantity',
-            'items.*.rate' => 'rate',
-        ]);
+        return $request->validate(WorkOrderValidation::rules(api: true), [], WorkOrderValidation::attributes());
     }
 
     private function detail(WorkOrder $order): WorkOrder
     {
         return $order->load([
-            'subcontractor:id,code,name,gstin,mobile',
+            'subcontractor:id,code,name,gstin,mobile,email,pan,address,city,pincode,state_code,contact_person',
             'items.unit:id,symbol',
             'items.boqItem:id,item_code,name',
             'items.task:id,wbs_code,name',

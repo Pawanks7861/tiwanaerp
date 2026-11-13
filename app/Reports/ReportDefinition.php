@@ -19,6 +19,8 @@ abstract class ReportDefinition
         'executive' => 'Executive', 'project' => 'Project', 'cost' => 'Cost', 'procurement' => 'Procurement',
         'inventory' => 'Inventory', 'progress' => 'Progress', 'finance' => 'Finance', 'labour' => 'Labour',
         'subcontract' => 'Subcontract', 'equipment' => 'Equipment', 'quality' => 'Quality', 'crm' => 'CRM',
+        'scrap' => 'Scrap',
+        'utilities' => 'Utilities',
     ];
 
     abstract public function key(): string;

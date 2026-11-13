@@ -16,6 +16,16 @@ use App\Reports\Definitions\CashFlowReport;
 use App\Reports\Definitions\CostByHeadReport;
 use App\Reports\Definitions\CrmFunnelReport;
 use App\Reports\Definitions\DelayedTasksReport;
+use App\Reports\Definitions\ElectricityBillVarianceReport;
+use App\Reports\Definitions\ElectricityComponentChargeReport;
+use App\Reports\Definitions\ElectricityConsumptionTrendReport;
+use App\Reports\Definitions\ElectricityDemandUtilizationReport;
+use App\Reports\Definitions\ElectricityMonthlyComparisonReport;
+use App\Reports\Definitions\ElectricityPenaltyRebateReport;
+use App\Reports\Definitions\ElectricityPfAnalysisReport;
+use App\Reports\Definitions\ElectricityRebateSubsidyReport;
+use App\Reports\Definitions\ElectricitySiteCostReport;
+use App\Reports\Definitions\ElectricityTariffComparisonReport;
 use App\Reports\Definitions\EquipmentReport;
 use App\Reports\Definitions\EstimatedVsActualCostReport;
 use App\Reports\Definitions\LabourCostReport;
@@ -30,6 +40,13 @@ use App\Reports\Definitions\StockLedgerReport;
 use App\Reports\Definitions\StockSummaryReport;
 use App\Reports\Definitions\RetentionRegisterReport;
 use App\Reports\Definitions\RgpOutstandingReport;
+use App\Reports\Definitions\ScrapBalanceReport;
+use App\Reports\Definitions\ScrapCategorySummaryReport;
+use App\Reports\Definitions\ScrapDispatchRegisterReport;
+use App\Reports\Definitions\ScrapGatePassMovementReport;
+use App\Reports\Definitions\ScrapGeneratedVsDispatchedReport;
+use App\Reports\Definitions\ScrapGenerationRegisterReport;
+use App\Reports\Definitions\ScrapProjectSummaryReport;
 use App\Reports\Definitions\SubcontractReport;
 use App\Reports\Definitions\WorkflowAgeingReport;
 
@@ -69,6 +86,23 @@ final class ReportRegistry
         AdvanceRegisterReport::class,
         RetentionRegisterReport::class,
         WorkflowAgeingReport::class,
+        ScrapBalanceReport::class,
+        ScrapGenerationRegisterReport::class,
+        ScrapDispatchRegisterReport::class,
+        ScrapCategorySummaryReport::class,
+        ScrapProjectSummaryReport::class,
+        ScrapGatePassMovementReport::class,
+        ScrapGeneratedVsDispatchedReport::class,
+        ElectricityMonthlyComparisonReport::class,
+        ElectricitySiteCostReport::class,
+        ElectricityTariffComparisonReport::class,
+        ElectricityDemandUtilizationReport::class,
+        ElectricityPfAnalysisReport::class,
+        ElectricityComponentChargeReport::class,
+        ElectricityPenaltyRebateReport::class,
+        ElectricityRebateSubsidyReport::class,
+        ElectricityBillVarianceReport::class,
+        ElectricityConsumptionTrendReport::class,
     ];
 
     /** @var array<string, ReportDefinition>|null */

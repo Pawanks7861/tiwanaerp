@@ -14,6 +14,7 @@ use App\Http\Controllers\Imports\DataImportController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\BrandingController;
 use App\Http\Controllers\Admin\CompanySettingsController;
+use App\Http\Controllers\Admin\DocumentTermsTemplateController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Boq\BoqController;
@@ -84,6 +85,11 @@ use App\Http\Controllers\Quality\NcrController;
 use App\Http\Controllers\Quality\QualityChecklistController;
 use App\Http\Controllers\Quality\QualityInspectionController;
 use App\Http\Controllers\Reports\ReportController;
+use App\Http\Controllers\Scrap\ScrapAdjustmentController;
+use App\Http\Controllers\Scrap\ScrapBalanceController;
+use App\Http\Controllers\Scrap\ScrapDashboardController;
+use App\Http\Controllers\Scrap\ScrapGenerationController;
+use App\Http\Controllers\Scrap\ScrapLedgerController;
 use App\Http\Controllers\Reports\ReportExportController;
 use App\Http\Controllers\SiteExecution\DprController;
 use App\Http\Controllers\SiteExecution\SiteDiaryController;
@@ -91,6 +97,17 @@ use App\Http\Controllers\SiteExecution\SiteDiaryPhotoController;
 use App\Http\Controllers\Subcontract\SubcontractorBillController;
 use App\Http\Controllers\Subcontract\WorkOrderController;
 use App\Http\Controllers\Uploads\UploadController;
+use App\Http\Controllers\Utilities\Electricity\ElectricityBillController;
+use App\Http\Controllers\Utilities\Electricity\ElectricityComparisonController;
+use App\Http\Controllers\Utilities\Electricity\ElectricityConnectionController;
+use App\Http\Controllers\Utilities\Electricity\ElectricityDashboardController;
+use App\Http\Controllers\Utilities\Electricity\ElectricityHubController;
+use App\Http\Controllers\Utilities\Electricity\ElectricityMeterController;
+use App\Http\Controllers\Utilities\Electricity\ElectricityMeterReadingController;
+use App\Http\Controllers\Utilities\Electricity\ElectricityReportsController;
+use App\Http\Controllers\Utilities\Electricity\ElectricityTariffComparisonController;
+use App\Http\Controllers\Utilities\Electricity\ElectricityTariffController;
+use App\Http\Controllers\Utilities\Electricity\UtilitySiteController;
 use App\Support\Masters\MasterRegistry;
 use Illuminate\Support\Facades\Route;
 
@@ -354,6 +371,8 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::post('/close', [WorkOrderController::class, 'close'])->name('close');
             Route::post('/cancel', [WorkOrderController::class, 'cancel'])->name('cancel');
             Route::put('/milestones', [WorkOrderController::class, 'milestones'])->name('milestones');
+            Route::get('/pdf/view', [WorkOrderController::class, 'pdf'])->name('pdf.view');
+            Route::get('/pdf', [WorkOrderController::class, 'pdf'])->name('pdf');
         });
         Route::get('/subcontractor-bills', [SubcontractorBillController::class, 'index'])->name('projects.subcontractor-bills.index');
         Route::get('/subcontractor-bills/create', [SubcontractorBillController::class, 'create'])->name('projects.subcontractor-bills.create');
@@ -393,6 +412,36 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/gate-passes', [GatePassController::class, 'index'])->name('projects.gate-passes.index');
         Route::get('/gate-passes/create', [GatePassController::class, 'create'])->name('projects.gate-passes.create');
         Route::post('/gate-passes', [GatePassController::class, 'store'])->name('projects.gate-passes.store');
+        Route::prefix('/scrap')->name('projects.scrap.')->group(function () {
+            Route::get('/generations', [ScrapGenerationController::class, 'index'])->name('generations.index');
+            Route::get('/generations/create', [ScrapGenerationController::class, 'create'])->name('generations.create');
+            Route::post('/generations', [ScrapGenerationController::class, 'store'])->name('generations.store');
+            Route::prefix('/generations/{scrapGeneration}')->whereNumber('scrapGeneration')->name('generations.')->group(function () {
+                Route::get('/', [ScrapGenerationController::class, 'show'])->name('show');
+                Route::get('/edit', [ScrapGenerationController::class, 'edit'])->name('edit');
+                Route::put('/', [ScrapGenerationController::class, 'update'])->name('update');
+                Route::delete('/', [ScrapGenerationController::class, 'destroy'])->name('destroy');
+                Route::post('/submit', [ScrapGenerationController::class, 'submit'])->name('submit');
+                Route::post('/approve', [ScrapGenerationController::class, 'approve'])->name('approve');
+                Route::post('/cancel', [ScrapGenerationController::class, 'cancel'])->name('cancel');
+            });
+
+            Route::get('/balances', [ScrapBalanceController::class, 'index'])->name('balances.index');
+            Route::get('/balances/{scrapBalance}', [ScrapBalanceController::class, 'show'])->whereNumber('scrapBalance')->name('balances.show');
+            Route::get('/ledger', [ScrapLedgerController::class, 'index'])->name('ledger.index');
+
+            Route::get('/adjustments', [ScrapAdjustmentController::class, 'index'])->name('adjustments.index');
+            Route::get('/adjustments/create', [ScrapAdjustmentController::class, 'create'])->name('adjustments.create');
+            Route::post('/adjustments', [ScrapAdjustmentController::class, 'store'])->name('adjustments.store');
+            Route::prefix('/adjustments/{scrapAdjustment}')->whereNumber('scrapAdjustment')->name('adjustments.')->group(function () {
+                Route::get('/', [ScrapAdjustmentController::class, 'show'])->name('show');
+                Route::get('/edit', [ScrapAdjustmentController::class, 'edit'])->name('edit');
+                Route::put('/', [ScrapAdjustmentController::class, 'update'])->name('update');
+                Route::delete('/', [ScrapAdjustmentController::class, 'destroy'])->name('destroy');
+                Route::post('/submit', [ScrapAdjustmentController::class, 'submit'])->name('submit');
+            });
+        });
+
         Route::prefix('/gate-passes/{gatePass}')->whereNumber('gatePass')->name('projects.gate-passes.')->group(function () {
             Route::get('/', [GatePassController::class, 'show'])->name('show');
             Route::get('/edit', [GatePassController::class, 'edit'])->name('edit');
@@ -706,6 +755,65 @@ Route::middleware(['auth', 'company'])->group(function () {
     // Company-wide Gate Pass list (view for all users with gate_pass.view)
     Route::get('/gate-passes', [CompanyGatePassController::class, 'index'])->name('gate-passes.index');
 
+    Route::prefix('/utilities/electricity')->name('utilities.electricity.')->group(function () {
+        Route::get('/', [ElectricityHubController::class, 'index'])->name('hub');
+        Route::get('/dashboard', [ElectricityDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/comparison', [ElectricityComparisonController::class, 'index'])->name('comparison');
+        Route::get('/tariff-comparison', [ElectricityTariffComparisonController::class, 'index'])->name('tariff-comparison');
+        Route::get('/reports', [ElectricityReportsController::class, 'index'])->name('reports');
+
+        Route::get('/sites', [UtilitySiteController::class, 'index'])->name('sites.index');
+        Route::get('/sites/create', [UtilitySiteController::class, 'create'])->name('sites.create');
+        Route::post('/sites', [UtilitySiteController::class, 'store'])->name('sites.store');
+        Route::get('/sites/{utilitySite}/edit', [UtilitySiteController::class, 'edit'])->whereNumber('utilitySite')->name('sites.edit');
+        Route::put('/sites/{utilitySite}', [UtilitySiteController::class, 'update'])->whereNumber('utilitySite')->name('sites.update');
+
+        Route::get('/connections', [ElectricityConnectionController::class, 'index'])->name('connections.index');
+        Route::get('/connections/create', [ElectricityConnectionController::class, 'create'])->name('connections.create');
+        Route::post('/connections', [ElectricityConnectionController::class, 'store'])->name('connections.store');
+        Route::get('/connections/{electricityConnection}', [ElectricityConnectionController::class, 'show'])->whereNumber('electricityConnection')->name('connections.show');
+        Route::get('/connections/{electricityConnection}/edit', [ElectricityConnectionController::class, 'edit'])->whereNumber('electricityConnection')->name('connections.edit');
+        Route::put('/connections/{electricityConnection}', [ElectricityConnectionController::class, 'update'])->whereNumber('electricityConnection')->name('connections.update');
+        Route::delete('/connections/{electricityConnection}', [ElectricityConnectionController::class, 'destroy'])->whereNumber('electricityConnection')->name('connections.destroy');
+        Route::post('/connections/{electricityConnection}/meters', [ElectricityMeterController::class, 'store'])->whereNumber('electricityConnection')->name('meters.store');
+
+        Route::put('/meters/{electricityMeter}', [ElectricityMeterController::class, 'update'])->whereNumber('electricityMeter')->name('meters.update');
+
+        Route::get('/tariffs', [ElectricityTariffController::class, 'index'])->name('tariffs.index');
+        Route::get('/tariffs/create', [ElectricityTariffController::class, 'create'])->name('tariffs.create');
+        Route::post('/tariffs', [ElectricityTariffController::class, 'store'])->name('tariffs.store');
+        Route::get('/tariffs/{electricityTariff}', [ElectricityTariffController::class, 'show'])->whereNumber('electricityTariff')->name('tariffs.show');
+        Route::get('/tariffs/{electricityTariff}/edit', [ElectricityTariffController::class, 'edit'])->whereNumber('electricityTariff')->name('tariffs.edit');
+        Route::put('/tariffs/{electricityTariff}', [ElectricityTariffController::class, 'update'])->whereNumber('electricityTariff')->name('tariffs.update');
+        Route::delete('/tariffs/{electricityTariff}', [ElectricityTariffController::class, 'destroy'])->whereNumber('electricityTariff')->name('tariffs.destroy');
+
+        Route::get('/readings', [ElectricityMeterReadingController::class, 'index'])->name('readings.index');
+        Route::get('/readings/create', [ElectricityMeterReadingController::class, 'create'])->name('readings.create');
+        Route::post('/readings', [ElectricityMeterReadingController::class, 'store'])->name('readings.store');
+        Route::get('/readings/{electricityMeterReading}', [ElectricityMeterReadingController::class, 'show'])->whereNumber('electricityMeterReading')->name('readings.show');
+        Route::get('/readings/{electricityMeterReading}/edit', [ElectricityMeterReadingController::class, 'edit'])->whereNumber('electricityMeterReading')->name('readings.edit');
+        Route::put('/readings/{electricityMeterReading}', [ElectricityMeterReadingController::class, 'update'])->whereNumber('electricityMeterReading')->name('readings.update');
+        Route::post('/readings/{electricityMeterReading}/confirm', [ElectricityMeterReadingController::class, 'confirm'])->whereNumber('electricityMeterReading')->name('readings.confirm');
+
+        Route::get('/bills', [ElectricityBillController::class, 'index'])->name('bills.index');
+        Route::get('/bills/create', [ElectricityBillController::class, 'create'])->name('bills.create');
+        Route::post('/bills', [ElectricityBillController::class, 'store'])->name('bills.store');
+        Route::get('/bills/{electricityBill}', [ElectricityBillController::class, 'show'])->whereNumber('electricityBill')->name('bills.show');
+        Route::get('/bills/{electricityBill}/edit', [ElectricityBillController::class, 'edit'])->whereNumber('electricityBill')->name('bills.edit');
+        Route::put('/bills/{electricityBill}', [ElectricityBillController::class, 'update'])->whereNumber('electricityBill')->name('bills.update');
+        Route::post('/bills/{electricityBill}/recalculate', [ElectricityBillController::class, 'recalculate'])->whereNumber('electricityBill')->name('bills.recalculate');
+        Route::post('/bills/{electricityBill}/review', [ElectricityBillController::class, 'review'])->whereNumber('electricityBill')->name('bills.review');
+        Route::post('/bills/{electricityBill}/approve', [ElectricityBillController::class, 'approve'])->whereNumber('electricityBill')->name('bills.approve');
+    });
+
+    Route::prefix('/scrap')->name('scrap.')->group(function () {
+        Route::get('/', [ScrapDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/generations', [ScrapGenerationController::class, 'companyIndex'])->name('generations.index');
+        Route::get('/balances', [ScrapBalanceController::class, 'companyIndex'])->name('balances.index');
+        Route::get('/ledger', [ScrapLedgerController::class, 'companyIndex'])->name('ledger.index');
+        Route::get('/adjustments', [ScrapAdjustmentController::class, 'companyIndex'])->name('adjustments.index');
+    });
+
     // CRM: leads, activities, quotations, conversion to project
     Route::prefix('/crm')->name('crm.')->group(function () {
         Route::get('/leads', [LeadController::class, 'index'])->name('leads.index');
@@ -867,10 +975,16 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::put('/company/procurement', [CompanySettingsController::class, 'updateProcurement'])->name('company.procurement');
         Route::post('/company/boq', [CompanySettingsController::class, 'updateBoq'])->name('company.boq');
         Route::post('/company/default-client', [CompanySettingsController::class, 'ensureDefaultClient'])->name('company.default-client');
+        Route::put('/company/pdf', [CompanySettingsController::class, 'updatePdf'])->name('company.pdf');
         Route::post('/company/logo', [BrandingController::class, 'storeLogo'])->name('company.logo.store');
         Route::delete('/company/logo', [BrandingController::class, 'destroyLogo'])->name('company.logo.destroy');
         Route::post('/company/favicon', [BrandingController::class, 'storeFavicon'])->name('company.favicon.store');
         Route::delete('/company/favicon', [BrandingController::class, 'destroyFavicon'])->name('company.favicon.destroy');
+
+        Route::get('/document-terms', [DocumentTermsTemplateController::class, 'index'])->name('document-terms.index');
+        Route::post('/document-terms', [DocumentTermsTemplateController::class, 'store'])->name('document-terms.store');
+        Route::put('/document-terms/{documentTermsTemplate}', [DocumentTermsTemplateController::class, 'update'])->name('document-terms.update');
+        Route::delete('/document-terms/{documentTermsTemplate}', [DocumentTermsTemplateController::class, 'destroy'])->name('document-terms.destroy');
 
         Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
     });

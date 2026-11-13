@@ -3,8 +3,8 @@
 namespace App\Models\Procurement;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
 use App\Enums\Procurement\PurchaseOrderStatus;
+use App\Models\Approval\ApprovalRequest;
 use App\Enums\Procurement\TaxType;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
@@ -175,12 +175,9 @@ class PurchaseOrder extends Model implements Approvable
         $this->forceFill(['status' => PurchaseOrderStatus::Submitted])->save();
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $approverId = $this->approvalRequests()->first()?->actions()
-            ->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(PurchaseOrderService::class)->markApproved($this, $approverId);
+        app(PurchaseOrderService::class)->markApproved($this, $this->completingApproverId($request));
     }
 
     public function onApprovalRejected(): void

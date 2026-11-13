@@ -10,6 +10,8 @@ use App\Models\Masters\ExpenseCategory;
 use App\Models\Masters\LabourTrade;
 use App\Models\Masters\Material;
 use App\Models\Masters\MaterialCategory;
+use App\Models\Masters\ScrapCategory;
+use App\Models\Masters\ScrapType;
 use App\Models\Masters\Subcontractor;
 use App\Models\Masters\TaxRate;
 use App\Models\Masters\Unit;
@@ -38,6 +40,8 @@ class MasterPolicy
         EquipmentType::class => 'masters.equipment_types',
         Warehouse::class => 'masters.warehouses',
         ExpenseCategory::class => 'masters.expense_categories',
+        ScrapCategory::class => 'masters.scrap_categories',
+        ScrapType::class => 'masters.scrap_types',
         Client::class => 'crm.clients',
         Labour::class => 'labour',
         Equipment::class => 'equipment',

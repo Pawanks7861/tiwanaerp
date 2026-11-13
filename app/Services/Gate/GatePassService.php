@@ -6,23 +6,35 @@ use App\Enums\Equipment\EquipmentLocationType;
 use App\Enums\Gate\GatePassDirection;
 use App\Enums\Gate\GatePassItemType;
 use App\Enums\Gate\GatePassStatus;
+use App\Enums\Scrap\ScrapLedgerTxnType;
 use App\Models\Equipment\Equipment;
 use App\Models\Gate\GatePass;
 use App\Models\Gate\GatePassItem;
 use App\Models\Masters\Material;
+use App\Models\Masters\ScrapType;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
 use App\Services\Equipment\EquipmentLocationService;
 use App\Services\Numbering\DocumentNumberService;
+use App\Services\Scrap\ScrapBalanceService;
+use App\Services\Scrap\ScrapLedgerService;
+use App\Services\Scrap\ScrapMovement;
 use App\Services\Weighbridge\WeighbridgeReceiptService;
 use App\Support\Math\Decimal;
+use App\Support\Transitions\DocumentTransition;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
  * Gate movement register. It does not post stock. An equipment line updates the machine's
  * location only when the pass is gate-verified.
+ *
+ * Dual approval path (R2): when `ApprovalService::resolveWorkflow` finds an active `gate_pass`
+ * workflow, submit/approve/reject use the approval engine. Otherwise legacy `transition()` is
+ * used (Draft/Rejected → Submitted → Approved/Rejected). Gate verify is never approval-backed;
+ * scrap `gate_pass_out` posts only on verify and is ledger-idempotent. Do not introduce a
+ * mandatory workflow where none is configured.
  */
 class GatePassService
 {
@@ -31,6 +43,8 @@ class GatePassService
         private readonly WeighbridgeReceiptService $weighbridge,
         private readonly EquipmentLocationService $locations,
         private readonly ApprovalService $approvals,
+        private readonly ScrapLedgerService $scrapLedger,
+        private readonly ScrapBalanceService $scrapBalances,
     ) {}
 
     /**
@@ -145,15 +159,29 @@ class GatePassService
     {
         DB::transaction(function () use ($pass, $user) {
             $pass = GatePass::query()->whereKey($pass->id)->lockForUpdate()->firstOrFail();
+
+            // Idempotent retry: scrap ledger is keyed by gate_pass_item + gate_pass_out.
+            if (in_array($pass->status, [GatePassStatus::Verified, GatePassStatus::Closed], true)) {
+                $this->postScrapOutbound($pass, $user);
+
+                return;
+            }
+
             if ($pass->status !== GatePassStatus::Approved) {
                 throw ValidationException::withMessages(['gate_pass' => 'Only an approved gate pass can be verified at the gate.']);
             }
+
+            if ($pass->direction === GatePassDirection::Out) {
+                $this->assertScrapAvailable($pass);
+            }
+
             $pass->forceFill([
                 'status' => GatePassStatus::Verified,
                 'verified_by' => $user->id,
                 'verified_at' => now(),
             ])->save();
             $this->moveEquipment($pass, $user);
+            $this->postScrapOutbound($pass, $user);
             if (! $pass->returnable) {
                 $pass->forceFill(['status' => GatePassStatus::Closed])->save();
             }
@@ -174,14 +202,17 @@ class GatePassService
     private function transition(GatePass $pass, array $from, GatePassStatus $to, array $extra = []): void
     {
         DB::transaction(function () use ($pass, $from, $to, $extra) {
-            $pass = GatePass::query()->whereKey($pass->id)->lockForUpdate()->firstOrFail();
-            if (! in_array($pass->status, $from, true)) {
-                throw ValidationException::withMessages(['gate_pass' => 'This gate pass cannot move to '.$to->label().' from '.$pass->status->label().'.']);
-            }
+            $pass = DocumentTransition::lock($pass);
+            DocumentTransition::assertStatus(
+                $pass,
+                $from,
+                'gate_pass',
+                'This gate pass cannot move to '.$to->label().' from '.$pass->status->label().'.',
+            );
             if ($pass->items()->doesntExist()) {
                 throw ValidationException::withMessages(['items' => 'Add at least one line.']);
             }
-            $pass->forceFill(['status' => $to, ...$extra])->save();
+            DocumentTransition::apply($pass, $to, $extra);
         });
     }
 
@@ -255,8 +286,14 @@ class GatePassService
             if (! $qty->isPositive()) {
                 throw ValidationException::withMessages(["items.{$index}.quantity" => 'Quantity must be greater than zero.']);
             }
-            if ($type === GatePassItemType::Scrap && blank($row['scrap_type'] ?? null)) {
-                throw ValidationException::withMessages(["items.{$index}.scrap_type" => 'Name the scrap.']);
+            $scrapType = null;
+            $scrapTypeId = blank($row['scrap_type_id'] ?? null) ? null : (int) $row['scrap_type_id'];
+            if ($type === GatePassItemType::Scrap) {
+                if ($scrapTypeId === null) {
+                    throw ValidationException::withMessages(["items.{$index}.scrap_type_id" => 'Choose the scrap type.']);
+                }
+                $scrapType = ScrapType::query()->active()->whereKey($scrapTypeId)->first()
+                    ?? throw ValidationException::withMessages(["items.{$index}.scrap_type_id" => 'Choose a scrap type of this company.']);
             }
             $materialId = blank($row['material_id'] ?? null) ? null : (int) $row['material_id'];
             if ($materialId !== null && Material::query()->whereKey($materialId)->doesntExist()) {
@@ -270,6 +307,23 @@ class GatePassService
                 throw ValidationException::withMessages(["items.{$index}.equipment_id" => 'Choose equipment of this company.']);
             }
 
+            $unitId = blank($row['unit_id'] ?? null) ? null : (int) $row['unit_id'];
+            if ($scrapType !== null) {
+                $unitId = $unitId ?? $scrapType->unit_id;
+                if ($unitId === null) {
+                    throw ValidationException::withMessages(["items.{$index}.unit_id" => 'This scrap type needs a default unit.']);
+                }
+                if ($scrapType->unit_id !== null && (int) $unitId !== (int) $scrapType->unit_id) {
+                    throw ValidationException::withMessages(["items.{$index}.unit_id" => 'Use the unit defined for this scrap type.']);
+                }
+                if ($pass->direction === GatePassDirection::Out) {
+                    $available = $this->scrapBalances->availableQty($pass->project_id, $scrapType->id, $unitId);
+                    if ($qty->greaterThan($available)) {
+                        throw ValidationException::withMessages(["items.{$index}.quantity" => "Only {$available->toQuantity()} {$scrapType->name} available on this project."]);
+                    }
+                }
+            }
+
             (new GatePassItem)->forceFill([
                 'gate_pass_id' => $pass->id,
                 'item_type' => $type,
@@ -277,14 +331,51 @@ class GatePassService
                 'equipment_id' => $equipmentId,
                 'description' => $row['description'],
                 'quantity' => $qty->toQuantity(),
-                'unit_id' => $row['unit_id'] ?? null,
+                'unit_id' => $unitId,
                 'weight' => blank($row['weight'] ?? null) ? null : Decimal::of((string) $row['weight'])->toQuantity(),
-                'scrap_type' => $row['scrap_type'] ?? null,
+                'scrap_type_id' => $scrapType?->id,
+                'scrap_type' => $scrapType?->name ?? ($row['scrap_type'] ?? null),
                 'rate' => blank($row['rate'] ?? null) ? null : Decimal::of((string) $row['rate'])->toRate(),
                 'destination' => $row['destination'] ?? null,
                 'remarks' => $row['remarks'] ?? null,
                 'sort_order' => $index + 1,
             ])->save();
+        }
+    }
+
+    private function assertScrapAvailable(GatePass $pass): void
+    {
+        foreach ($pass->items()->where('item_type', GatePassItemType::Scrap)->whereNotNull('scrap_type_id')->get() as $item) {
+            $available = $this->scrapBalances->availableQty($pass->project_id, (int) $item->scrap_type_id, (int) $item->unit_id);
+            $required = Decimal::of($item->quantity);
+            if ($required->greaterThan($available)) {
+                $name = $item->scrap_type ?: 'scrap';
+                throw ValidationException::withMessages(['items' => "Insufficient scrap of {$name}: available {$available->toQuantity()}, required {$required->toQuantity()}."]);
+            }
+        }
+    }
+
+    private function postScrapOutbound(GatePass $pass, User $user): void
+    {
+        if ($pass->direction !== GatePassDirection::Out) {
+            return;
+        }
+
+        $project = Project::query()->findOrFail($pass->project_id);
+        foreach ($pass->items()->where('item_type', GatePassItemType::Scrap)->whereNotNull('scrap_type_id')->get() as $item) {
+            $this->scrapLedger->post(new ScrapMovement(
+                reference: $item,
+                type: ScrapLedgerTxnType::GatePassOut,
+                project: $project,
+                scrapTypeId: (int) $item->scrap_type_id,
+                unitId: (int) $item->unit_id,
+                quantity: Decimal::of($item->quantity),
+                date: $pass->passed_at,
+                referenceNumber: $pass->pass_number,
+                remarks: $pass->pass_number,
+                userId: $user->id,
+                errorKey: 'gate_pass',
+            ));
         }
     }
 }

@@ -3,10 +3,12 @@
 namespace App\Services\Inventory;
 
 use App\Enums\Procurement\GrnStatus;
+use App\Models\Masters\Warehouse;
 use App\Models\Procurement\Grn;
 use App\Support\Math\Decimal;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Recomputes balances from the append-only ledger and compares them with the stock_balances
@@ -120,6 +122,53 @@ class InventoryReconciler
             ->filter(fn (array $row) => $row['items'] > 0)
             ->values()
             ->all();
+    }
+
+    /**
+     * Idempotently post stock for approved GRNs that are still missing grn_in rows.
+     * Safe to rerun: StockLedgerService returns existing rows for the same source + txn_type.
+     *
+     * @return array{examined: int, posted_lines: int, already_complete: int, failed: list<array{grn_id: int, grn_number: string, message: string}>}
+     */
+    public function recoverUnpostedGrns(?Warehouse $fallback = null): array
+    {
+        $examined = 0;
+        $postedLines = 0;
+        $alreadyComplete = 0;
+        $failed = [];
+
+        foreach (Grn::query()->where('status', GrnStatus::Approved)->orderBy('id')->get() as $grn) {
+            $examined++;
+            if (! $this->grnPoster->hasIncompletePosting($grn)) {
+                $alreadyComplete++;
+
+                continue;
+            }
+
+            try {
+                $remarks = $grn->warehouse_id === null
+                    ? "{$grn->grn_number} (reconcile recovery; GRN approved without a warehouse)"
+                    : "{$grn->grn_number} (reconcile recovery)";
+                foreach ($this->grnPoster->post($grn, $fallback, $remarks) as $result) {
+                    if ($result['created']) {
+                        $postedLines++;
+                    }
+                }
+            } catch (\Throwable $e) {
+                $failed[] = [
+                    'grn_id' => $grn->id,
+                    'grn_number' => $grn->grn_number,
+                    'message' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return [
+            'examined' => $examined,
+            'posted_lines' => $postedLines,
+            'already_complete' => $alreadyComplete,
+            'failed' => $failed,
+        ];
     }
 
     /**

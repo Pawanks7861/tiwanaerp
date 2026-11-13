@@ -3,7 +3,7 @@
 namespace App\Models\Subcontract;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
+use App\Models\Approval\ApprovalRequest;
 use App\Enums\Subcontract\SubcontractorBillStatus;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
@@ -183,12 +183,9 @@ class SubcontractorBill extends Model implements Approvable
         $this->forceFill(['status' => SubcontractorBillStatus::Submitted])->save();
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $approverId = $this->approvalRequests()->first()?->actions()
-            ->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(SubcontractorBillService::class)->certify($this, $approverId);
+        app(SubcontractorBillService::class)->certify($this, $this->completingApproverId($request));
     }
 
     public function onApprovalRejected(): void

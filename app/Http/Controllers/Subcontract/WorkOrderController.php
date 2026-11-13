@@ -4,9 +4,12 @@ namespace App\Http\Controllers\Subcontract;
 
 use App\Enums\Subcontract\MilestoneStatus;
 use App\Enums\Subcontract\WorkOrderStatus;
+use App\Enums\Subcontract\WorkOrderTemplateProfile;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
+use App\Models\Core\Company;
+use App\Models\Core\DocumentTermsTemplate;
 use App\Models\Masters\Subcontractor;
 use App\Models\Projects\Project;
 use App\Models\Subcontract\SubcontractorBill;
@@ -16,12 +19,17 @@ use App\Models\Subcontract\WorkOrderMilestone;
 use App\Models\User;
 use App\Services\Subcontract\SubcontractorBillService;
 use App\Services\Subcontract\WorkOrderService;
+use App\Support\Pdf\PdfResponder;
+use App\Support\Pdf\WorkOrderPdfDataBuilder;
+use App\Support\Subcontract\WorkOrderValidation;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class WorkOrderController extends Controller
 {
@@ -85,7 +93,12 @@ class WorkOrderController extends Controller
             'project' => ProjectHeader::for($project),
             'order' => [
                 ...$this->header($order),
-                ...$order->only(['scope', 'terms', 'retention_percent', 'advance_amount', 'tax_percent', 'tds_percent', 'subtotal', 'tax_amount', 'cancellation_reason']),
+                ...$order->only([
+                    'subject', 'template_profile', 'pdf_hide_quantities', 'scope', 'contractor_scope', 'company_scope',
+                    'payment_terms', 'terms', 'safety_terms', 'penalty_terms', 'delay_penalty_per_day',
+                    'maximum_penalty_percent', 'retention_percent', 'advance_amount', 'tax_percent', 'tds_percent',
+                    'subtotal', 'tax_amount', 'cancellation_reason',
+                ]),
                 'subcontractor' => $order->subcontractor?->only(['id', 'code', 'name', 'gstin', 'mobile']),
                 'tax_rate' => $order->taxRate?->name,
                 'start_date' => $order->start_date?->toDateString(),
@@ -211,49 +224,45 @@ class WorkOrderController extends Controller
         return back()->with('success', 'Milestones updated.');
     }
 
+    public function pdf(Request $request, Project $project, WorkOrder $workOrder): SymfonyResponse
+    {
+        abort_unless((int) $workOrder->project_id === (int) $project->id, 404);
+        Gate::authorize('export', $workOrder);
+
+        $company = Company::query()->findOrFail($workOrder->company_id);
+        $data = app(WorkOrderPdfDataBuilder::class)->build($workOrder, $project, $company);
+        $pdf = Pdf::loadView('pdf.work-order', $data)->setPaper('a4');
+
+        return PdfResponder::send($pdf, $workOrder->wo_number.'.pdf', $request->routeIs('projects.work-orders.pdf.view'));
+    }
+
     /**
      * @return array<string, mixed>
      */
     private function validated(Request $request): array
     {
-        return $request->validate([
-            'subcontractor_id' => ['required', 'integer'],
-            'wo_date' => ['required', 'date'],
-            'scope' => ['nullable', 'string', 'max:5000'],
-            'start_date' => ['nullable', 'date'],
-            'end_date' => ['nullable', 'date'],
-            'retention_percent' => ['nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
-            'advance_amount' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999'],
-            'tax_rate_id' => ['nullable', 'integer'],
-            'tds_percent' => ['nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
-            'terms' => ['nullable', 'string', 'max:5000'],
-            'items' => ['required', 'array', 'min:1', 'max:300'],
-            'items.*.boq_item_id' => ['nullable', 'integer'],
-            'items.*.task_id' => ['nullable', 'integer'],
-            'items.*.description' => ['nullable', 'string', 'max:500'],
-            'items.*.unit_id' => ['nullable', 'integer'],
-            'items.*.quantity' => ['required', 'numeric', 'decimal:0,4', 'gt:0', 'max:9999999999'],
-            'items.*.rate' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:9999999999'],
-            'milestones' => ['nullable', 'array', 'max:50'],
-            'milestones.*.name' => ['required', 'string', 'max:200'],
-            'milestones.*.due_date' => ['nullable', 'date'],
-            'milestones.*.amount_percent' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
-        ], [], [
-            'subcontractor_id' => 'subcontractor',
-            'items.*.quantity' => 'quantity',
-            'items.*.rate' => 'rate',
-            'milestones.*.amount_percent' => 'milestone %',
-        ]);
+        return $request->validate(WorkOrderValidation::rules(), [], WorkOrderValidation::attributes());
     }
 
     private function form(Project $project, ?WorkOrder $order): Response
     {
+        $templates = DocumentTermsTemplate::query()
+            ->where('document_type', 'work_order')
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name', 'template_profile', 'contractor_scope', 'company_scope', 'payment_terms', 'safety_terms', 'general_terms', 'penalty_terms']);
+
         return Inertia::render('Subcontract/WorkOrders/Form', [
             'project' => ProjectHeader::for($project),
             'order' => $order ? [
                 'id' => $order->id,
                 'wo_number' => $order->wo_number,
-                ...$order->only(['subcontractor_id', 'scope', 'retention_percent', 'advance_amount', 'tax_rate_id', 'tds_percent', 'terms']),
+                ...$order->only([
+                    'subcontractor_id', 'subject', 'template_profile', 'pdf_hide_quantities', 'document_terms_template_id',
+                    'scope', 'contractor_scope', 'company_scope', 'payment_terms', 'retention_percent', 'advance_amount',
+                    'tax_rate_id', 'tds_percent', 'terms', 'safety_terms', 'penalty_terms', 'delay_penalty_per_day',
+                    'maximum_penalty_percent',
+                ]),
                 'wo_date' => $order->wo_date?->toDateString(),
                 'start_date' => $order->start_date?->toDateString(),
                 'end_date' => $order->end_date?->toDateString(),
@@ -269,6 +278,18 @@ class WorkOrderController extends Controller
                 'units' => ProcurementPresenter::unitOptions(),
                 'boq_items' => ProcurementPresenter::boqItemOptions($project),
                 'tasks' => ProcurementPresenter::taskOptions($project),
+                'profiles' => WorkOrderTemplateProfile::options(),
+                'terms_templates' => $templates->map(fn (DocumentTermsTemplate $t) => [
+                    'value' => $t->id,
+                    'label' => $t->name,
+                    'template_profile' => $t->template_profile,
+                    'contractor_scope' => $t->contractor_scope,
+                    'company_scope' => $t->company_scope,
+                    'payment_terms' => $t->payment_terms,
+                    'safety_terms' => $t->safety_terms,
+                    'general_terms' => $t->general_terms,
+                    'penalty_terms' => $t->penalty_terms,
+                ])->all(),
             ],
             'today' => now()->toDateString(),
         ]);
@@ -310,6 +331,7 @@ class WorkOrderController extends Controller
             'milestones' => $billable && $user->can('updateMilestones', $order),
             'create_bill' => $billable && $user->can('create', [SubcontractorBill::class, $order->project]),
             'attach' => $editable && $user->can('update', $order),
+            'export' => $user->can('export', $order),
         ];
     }
 }

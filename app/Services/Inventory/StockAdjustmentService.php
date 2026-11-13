@@ -346,7 +346,7 @@ class StockAdjustmentService
             'warehouse_id' => $this->scope->warehouse($project, $data['warehouse_id'] ?? null)->id,
             'adjustment_date' => $data['adjustment_date'],
             'reason' => $data['reason'],
-            'remarks' => $data['remarks'],
+            'remarks' => $data['remarks'] ?? null,
         ];
     }
 }

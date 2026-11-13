@@ -3,8 +3,8 @@
 namespace App\Models\Inventory;
 
 use App\Contracts\Approvable;
-use App\Enums\Approval\ApprovalActionType;
 use App\Enums\Inventory\InventoryDocumentStatus;
+use App\Models\Approval\ApprovalRequest;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
@@ -140,29 +140,37 @@ class MaterialIssue extends Model implements Approvable
 
     public function onApprovalSubmitted(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => InventoryDocumentStatus::Submitted])->save();
+        $this->recordApprovalAudit('submitted', $from, InventoryDocumentStatus::Submitted, $this->pendingApprovalRequest());
     }
 
-    public function onApprovalCompleted(): void
+    public function onApprovalCompleted(?ApprovalRequest $request = null): void
     {
-        $approverId = $this->approvalRequests()->first()?->actions()
-            ->where('action', ApprovalActionType::Approved)->reorder('id', 'desc')->value('user_id');
-
-        app(MaterialIssueService::class)->post($this, $approverId);
+        $from = $this->status;
+        app(MaterialIssueService::class)->post($this, $this->completingApproverId($request));
+        // Semantic "posted" (ledger) maps to InventoryDocumentStatus::Approved.
+        $this->recordApprovalAudit('posted', $from, InventoryDocumentStatus::Approved, $request);
     }
 
     public function onApprovalRejected(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => InventoryDocumentStatus::Rejected])->save();
+        $this->recordApprovalAudit('rejected', $from, InventoryDocumentStatus::Rejected, $this->latestApprovalRequest);
     }
 
     public function onApprovalSentBack(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => InventoryDocumentStatus::Draft])->save();
+        $this->recordApprovalAudit('sent_back', $from, InventoryDocumentStatus::Draft, $this->latestApprovalRequest);
     }
 
     public function onApprovalCancelled(): void
     {
+        $from = $this->status;
         $this->forceFill(['status' => InventoryDocumentStatus::Draft])->save();
+        $this->recordApprovalAudit('withdrawn', $from, InventoryDocumentStatus::Draft, $this->latestApprovalRequest);
     }
 }
