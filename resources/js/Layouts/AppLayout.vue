@@ -89,6 +89,8 @@ function refreshChat() {
 }
 
 // Recomputed on every visit so "active" follows the current URL.
+const menuItems = computed(() => page.props.auth?.menu_items ?? null);
+
 const navigation = computed(() => {
     void page.url;
 
@@ -97,6 +99,7 @@ const navigation = computed(() => {
         isSuperAdmin: !!user.value?.is_super_admin,
         multiCompany: multiCompany.value,
         advancedBoqCalculations: advancedBoqCalculations.value,
+        menuItems: menuItems.value,
     });
 });
 

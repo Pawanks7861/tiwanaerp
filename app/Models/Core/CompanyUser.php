@@ -21,12 +21,13 @@ class CompanyUser extends Pivot
 
     public $incrementing = true;
 
-    protected $fillable = ['company_id', 'user_id', 'user_type', 'is_active'];
+    protected $fillable = ['company_id', 'user_id', 'user_type', 'is_active', 'menu_items'];
 
     protected function casts(): array
     {
         return [
             'is_active' => 'boolean',
+            'menu_items' => 'array',
         ];
     }
 

@@ -57,7 +57,7 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(Company::class)
             ->using(CompanyUser::class)
-            ->withPivot(['id', 'user_type', 'is_active'])
+            ->withPivot(['id', 'user_type', 'is_active', 'menu_items'])
             ->withTimestamps();
     }
 

@@ -2,14 +2,16 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Core\CompanyUser;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Chat\ChatPresenter;
 use App\Services\Notifications\FcmClient;
+use App\Services\Tutorial\TutorialProgressService;
 use App\Support\Boq\BoqCompanySettings;
-use App\Support\Procurement\ProcurementSettings;
 use App\Support\Permissions\DefaultRoles;
 use App\Support\Permissions\PermissionCatalog;
+use App\Support\Procurement\ProcurementSettings;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\Request;
 use Illuminate\Notifications\DatabaseNotification;
@@ -81,7 +83,7 @@ class HandleInertiaRequests extends Middleware
             return ['show' => false];
         }
 
-        return app(\App\Services\Tutorial\TutorialProgressService::class)->inertiaPayload($user);
+        return app(TutorialProgressService::class)->inertiaPayload($user);
     }
 
     /**
@@ -108,10 +110,11 @@ class HandleInertiaRequests extends Middleware
     private function auth(?User $user): ?array
     {
         if ($user === null) {
-            return ['user' => null, 'permissions' => []];
+            return ['user' => null, 'permissions' => [], 'menu_items' => null];
         }
 
-        $hasCompany = app(CurrentCompany::class)->has();
+        $company = app(CurrentCompany::class)->get();
+        $hasCompany = $company !== null;
 
         return [
             'user' => [
@@ -126,6 +129,13 @@ class HandleInertiaRequests extends Middleware
                 $hasCompany => $user->getAllPermissions()->pluck('name')->values()->all(),
                 default => [],
             },
+            'menu_items' => $hasCompany
+                ? CompanyUser::query()
+                    ->where('company_id', $company->id)
+                    ->where('user_id', $user->id)
+                    ->first()
+                    ?->menu_items
+                : null,
         ];
     }
 

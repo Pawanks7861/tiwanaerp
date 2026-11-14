@@ -9,6 +9,8 @@ use App\Models\Core\Role;
 use App\Models\User;
 use App\Services\Core\CompanyDirectory;
 use App\Services\Core\UserService;
+use App\Support\Navigation\SidebarCatalog;
+use App\Support\Permissions\PermissionCatalog;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -62,6 +64,8 @@ class UserController extends Controller
         return Inertia::render('Admin/Users/Form', [
             'user' => null,
             'roles' => $this->roleOptions(),
+            'permissionCatalog' => $this->permissionCatalog(),
+            'menuCatalog' => SidebarCatalog::groups(),
             'canEditProfile' => true,
         ]);
     }
@@ -82,14 +86,21 @@ class UserController extends Controller
         Gate::authorize('update', $user);
 
         $user->load('roles:id,name');
+        $companyId = $this->tenancy->require()->id;
+        /** @var CompanyUser|null $membership */
+        $membership = $user->memberships()->where('company_id', $companyId)->first();
 
         return Inertia::render('Admin/Users/Form', [
             'user' => [
                 ...$user->only(['id', 'name', 'email', 'mobile']),
                 'is_placeholder_email' => $user->isPlaceholderEmail(),
                 'roles' => $user->roles->pluck('id')->all(),
+                'permissions' => $user->getDirectPermissions()->pluck('name')->values()->all(),
+                'menu_items' => $membership?->menu_items ?? [],
             ],
             'roles' => $this->roleOptions(),
+            'permissionCatalog' => $this->permissionCatalog(),
+            'menuCatalog' => SidebarCatalog::groups(),
             'canEditProfile' => $this->users->canEditProfile($user, $request->user()),
         ]);
     }
@@ -119,6 +130,19 @@ class UserController extends Controller
         return Role::query()->forCurrentCompany()->orderBy('name')->get(['id', 'name', 'description'])
             ->map(fn (Role $r) => ['value' => $r->id, 'label' => $r->name, 'description' => $r->description])
             ->all();
+    }
+
+    /**
+     * @return list<array{group: string, modules: list<array{key: string, label: string, actions: list<string>}>}>
+     */
+    private function permissionCatalog(): array
+    {
+        $groups = [];
+        foreach (PermissionCatalog::modules() as $key => $module) {
+            $groups[$module['group']][] = ['key' => $key, 'label' => $module['label'], 'actions' => $module['actions']];
+        }
+
+        return array_map(fn ($group, $modules) => ['group' => $group, 'modules' => $modules], array_keys($groups), $groups);
     }
 
     /**
