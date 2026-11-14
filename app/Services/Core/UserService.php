@@ -22,6 +22,7 @@ class UserService
     public function __construct(
         private readonly CurrentCompany $tenancy,
         private readonly CompanyService $companies,
+        private readonly CompanyProvisioner $provisioner,
         private readonly PermissionRegistrar $registrar,
     ) {}
 
@@ -182,6 +183,9 @@ class UserService
      */
     public function syncDirectPermissions(Company $company, User $user, array $permissionNames): void
     {
+        // Catalog names may be newer than the permissions table (e.g. utilities.*).
+        $this->provisioner->ensurePermissions();
+
         $this->tenancy->runAs($company, function () use ($company, $user, $permissionNames) {
             $previousTeam = $this->registrar->getPermissionsTeamId();
             $this->registrar->setPermissionsTeamId($company->id);
