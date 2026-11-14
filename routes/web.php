@@ -1,25 +1,24 @@
 <?php
 
+use App\Http\Controllers\Admin\ApprovalDelegationController;
 use App\Http\Controllers\Admin\ApprovalWorkflowController;
-use App\Http\Controllers\Ai\AiAssistantController;
-use App\Http\Controllers\Boq\BoqItemWorkspaceController;
-use App\Http\Controllers\Boq\Coefficient\CostingRateLibraryController;
-use App\Http\Controllers\Boq\Coefficient\MaterialRecipeController;
-use App\Http\Controllers\Boq\Coefficient\SteelUnitWeightProfileController;
-use App\Http\Controllers\Boq\Coefficient\UnitConversionController;
-use App\Http\Controllers\Boq\MaterialRequirementController;
-use App\Http\Controllers\Boq\MaterialReconciliationController;
-use App\Http\Controllers\Tutorial\TutorialController;
-use App\Http\Controllers\Imports\DataImportController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\BrandingController;
 use App\Http\Controllers\Admin\CompanySettingsController;
 use App\Http\Controllers\Admin\DocumentTermsTemplateController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\Ai\AiAssistantController;
 use App\Http\Controllers\Boq\BoqController;
 use App\Http\Controllers\Boq\BoqExcelController;
+use App\Http\Controllers\Boq\BoqItemWorkspaceController;
 use App\Http\Controllers\Boq\BoqSectionController;
+use App\Http\Controllers\Boq\Coefficient\CostingRateLibraryController;
+use App\Http\Controllers\Boq\Coefficient\MaterialRecipeController;
+use App\Http\Controllers\Boq\Coefficient\SteelUnitWeightProfileController;
+use App\Http\Controllers\Boq\Coefficient\UnitConversionController;
+use App\Http\Controllers\Boq\MaterialReconciliationController;
+use App\Http\Controllers\Boq\MaterialRequirementController;
 use App\Http\Controllers\Boq\ProjectBudgetController;
 use App\Http\Controllers\Boq\RateAnalysisController;
 use App\Http\Controllers\Chat\ChatController;
@@ -37,21 +36,22 @@ use App\Http\Controllers\Documents\DocumentController;
 use App\Http\Controllers\Documents\DocumentFolderController;
 use App\Http\Controllers\Documents\DrawingController;
 use App\Http\Controllers\Equipment\EquipmentAssignmentController;
-use App\Http\Controllers\Equipment\EquipmentLocationController;
 use App\Http\Controllers\Equipment\EquipmentFuelController;
+use App\Http\Controllers\Equipment\EquipmentLocationController;
 use App\Http\Controllers\Equipment\EquipmentQuantityMovementController;
 use App\Http\Controllers\Equipment\EquipmentRepairController;
 use App\Http\Controllers\Equipment\EquipmentUsageController;
 use App\Http\Controllers\Files\FileViewerController;
 use App\Http\Controllers\Finance\CashFlowController;
-use App\Http\Controllers\Gate\CompanyGatePassController;
-use App\Http\Controllers\Gate\GatePassController;
 use App\Http\Controllers\Finance\ClientInvoiceController;
 use App\Http\Controllers\Finance\ExpenseController;
 use App\Http\Controllers\Finance\PaymentController;
 use App\Http\Controllers\Finance\PettyCashController;
 use App\Http\Controllers\Finance\RetentionController;
 use App\Http\Controllers\Finance\VendorBillController;
+use App\Http\Controllers\Gate\CompanyGatePassController;
+use App\Http\Controllers\Gate\GatePassController;
+use App\Http\Controllers\Imports\DataImportController;
 use App\Http\Controllers\Integrations\TallyDocumentController;
 use App\Http\Controllers\Integrations\TallyHistoryController;
 use App\Http\Controllers\Integrations\TallyMappingController;
@@ -85,17 +85,18 @@ use App\Http\Controllers\Quality\NcrController;
 use App\Http\Controllers\Quality\QualityChecklistController;
 use App\Http\Controllers\Quality\QualityInspectionController;
 use App\Http\Controllers\Reports\ReportController;
+use App\Http\Controllers\Reports\ReportExportController;
 use App\Http\Controllers\Scrap\ScrapAdjustmentController;
 use App\Http\Controllers\Scrap\ScrapBalanceController;
 use App\Http\Controllers\Scrap\ScrapDashboardController;
 use App\Http\Controllers\Scrap\ScrapGenerationController;
 use App\Http\Controllers\Scrap\ScrapLedgerController;
-use App\Http\Controllers\Reports\ReportExportController;
 use App\Http\Controllers\SiteExecution\DprController;
 use App\Http\Controllers\SiteExecution\SiteDiaryController;
 use App\Http\Controllers\SiteExecution\SiteDiaryPhotoController;
 use App\Http\Controllers\Subcontract\SubcontractorBillController;
 use App\Http\Controllers\Subcontract\WorkOrderController;
+use App\Http\Controllers\Tutorial\TutorialController;
 use App\Http\Controllers\Uploads\UploadController;
 use App\Http\Controllers\Utilities\Electricity\ElectricityBillController;
 use App\Http\Controllers\Utilities\Electricity\ElectricityComparisonController;
@@ -216,6 +217,10 @@ Route::middleware(['auth', 'company'])->group(function () {
                 Route::post('/measurements/{sheet}/reject', [BoqItemWorkspaceController::class, 'reject'])->whereNumber('sheet')->name('measurements.reject');
                 Route::put('/cost-build-up', [BoqItemWorkspaceController::class, 'saveCostBuildUp'])->name('cost-build-up.save');
                 Route::get('/cost-build-up/suggest-rate', [BoqItemWorkspaceController::class, 'suggestCostRate'])->name('cost-build-up.suggest-rate');
+                Route::get('/cost-build-up/refresh-rates', [BoqItemWorkspaceController::class, 'previewRateRefresh'])->name('cost-build-up.refresh-rates.preview');
+                Route::post('/cost-build-up/refresh-rates', [BoqItemWorkspaceController::class, 'applyRateRefresh'])->name('cost-build-up.refresh-rates.apply');
+                Route::put('/rate-comparison', [BoqItemWorkspaceController::class, 'saveRateComparison'])->name('rate-comparison.save');
+                Route::put('/planning-map', [BoqItemWorkspaceController::class, 'savePlanningMap'])->name('planning-map.save');
                 Route::put('/material-norms', [BoqItemWorkspaceController::class, 'saveMaterialNorms'])->name('material-norms.save');
                 Route::post('/material-norms/apply-recipe', [BoqItemWorkspaceController::class, 'applyRecipe'])->name('material-norms.apply-recipe');
                 Route::post('/material-norms/from-cost', [BoqItemWorkspaceController::class, 'importNormsFromCost'])->name('material-norms.from-cost');
@@ -475,33 +480,33 @@ Route::middleware(['auth', 'company'])->group(function () {
 
         // Procurement: RFQs, vendor quotations, bid comparison. Hidden while procurement.rfq_enabled is off.
         Route::middleware('procurement.rfq')->group(function () {
-        Route::get('/rfqs', [RfqController::class, 'index'])->name('projects.rfqs.index');
-        Route::get('/rfqs/create', [RfqController::class, 'create'])->name('projects.rfqs.create');
-        Route::post('/rfqs', [RfqController::class, 'store'])->name('projects.rfqs.store');
-        Route::prefix('/rfqs/{rfq}')->whereNumber('rfq')->name('projects.rfqs.')->group(function () {
-            Route::get('/', [RfqController::class, 'show'])->name('show');
-            Route::get('/edit', [RfqController::class, 'edit'])->name('edit');
-            Route::put('/', [RfqController::class, 'update'])->name('update');
-            Route::delete('/', [RfqController::class, 'destroy'])->name('destroy');
-            Route::put('/vendors', [RfqController::class, 'vendors'])->name('vendors');
-            Route::post('/send', [RfqController::class, 'send'])->name('send');
-            Route::post('/close', [RfqController::class, 'close'])->name('close');
-            Route::post('/cancel', [RfqController::class, 'cancel'])->name('cancel');
+            Route::get('/rfqs', [RfqController::class, 'index'])->name('projects.rfqs.index');
+            Route::get('/rfqs/create', [RfqController::class, 'create'])->name('projects.rfqs.create');
+            Route::post('/rfqs', [RfqController::class, 'store'])->name('projects.rfqs.store');
+            Route::prefix('/rfqs/{rfq}')->whereNumber('rfq')->name('projects.rfqs.')->group(function () {
+                Route::get('/', [RfqController::class, 'show'])->name('show');
+                Route::get('/edit', [RfqController::class, 'edit'])->name('edit');
+                Route::put('/', [RfqController::class, 'update'])->name('update');
+                Route::delete('/', [RfqController::class, 'destroy'])->name('destroy');
+                Route::put('/vendors', [RfqController::class, 'vendors'])->name('vendors');
+                Route::post('/send', [RfqController::class, 'send'])->name('send');
+                Route::post('/close', [RfqController::class, 'close'])->name('close');
+                Route::post('/cancel', [RfqController::class, 'cancel'])->name('cancel');
 
-            Route::get('/quotations/create', [VendorQuotationController::class, 'create'])->name('quotations.create');
-            Route::post('/quotations', [VendorQuotationController::class, 'store'])->name('quotations.store');
-            Route::get('/quotations/{quotation}/edit', [VendorQuotationController::class, 'edit'])->whereNumber('quotation')->name('quotations.edit');
-            Route::put('/quotations/{quotation}', [VendorQuotationController::class, 'update'])->whereNumber('quotation')->name('quotations.update');
-            Route::delete('/quotations/{quotation}', [VendorQuotationController::class, 'destroy'])->whereNumber('quotation')->name('quotations.destroy');
+                Route::get('/quotations/create', [VendorQuotationController::class, 'create'])->name('quotations.create');
+                Route::post('/quotations', [VendorQuotationController::class, 'store'])->name('quotations.store');
+                Route::get('/quotations/{quotation}/edit', [VendorQuotationController::class, 'edit'])->whereNumber('quotation')->name('quotations.edit');
+                Route::put('/quotations/{quotation}', [VendorQuotationController::class, 'update'])->whereNumber('quotation')->name('quotations.update');
+                Route::delete('/quotations/{quotation}', [VendorQuotationController::class, 'destroy'])->whereNumber('quotation')->name('quotations.destroy');
 
-            Route::get('/comparison', [BidComparisonController::class, 'show'])->name('comparison');
-            Route::put('/comparison', [BidComparisonController::class, 'save'])->name('comparison.save');
-            Route::post('/comparison/submit', [BidComparisonController::class, 'submit'])->name('comparison.submit');
-            Route::post('/comparison/approve', [BidComparisonController::class, 'approve'])->name('comparison.approve');
-            Route::post('/comparison/reject', [BidComparisonController::class, 'reject'])->name('comparison.reject');
+                Route::get('/comparison', [BidComparisonController::class, 'show'])->name('comparison');
+                Route::put('/comparison', [BidComparisonController::class, 'save'])->name('comparison.save');
+                Route::post('/comparison/submit', [BidComparisonController::class, 'submit'])->name('comparison.submit');
+                Route::post('/comparison/approve', [BidComparisonController::class, 'approve'])->name('comparison.approve');
+                Route::post('/comparison/reject', [BidComparisonController::class, 'reject'])->name('comparison.reject');
 
-            Route::post('/purchase-order', [PurchaseOrderController::class, 'storeFromRfq'])->name('purchase-order');
-        });
+                Route::post('/purchase-order', [PurchaseOrderController::class, 'storeFromRfq'])->name('purchase-order');
+            });
         });
 
         // Procurement: purchase orders
@@ -912,9 +917,9 @@ Route::middleware(['auth', 'company'])->group(function () {
 
     // Approvals inbox
     Route::get('/approvals', [ApprovalController::class, 'index'])->name('approvals.index');
-    Route::get('/approvals/delegations', [\App\Http\Controllers\Admin\ApprovalDelegationController::class, 'index'])->name('approvals.delegations.index');
-    Route::post('/approvals/delegations', [\App\Http\Controllers\Admin\ApprovalDelegationController::class, 'store'])->name('approvals.delegations.store');
-    Route::delete('/approvals/delegations/{approvalDelegation}', [\App\Http\Controllers\Admin\ApprovalDelegationController::class, 'destroy'])->whereNumber('approvalDelegation')->name('approvals.delegations.destroy');
+    Route::get('/approvals/delegations', [ApprovalDelegationController::class, 'index'])->name('approvals.delegations.index');
+    Route::post('/approvals/delegations', [ApprovalDelegationController::class, 'store'])->name('approvals.delegations.store');
+    Route::delete('/approvals/delegations/{approvalDelegation}', [ApprovalDelegationController::class, 'destroy'])->whereNumber('approvalDelegation')->name('approvals.delegations.destroy');
     Route::prefix('/approvals/{approvalRequest}')->name('approvals.')->group(function () {
         Route::post('/approve', [ApprovalController::class, 'approve'])->name('approve');
         Route::post('/reject', [ApprovalController::class, 'reject'])->name('reject');

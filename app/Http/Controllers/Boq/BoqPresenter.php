@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Boq;
 
 use App\Enums\Boq\BoqStatus;
 use App\Enums\Documents\DrawingRevisionStatus;
+use App\Http\Resources\AttachmentResource;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
 use App\Models\Boq\RateAnalysis;
 use App\Models\Documents\DrawingRevision;
 use App\Models\Projects\Project;
 use App\Models\User;
+use App\Services\Boq\SimpleBoqMaterialCostService;
+use App\Support\Math\Decimal;
 
 /**
  * Serialises BOQ data for Inertia/JSON. Cost fields are removed on the server for users without
@@ -22,6 +25,8 @@ final class BoqPresenter
      */
     public static function header(Boq $boq, bool $withCosts): array
     {
+        $boq->loadMissing(['parent:id,version,title', 'creator:id,name']);
+
         $data = [
             ...$boq->only(['id', 'boq_number', 'version', 'title', 'revision_reason', 'is_current', 'parent_boq_id', 'total_client_amount']),
             'status' => $boq->status->value,
@@ -30,6 +35,17 @@ final class BoqPresenter
             'approved_by' => $boq->relationLoaded('approver') ? $boq->approver?->name : null,
             'created_at' => $boq->created_at?->toIso8601String(),
             'updated_at' => $boq->updated_at?->toIso8601String(),
+            'created_by_name' => $boq->creator?->name,
+            'cloned_from' => $boq->parent_boq_id
+                ? [
+                    'id' => $boq->parent?->id,
+                    'version' => $boq->parent?->version,
+                    'title' => $boq->parent?->title,
+                    'label' => $boq->parent
+                        ? "Revision {$boq->version} cloned from Revision {$boq->parent->version}"
+                        : "Revision {$boq->version}",
+                ]
+                : null,
         ];
 
         if ($withCosts) {
@@ -56,7 +72,7 @@ final class BoqPresenter
         $attachments = $item->relationLoaded('attachments')
             ? $item->attachments
             : $item->attachments()->with('uploader:id,name')->get();
-        $data['attachments'] = \App\Http\Resources\AttachmentResource::collection(
+        $data['attachments'] = AttachmentResource::collection(
             $attachments->each(fn ($attachment) => $attachment->setRelation('attachable', $item))
         )->resolve();
 
@@ -66,7 +82,7 @@ final class BoqPresenter
             $materials = $item->relationLoaded('simpleMaterialCosts')
                 ? $item->simpleMaterialCosts
                 : $item->simpleMaterialCosts()->get();
-            $materialService = app(\App\Services\Boq\SimpleBoqMaterialCostService::class);
+            $materialService = app(SimpleBoqMaterialCostService::class);
             $data['simple_materials'] = $materials->map(function ($row) use ($materialService, $item) {
                 $metrics = $materialService->lineMetrics([
                     'quantity' => (string) $row->quantity,
@@ -92,8 +108,8 @@ final class BoqPresenter
             $data['simple_material_quantity_summary'] = $totals['quantity_summary'];
             $labourRate = (string) ($item->labour_rate ?? '0');
             $data['labour_rate'] = $labourRate;
-            $data['simple_labour_cost_per_unit'] = \App\Support\Math\Decimal::of($labourRate)->toMoney();
-            $data['simple_labour_cost_total'] = \App\Support\Math\Decimal::of((string) $item->quantity)
+            $data['simple_labour_cost_per_unit'] = Decimal::of($labourRate)->toMoney();
+            $data['simple_labour_cost_total'] = Decimal::of((string) $item->quantity)
                 ->times($labourRate)
                 ->toMoney();
             $data['is_pcc_work'] = $materialService->isPccWork($item);

@@ -5,6 +5,7 @@ namespace App\Services\Boq;
 use App\Enums\Boq\BoqStatus;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -12,10 +13,20 @@ use Illuminate\Validation\ValidationException;
  * Creates the next revision of an approved BOQ (architecture: approved BOQs are immutable).
  * The clone is a new draft with version + 1; every line keeps its line_uid so later modules
  * (planning, progress, billing) can follow a line across revisions.
+ *
+ * Advanced BOQ children (MB, norms, cost, BBS, rate comparison, planning maps) are deep-cloned
+ * via AdvancedBoqRevisionCloneService using old→new item id mapping.
  */
 class BoqRevisionService
 {
-    public function revise(Boq $boq, string $reason): Boq
+    public function __construct(
+        private readonly AdvancedBoqRevisionCloneService $advancedClone,
+    ) {}
+
+    /**
+     * @return Boq Draft revision with advanced_clone_summary attribute set for callers/tests
+     */
+    public function revise(Boq $boq, string $reason, ?User $user = null): Boq
     {
         $reason = trim($reason);
         if ($reason === '') {
@@ -25,7 +36,7 @@ class BoqRevisionService
             throw ValidationException::withMessages(['revision_reason' => 'Revision reason may not exceed 255 characters.']);
         }
 
-        return DB::transaction(function () use ($boq, $reason) {
+        return DB::transaction(function () use ($boq, $reason, $user) {
             $source = Boq::query()->whereKey($boq->id)->lockForUpdate()->firstOrFail();
 
             if ($source->status !== BoqStatus::Approved || ! $source->is_current) {
@@ -55,17 +66,25 @@ class BoqRevisionService
                 'is_current' => false,
                 'total_cost_amount' => $source->total_cost_amount,
                 'total_client_amount' => $source->total_client_amount,
+                'created_by' => $user?->id,
+                'updated_by' => $user?->id,
             ])->save();
 
             $sectionMap = $this->cloneSections($source, $revision);
-            $this->cloneItems($source, $revision, $sectionMap);
+            $itemMap = $this->cloneItems($source, $revision, $sectionMap);
             $this->cloneDrawingLinks($source, $revision);
+
+            $cloneSummary = $this->advancedClone->cloneChildren($source, $revision, $itemMap, $user);
 
             $revision->writeAudit('revised', null, [
                 'parent_boq_id' => $source->id,
                 'parent_version' => $source->version,
                 'revision_reason' => $reason,
+                'advanced_clone' => $cloneSummary,
             ]);
+
+            $revision->advancedCloneSummary = $cloneSummary;
+            $revision->sourceRevisionId = $source->id;
 
             return $revision;
         });
@@ -92,14 +111,18 @@ class BoqRevisionService
 
     /**
      * @param  array<int, int>  $sectionMap
+     * @return array<int, int> old item id => new item id
      */
-    private function cloneItems(Boq $source, Boq $revision, array $sectionMap): void
+    private function cloneItems(Boq $source, Boq $revision, array $sectionMap): array
     {
-        $source->items()->with('simpleMaterialCosts')->orderBy('id')->get()->each(function (BoqItem $item) use ($revision, $sectionMap) {
+        $itemMap = [];
+
+        $source->items()->with('simpleMaterialCosts')->orderBy('id')->get()->each(function (BoqItem $item) use ($revision, $sectionMap, &$itemMap) {
             $copy = $item->replicate(['boq_id', 'boq_section_id']);
             $copy->boq()->associate($revision);
             $copy->boq_section_id = $sectionMap[$item->boq_section_id];
             $copy->save();
+            $itemMap[$item->id] = $copy->id;
 
             foreach ($item->simpleMaterialCosts as $material) {
                 $materialCopy = $material->replicate(['boq_id', 'boq_item_id', 'project_id']);
@@ -111,6 +134,8 @@ class BoqRevisionService
                 ])->save();
             }
         });
+
+        return $itemMap;
     }
 
     /**

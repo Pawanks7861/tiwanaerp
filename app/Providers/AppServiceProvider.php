@@ -19,32 +19,35 @@ use App\Listeners\SendApprovalNotifications;
 use App\Listeners\SendChatNotification;
 use App\Listeners\SendOperationalNotifications;
 use App\Listeners\SendProcurementNotifications;
+use App\Models\Approval\ApprovalDelegation;
 use App\Models\Approval\ApprovalRequest;
 use App\Models\Approval\ApprovalWorkflow;
 use App\Models\Boq\Boq;
-use App\Models\Boq\BoqCostComponent;
-use App\Models\Boq\BoqItem;
-use App\Models\Boq\BoqItemMaterialCost;
 use App\Models\Boq\BoqBbs;
 use App\Models\Boq\BoqBbsAdjustment;
 use App\Models\Boq\BoqBbsLine;
 use App\Models\Boq\BoqBbsSteelMap;
-use App\Models\Boq\BoqVariation;
-use App\Models\Boq\BoqVariationItem;
+use App\Models\Boq\BoqCostComponent;
+use App\Models\Boq\BoqItem;
+use App\Models\Boq\BoqItemMaterialCost;
 use App\Models\Boq\BoqMaterialNorm;
 use App\Models\Boq\BoqMeasurementLine;
 use App\Models\Boq\BoqMeasurementSheet;
+use App\Models\Boq\BoqPlanningMap;
+use App\Models\Boq\BoqRateComparisonQuote;
 use App\Models\Boq\BoqSection;
+use App\Models\Boq\BoqVariation;
+use App\Models\Boq\BoqVariationItem;
 use App\Models\Boq\CostingRateLibraryEntry;
 use App\Models\Boq\MaterialRecipeTemplate;
 use App\Models\Boq\MaterialRecipeTemplateLine;
-use App\Models\Boq\SteelUnitWeightProfile;
-use App\Models\Boq\SteelUnitWeightProfileLine;
-use App\Models\Boq\UnitConversion;
 use App\Models\Boq\ProjectBudget;
 use App\Models\Boq\ProjectBudgetLine;
 use App\Models\Boq\RateAnalysis;
 use App\Models\Boq\RateAnalysisItem;
+use App\Models\Boq\SteelUnitWeightProfile;
+use App\Models\Boq\SteelUnitWeightProfileLine;
+use App\Models\Boq\UnitConversion;
 use App\Models\Core\Attachment;
 use App\Models\Core\Company;
 use App\Models\Core\CompanySetting;
@@ -66,6 +69,7 @@ use App\Models\Documents\DrawingRevision;
 use App\Models\Equipment\Equipment;
 use App\Models\Equipment\EquipmentAssignment;
 use App\Models\Equipment\EquipmentFuelLog;
+use App\Models\Equipment\EquipmentLocationHistory;
 use App\Models\Equipment\EquipmentRepair;
 use App\Models\Equipment\EquipmentUsageLog;
 use App\Models\Finance\ClientInvoice;
@@ -79,6 +83,11 @@ use App\Models\Finance\ProjectCostEntry;
 use App\Models\Finance\RetentionRelease;
 use App\Models\Finance\VendorBill;
 use App\Models\Finance\VendorBillItem;
+use App\Models\Gate\GatePass;
+use App\Models\Gate\GatePassItem;
+use App\Models\Gate\GatePassReturn;
+use App\Models\Gate\GatePassReturnItem;
+use App\Models\Imports\DataImport;
 use App\Models\Integrations\TallyConnection;
 use App\Models\Integrations\TallyCostCentreMapping;
 use App\Models\Integrations\TallyLedgerMapping;
@@ -96,24 +105,19 @@ use App\Models\Inventory\StockTransfer;
 use App\Models\Inventory\StockTransferItem;
 use App\Models\Inventory\StockTransferReceipt;
 use App\Models\Inventory\StockTransferReceiptItem;
-use App\Models\Masters\ScrapCategory;
-use App\Models\Masters\ScrapType;
-use App\Models\Scrap\ScrapAdjustment;
-use App\Models\Scrap\ScrapAdjustmentItem;
-use App\Models\Scrap\ScrapBalance;
-use App\Models\Scrap\ScrapGeneration;
-use App\Models\Scrap\ScrapGenerationItem;
-use App\Models\Scrap\ScrapLedgerEntry;
 use App\Models\Labour\Labour;
 use App\Models\Labour\LabourAdvance;
 use App\Models\Labour\LabourAttendance;
 use App\Models\Labour\LabourPayment;
 use App\Models\Labour\LabourPaymentLine;
+use App\Models\Masters\Department;
 use App\Models\Masters\EquipmentType;
 use App\Models\Masters\ExpenseCategory;
 use App\Models\Masters\LabourTrade;
 use App\Models\Masters\Material;
 use App\Models\Masters\MaterialCategory;
+use App\Models\Masters\ScrapCategory;
+use App\Models\Masters\ScrapType;
 use App\Models\Masters\Subcontractor;
 use App\Models\Masters\TaxRate;
 use App\Models\Masters\Unit;
@@ -146,11 +150,17 @@ use App\Models\Quality\QualityChecklistItem;
 use App\Models\Quality\QualityInspection;
 use App\Models\Quality\QualityInspectionItem;
 use App\Models\Reports\ReportExport;
+use App\Models\Scrap\ScrapAdjustment;
+use App\Models\Scrap\ScrapAdjustmentItem;
+use App\Models\Scrap\ScrapBalance;
+use App\Models\Scrap\ScrapGeneration;
+use App\Models\Scrap\ScrapGenerationItem;
+use App\Models\Scrap\ScrapLedgerEntry;
 use App\Models\SiteExecution\Dpr;
+use App\Models\SiteExecution\DprConstraint;
 use App\Models\SiteExecution\DprEquipment;
 use App\Models\SiteExecution\DprItem;
 use App\Models\SiteExecution\DprLabour;
-use App\Models\SiteExecution\DprConstraint;
 use App\Models\SiteExecution\DprMaterial;
 use App\Models\SiteExecution\SiteDiary;
 use App\Models\SiteExecution\SiteDiaryEquipment;
@@ -173,15 +183,16 @@ use App\Models\Utilities\ElectricityMeterTodReading;
 use App\Models\Utilities\ElectricityTariff;
 use App\Models\Utilities\ElectricityTariffComponent;
 use App\Models\Utilities\UtilitySite;
-use App\Models\Imports\DataImport;
+use App\Models\Weighbridge\WeighbridgeReceipt;
+use App\Policies\ApprovalDelegationPolicy;
 use App\Policies\ApprovalWorkflowPolicy;
-use App\Policies\DataImportPolicy;
 use App\Policies\AttachmentPolicy;
 use App\Policies\BoqItemPolicy;
 use App\Policies\BoqPolicy;
 use App\Policies\CompanyPolicy;
 use App\Policies\Crm\LeadPolicy;
 use App\Policies\Crm\QuotationPolicy;
+use App\Policies\DataImportPolicy;
 use App\Policies\Documents\DocumentPolicy;
 use App\Policies\Documents\DrawingPolicy;
 use App\Policies\Equipment\EquipmentAssignmentPolicy;
@@ -194,6 +205,7 @@ use App\Policies\Finance\PaymentPolicy;
 use App\Policies\Finance\PettyCashAccountPolicy;
 use App\Policies\Finance\RetentionReleasePolicy;
 use App\Policies\Finance\VendorBillPolicy;
+use App\Policies\Gate\GatePassPolicy;
 use App\Policies\Inventory\MaterialIssuePolicy;
 use App\Policies\Inventory\MaterialReturnPolicy;
 use App\Policies\Inventory\StockAdjustmentPolicy;
@@ -205,8 +217,6 @@ use App\Policies\MasterPolicy;
 use App\Policies\Procurement\BidComparisonPolicy;
 use App\Policies\Procurement\GrnPolicy;
 use App\Policies\Procurement\MaterialRequestPolicy;
-use App\Policies\Scrap\ScrapAdjustmentPolicy;
-use App\Policies\Scrap\ScrapGenerationPolicy;
 use App\Policies\Procurement\PurchaseOrderPolicy;
 use App\Policies\Procurement\RfqPolicy;
 use App\Policies\Procurement\VendorQuotationPolicy;
@@ -219,6 +229,8 @@ use App\Policies\Quality\QualityChecklistPolicy;
 use App\Policies\Quality\QualityInspectionPolicy;
 use App\Policies\RateAnalysisPolicy;
 use App\Policies\RolePolicy;
+use App\Policies\Scrap\ScrapAdjustmentPolicy;
+use App\Policies\Scrap\ScrapGenerationPolicy;
 use App\Policies\SiteExecution\DprPolicy;
 use App\Policies\SiteExecution\SiteDiaryPolicy;
 use App\Policies\SitePolicy;
@@ -231,6 +243,7 @@ use App\Policies\Utilities\ElectricityMeterPolicy;
 use App\Policies\Utilities\ElectricityMeterReadingPolicy;
 use App\Policies\Utilities\ElectricityTariffPolicy;
 use App\Policies\Utilities\UtilitySitePolicy;
+use App\Policies\Weighbridge\WeighbridgeReceiptPolicy;
 use App\Services\Files\Cad\CadPreviewManager;
 use App\Services\Files\LocalPreviewConverter;
 use App\Services\Files\PreviewConverter;
@@ -307,6 +320,8 @@ class AppServiceProvider extends ServiceProvider
             'boq_measurement_sheet' => BoqMeasurementSheet::class,
             'boq_measurement_line' => BoqMeasurementLine::class,
             'boq_cost_component' => BoqCostComponent::class,
+            'boq_rate_comparison_quote' => BoqRateComparisonQuote::class,
+            'boq_planning_map' => BoqPlanningMap::class,
             'boq_material_norm' => BoqMaterialNorm::class,
             'boq_bbs' => BoqBbs::class,
             'boq_bbs_line' => BoqBbsLine::class,
@@ -379,11 +394,11 @@ class AppServiceProvider extends ServiceProvider
             'equipment_assignment' => EquipmentAssignment::class,
             'equipment_usage_log' => EquipmentUsageLog::class,
             'equipment_fuel_log' => EquipmentFuelLog::class,
-            'equipment_location_history' => \App\Models\Equipment\EquipmentLocationHistory::class,
-            'gate_pass' => \App\Models\Gate\GatePass::class,
-            'gate_pass_item' => \App\Models\Gate\GatePassItem::class,
-            'gate_pass_return' => \App\Models\Gate\GatePassReturn::class,
-            'gate_pass_return_item' => \App\Models\Gate\GatePassReturnItem::class,
+            'equipment_location_history' => EquipmentLocationHistory::class,
+            'gate_pass' => GatePass::class,
+            'gate_pass_item' => GatePassItem::class,
+            'gate_pass_return' => GatePassReturn::class,
+            'gate_pass_return_item' => GatePassReturnItem::class,
             'scrap_category' => ScrapCategory::class,
             'scrap_type' => ScrapType::class,
             'scrap_generation' => ScrapGeneration::class,
@@ -392,8 +407,8 @@ class AppServiceProvider extends ServiceProvider
             'scrap_balance' => ScrapBalance::class,
             'scrap_adjustment' => ScrapAdjustment::class,
             'scrap_adjustment_item' => ScrapAdjustmentItem::class,
-            'department' => \App\Models\Masters\Department::class,
-            'weighbridge_receipt' => \App\Models\Weighbridge\WeighbridgeReceipt::class,
+            'department' => Department::class,
+            'weighbridge_receipt' => WeighbridgeReceipt::class,
             'equipment_repair' => EquipmentRepair::class,
             'expense' => Expense::class,
             'petty_cash_account' => PettyCashAccount::class,
@@ -444,7 +459,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(User::class, UserPolicy::class);
         Gate::policy(Role::class, RolePolicy::class);
         Gate::policy(ApprovalWorkflow::class, ApprovalWorkflowPolicy::class);
-        Gate::policy(\App\Models\Approval\ApprovalDelegation::class, \App\Policies\ApprovalDelegationPolicy::class);
+        Gate::policy(ApprovalDelegation::class, ApprovalDelegationPolicy::class);
         Gate::policy(DataImport::class, DataImportPolicy::class);
         Gate::policy(Project::class, ProjectPolicy::class);
         Gate::policy(Site::class, SitePolicy::class);
@@ -475,10 +490,10 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(EquipmentAssignment::class, EquipmentAssignmentPolicy::class);
         Gate::policy(EquipmentUsageLog::class, EquipmentUsageLogPolicy::class);
         Gate::policy(EquipmentFuelLog::class, EquipmentFuelLogPolicy::class);
-        Gate::policy(\App\Models\Gate\GatePass::class, \App\Policies\Gate\GatePassPolicy::class);
+        Gate::policy(GatePass::class, GatePassPolicy::class);
         Gate::policy(ScrapGeneration::class, ScrapGenerationPolicy::class);
         Gate::policy(ScrapAdjustment::class, ScrapAdjustmentPolicy::class);
-        Gate::policy(\App\Models\Weighbridge\WeighbridgeReceipt::class, \App\Policies\Weighbridge\WeighbridgeReceiptPolicy::class);
+        Gate::policy(WeighbridgeReceipt::class, WeighbridgeReceiptPolicy::class);
         Gate::policy(EquipmentRepair::class, EquipmentRepairPolicy::class);
         Gate::policy(Expense::class, ExpensePolicy::class);
         Gate::policy(PettyCashAccount::class, PettyCashAccountPolicy::class);

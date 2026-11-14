@@ -32,6 +32,12 @@ const props = defineProps({
     material_options: { type: Array, default: () => [] },
     item_procurement: { type: Array, default: null },
     bbs_workspace: { type: Object, default: null },
+    rate_comparison: { type: Object, default: null },
+    rate_comparison_gst_modes: { type: Array, default: () => [] },
+    vendor_options: { type: Array, default: () => [] },
+    planning_map: { type: Object, default: null },
+    planning_task_options: { type: Array, default: () => [] },
+    planning_mapping_methods: { type: Array, default: () => [] },
     can: { type: Object, required: true },
     advanced_boq_calculations: { type: Boolean, default: false },
 });
@@ -45,7 +51,9 @@ const tabs = computed(() => [
     advanced.value && { key: 'measurements', label: 'Measurements' },
     advanced.value && props.can.view_costs && { key: 'cost', label: 'Cost Build-Up' },
     advanced.value && props.can.view_material_requirements && { key: 'materials', label: 'Materials' },
-    advanced.value && props.can.view_bbs && { key: 'bbs', label: 'BBS' },
+    advanced.value && props.can.view_bbs && { key: 'bbs', label: 'BBS / Steel' },
+    advanced.value && props.can.view_costs && { key: 'rate_comparison', label: 'Rate Comparison' },
+    advanced.value && { key: 'planning_map', label: 'Planning Mapping' },
     props.can.view_material_requirements && { key: 'procurement', label: 'Procurement' },
 ].filter(Boolean).map((t) => ({ ...t, href: undefined })));
 
@@ -243,6 +251,20 @@ watch(tab, (next) => {
             route('projects.boqs.items.workspace', [props.project.id, props.boq.id, props.item.id]),
             { bbs: 1 },
             { preserveState: true, preserveScroll: true, only: ['bbs_workspace', 'material_options', 'drawing_revisions', 'can', 'item'] },
+        );
+    }
+    if (next === 'rate_comparison' && advanced.value && props.can.view_costs && !props.rate_comparison) {
+        router.get(
+            route('projects.boqs.items.workspace', [props.project.id, props.boq.id, props.item.id]),
+            { rate_comparison: 1 },
+            { preserveState: true, preserveScroll: true, only: ['rate_comparison', 'rate_comparison_gst_modes', 'vendor_options', 'can', 'item'] },
+        );
+    }
+    if (next === 'planning_map' && advanced.value && !props.planning_map) {
+        router.get(
+            route('projects.boqs.items.workspace', [props.project.id, props.boq.id, props.item.id]),
+            { planning_map: 1 },
+            { preserveState: true, preserveScroll: true, only: ['planning_map', 'planning_task_options', 'planning_mapping_methods', 'can', 'item'] },
         );
     }
 });
@@ -584,6 +606,136 @@ function saveCost() {
     });
 }
 
+function blankRateQuote() {
+    return {
+        id: null,
+        vendor_id: null,
+        vendor_name: '',
+        quoted_rate: '',
+        gst_mode: 'inclusive',
+        gst_percent: '',
+        remarks: '',
+    };
+}
+
+const rateCompareForm = useForm({
+    quotes: props.rate_comparison?.quotes?.length
+        ? props.rate_comparison.quotes.map((q) => ({
+            id: q.id,
+            vendor_id: q.vendor_id,
+            vendor_name: q.vendor_name,
+            quoted_rate: q.quoted_rate,
+            gst_mode: q.gst_mode || 'inclusive',
+            gst_percent: q.gst_percent || '',
+            remarks: q.remarks || '',
+            effective_rate: q.effective_rate,
+            variance_vs_internal: q.variance_vs_internal,
+            variance_vs_internal_percent: q.variance_vs_internal_percent,
+            variance_vs_approved: q.variance_vs_approved,
+            variance_vs_approved_percent: q.variance_vs_approved_percent,
+            is_lowest: q.is_lowest,
+        }))
+        : [],
+});
+
+watch(() => props.rate_comparison, (payload) => {
+    if (!payload) return;
+    rateCompareForm.quotes = payload.quotes?.length
+        ? payload.quotes.map((q) => ({
+            id: q.id,
+            vendor_id: q.vendor_id,
+            vendor_name: q.vendor_name,
+            quoted_rate: q.quoted_rate,
+            gst_mode: q.gst_mode || 'inclusive',
+            gst_percent: q.gst_percent || '',
+            remarks: q.remarks || '',
+            effective_rate: q.effective_rate,
+            variance_vs_internal: q.variance_vs_internal,
+            variance_vs_internal_percent: q.variance_vs_internal_percent,
+            variance_vs_approved: q.variance_vs_approved,
+            variance_vs_approved_percent: q.variance_vs_approved_percent,
+            is_lowest: q.is_lowest,
+        }))
+        : [];
+    rateCompareForm.clearErrors();
+}, { deep: true });
+
+const rateCompareLocked = computed(() => !!props.rate_comparison?.locked || !props.can.manage_cost);
+
+function onRateVendor(row) {
+    const selected = (props.vendor_options || []).find((o) => o.value === row.vendor_id);
+    if (selected) {
+        row.vendor_name = selected.label.includes(' — ')
+            ? selected.label.split(' — ').slice(1).join(' — ')
+            : selected.label;
+    }
+}
+
+function addRateQuote() {
+    rateCompareForm.quotes.push(blankRateQuote());
+}
+
+function removeRateQuote(index) {
+    rateCompareForm.quotes.splice(index, 1);
+}
+
+function saveRateComparison() {
+    rateCompareForm.put(route('projects.boqs.items.rate-comparison.save', [props.project.id, props.boq.id, props.item.id]), {
+        preserveScroll: true,
+    });
+}
+
+function blankPlanningMap() {
+    return {
+        id: null,
+        project_task_id: null,
+        mapping_method: 'conversion_based',
+        allocated_boq_qty: props.item.quantity || '',
+        boq_unit_symbol: props.item.unit?.symbol || '',
+        planning_qty: '',
+        planning_unit_symbol: '',
+        conversion_factor: '',
+        remarks: '',
+    };
+}
+
+const planningMapForm = useForm({
+    maps: props.planning_map?.maps?.length
+        ? props.planning_map.maps.map((m) => ({ ...m, conversion_factor: m.conversion_factor || '' }))
+        : [],
+});
+
+watch(() => props.planning_map, (payload) => {
+    if (!payload) return;
+    planningMapForm.maps = payload.maps?.length
+        ? payload.maps.map((m) => ({ ...m, conversion_factor: m.conversion_factor || '' }))
+        : [];
+    planningMapForm.clearErrors();
+}, { deep: true });
+
+const planningMapLocked = computed(() => !!props.planning_map?.locked || !props.can.manage_planning_map);
+
+function onPlanningTask(row) {
+    const selected = (props.planning_task_options || []).find((o) => o.value === row.project_task_id);
+    if (!selected) return;
+    row.planning_qty = selected.planned_qty || row.planning_qty;
+    row.planning_unit_symbol = selected.unit || row.planning_unit_symbol;
+}
+
+function addPlanningMap() {
+    planningMapForm.maps.push(blankPlanningMap());
+}
+
+function removePlanningMap(index) {
+    planningMapForm.maps.splice(index, 1);
+}
+
+function savePlanningMap() {
+    planningMapForm.put(route('projects.boqs.items.planning-map.save', [props.project.id, props.boq.id, props.item.id]), {
+        preserveScroll: true,
+    });
+}
+
 function addNorm() {
     normForm.norms.push(blankNorm());
 }
@@ -655,10 +807,33 @@ function showDims(type) {
 }
 
 const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.code || '');
+
+function confirmRefreshRates(scope) {
+    if (!props.can.manage_cost || costLocked.value) return;
+    const label = scope === 'labour' ? 'labour' : 'material';
+    if (!window.confirm(`Refresh current ${label} rates from masters for this editable revision? This does not change prior revisions.`)) {
+        return;
+    }
+    router.post(route('projects.boqs.items.cost-build-up.refresh-rates.apply', [props.project.id, props.boq.id, props.item.id]), {
+        scope,
+        confirm: 1,
+    }, { preserveScroll: true });
+}
 </script>
 
 <template>
     <ProjectLayout :project="project" :title="`${item.item_code || item.name} · BOQ`" active="boq">
+        <div
+            v-if="boq.cloned_from"
+            class="mb-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950"
+        >
+            <p class="font-medium">{{ boq.cloned_from.label }}</p>
+            <p class="mt-1 text-xs text-sky-800">
+                <span v-if="boq.revision_reason">Reason: {{ boq.revision_reason }} · </span>
+                <span v-if="boq.created_by_name">Created by {{ boq.created_by_name }} · </span>
+                <span v-if="boq.created_at">{{ boq.created_at }}</span>
+            </p>
+        </div>
         <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
                 <Link :href="route('projects.boqs.show', [project.id, boq.id])" class="text-xs font-medium text-slate-500 hover:text-slate-700">← Back to BOQ</Link>
@@ -849,6 +1024,10 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                     {{ cost_build_up?.locked ? 'BOQ is approved — cost build-up is locked.' : 'You can view costs but cannot edit them.' }}
                 </p>
                 <p v-else class="mb-3 text-sm text-slate-600">Estimated cost per BOQ unit. Does not post stock, ledger, or procurement.</p>
+                <div v-if="!costLocked && can.manage_cost" class="mb-3 flex flex-wrap gap-2">
+                    <AppButton type="button" variant="secondary" @click="confirmRefreshRates('material')">Refresh material rates</AppButton>
+                    <AppButton type="button" variant="secondary" @click="confirmRefreshRates('labour')">Refresh labour rates</AppButton>
+                </div>
 
                 <div v-if="!cost_build_up" class="py-8 text-center text-sm text-slate-500">Loading cost build-up…</div>
 
@@ -1417,6 +1596,157 @@ const unitLabel = computed(() => props.item.unit?.symbol || props.item.unit?.cod
                     @close="showDrawingViewer = false"
                 />
             </template>
+        </div>
+
+        <div v-else-if="tab === 'rate_comparison' && can.view_costs" class="space-y-4">
+            <AppCard title="Rate Comparison">
+                <p class="mb-3 text-sm text-slate-600">
+                    Compare internal cost rate with vendor / contractor quotes. Lowest quote is highlighted — selection is never automatic.
+                </p>
+                <div v-if="!rate_comparison" class="py-8 text-center text-sm text-slate-500">Loading rate comparison…</div>
+                <form v-else class="space-y-4" @submit.prevent="saveRateComparison">
+                    <div class="grid gap-3 sm:grid-cols-3 text-sm">
+                        <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
+                            <div class="text-[11px] uppercase text-slate-500">Internal cost rate</div>
+                            <div class="font-medium tabular">{{ formatRate(rate_comparison.internal_cost_rate) }}</div>
+                        </div>
+                        <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
+                            <div class="text-[11px] uppercase text-slate-500">Approved BOQ rate</div>
+                            <div class="font-medium tabular">{{ formatRate(rate_comparison.approved_boq_rate) }}</div>
+                        </div>
+                        <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
+                            <div class="text-[11px] uppercase text-slate-500">Lowest quoted</div>
+                            <div class="font-medium tabular">{{ rate_comparison.lowest_effective_rate ? formatRate(rate_comparison.lowest_effective_rate) : '—' }}</div>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto rounded-xl border border-line">
+                        <table class="min-w-[1100px] w-full text-left text-xs">
+                            <thead class="bg-slate-50 text-[11px] uppercase text-slate-500">
+                                <tr>
+                                    <th class="px-2 py-2">Vendor / Contractor</th>
+                                    <th class="px-2 py-2">Quoted rate</th>
+                                    <th class="px-2 py-2">GST</th>
+                                    <th class="px-2 py-2 text-right">Effective</th>
+                                    <th class="px-2 py-2 text-right">vs Internal</th>
+                                    <th class="px-2 py-2 text-right">vs Approved</th>
+                                    <th class="px-2 py-2">Remarks</th>
+                                    <th v-if="!rateCompareLocked" class="px-2 py-2" />
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr
+                                    v-for="(row, index) in rateCompareForm.quotes"
+                                    :key="index"
+                                    class="border-t border-line align-top"
+                                    :class="row.is_lowest ? 'bg-emerald-50/60' : ''"
+                                >
+                                    <td class="px-1 py-1">
+                                        <select v-model="row.vendor_id" class="mb-1 w-48 rounded border-slate-200 py-1 text-xs" :disabled="rateCompareLocked" @change="onRateVendor(row)">
+                                            <option :value="null">— Optional master —</option>
+                                            <option v-for="opt in vendor_options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                                        </select>
+                                        <input v-model="row.vendor_name" class="w-48 rounded border-slate-200 px-1.5 py-1" :disabled="rateCompareLocked" placeholder="Name" required />
+                                    </td>
+                                    <td class="px-1 py-1"><input v-model="row.quoted_rate" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="rateCompareLocked" /></td>
+                                    <td class="px-1 py-1">
+                                        <select v-model="row.gst_mode" class="mb-1 w-28 rounded border-slate-200 py-1 text-xs" :disabled="rateCompareLocked">
+                                            <option v-for="m in rate_comparison_gst_modes" :key="m.value" :value="m.value">{{ m.label }}</option>
+                                        </select>
+                                        <input v-model="row.gst_percent" class="w-16 rounded border-slate-200 px-1 py-0.5 tabular" :disabled="rateCompareLocked" placeholder="%" />
+                                    </td>
+                                    <td class="px-2 py-2 text-right tabular">
+                                        {{ row.effective_rate ? formatRate(row.effective_rate) : '—' }}
+                                        <span v-if="row.is_lowest" class="ml-1 text-[10px] font-semibold uppercase text-emerald-700">Lowest</span>
+                                    </td>
+                                    <td class="px-2 py-2 text-right tabular">
+                                        {{ row.variance_vs_internal != null ? formatRate(row.variance_vs_internal) : '—' }}
+                                        <span v-if="row.variance_vs_internal_percent != null" class="block text-[10px] text-slate-500">{{ row.variance_vs_internal_percent }}%</span>
+                                    </td>
+                                    <td class="px-2 py-2 text-right tabular">
+                                        {{ row.variance_vs_approved != null ? formatRate(row.variance_vs_approved) : '—' }}
+                                        <span v-if="row.variance_vs_approved_percent != null" class="block text-[10px] text-slate-500">{{ row.variance_vs_approved_percent }}%</span>
+                                    </td>
+                                    <td class="px-1 py-1"><input v-model="row.remarks" class="w-36 rounded border-slate-200 px-1.5 py-1" :disabled="rateCompareLocked" /></td>
+                                    <td v-if="!rateCompareLocked" class="px-1 py-1">
+                                        <button type="button" class="text-rose-600" @click="removeRateQuote(index)">Del</button>
+                                    </td>
+                                </tr>
+                                <tr v-if="!rateCompareForm.quotes.length">
+                                    <td colspan="8" class="px-3 py-6 text-center text-slate-500">No comparison quotes yet.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <AppButton v-if="!rateCompareLocked" type="button" variant="secondary" @click="addRateQuote">Add quote</AppButton>
+                        <AppButton v-if="!rateCompareLocked" type="submit">Save comparison</AppButton>
+                    </div>
+                </form>
+            </AppCard>
+        </div>
+
+        <div v-else-if="tab === 'planning_map'" class="space-y-4">
+            <AppCard title="Planning Mapping">
+                <p class="mb-3 text-sm text-slate-600">
+                    Optional link from this BOQ item to Planning activities. Units may differ — use conversion, actual measurement, or manual certification.
+                </p>
+                <div v-if="!planning_map" class="py-8 text-center text-sm text-slate-500">Loading planning mapping…</div>
+                <form v-else class="space-y-4" @submit.prevent="savePlanningMap">
+                    <div class="overflow-x-auto rounded-xl border border-line">
+                        <table class="min-w-[980px] w-full text-left text-xs">
+                            <thead class="bg-slate-50 text-[11px] uppercase text-slate-500">
+                                <tr>
+                                    <th class="px-2 py-2">Planning activity</th>
+                                    <th class="px-2 py-2">Method</th>
+                                    <th class="px-2 py-2">BOQ qty</th>
+                                    <th class="px-2 py-2">Planning qty</th>
+                                    <th class="px-2 py-2">Conversion</th>
+                                    <th class="px-2 py-2">Remarks</th>
+                                    <th v-if="!planningMapLocked" class="px-2 py-2" />
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(row, index) in planningMapForm.maps" :key="index" class="border-t border-line align-top">
+                                    <td class="px-1 py-1">
+                                        <select v-model="row.project_task_id" class="w-56 rounded border-slate-200 py-1 text-xs" :disabled="planningMapLocked" @change="onPlanningTask(row)">
+                                            <option :value="null">— Select activity —</option>
+                                            <option v-for="opt in planning_task_options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                                        </select>
+                                    </td>
+                                    <td class="px-1 py-1">
+                                        <select v-model="row.mapping_method" class="w-40 rounded border-slate-200 py-1 text-xs" :disabled="planningMapLocked">
+                                            <option v-for="m in planning_mapping_methods" :key="m.value" :value="m.value">{{ m.label }}</option>
+                                        </select>
+                                    </td>
+                                    <td class="px-1 py-1">
+                                        <input v-model="row.allocated_boq_qty" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="planningMapLocked" />
+                                        <input v-model="row.boq_unit_symbol" class="mt-1 w-16 rounded border-slate-200 px-1 py-0.5" :disabled="planningMapLocked" placeholder="Unit" />
+                                    </td>
+                                    <td class="px-1 py-1">
+                                        <input v-model="row.planning_qty" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="planningMapLocked" />
+                                        <input v-model="row.planning_unit_symbol" class="mt-1 w-16 rounded border-slate-200 px-1 py-0.5" :disabled="planningMapLocked" placeholder="Unit" />
+                                    </td>
+                                    <td class="px-1 py-1">
+                                        <input v-model="row.conversion_factor" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="planningMapLocked || row.mapping_method !== 'conversion_based'" placeholder="Auto" />
+                                        <p v-if="row.boq_unit_symbol && row.planning_unit_symbol && row.boq_unit_symbol !== row.planning_unit_symbol" class="mt-1 text-[10px] text-amber-700">Unit mismatch — conversion required</p>
+                                    </td>
+                                    <td class="px-1 py-1"><input v-model="row.remarks" class="w-36 rounded border-slate-200 px-1.5 py-1" :disabled="planningMapLocked" /></td>
+                                    <td v-if="!planningMapLocked" class="px-1 py-1">
+                                        <button type="button" class="text-rose-600" @click="removePlanningMap(index)">Del</button>
+                                    </td>
+                                </tr>
+                                <tr v-if="!planningMapForm.maps.length">
+                                    <td colspan="7" class="px-3 py-6 text-center text-slate-500">No planning maps. Planning can still exist without BOQ.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <AppButton v-if="!planningMapLocked" type="button" variant="secondary" @click="addPlanningMap">Add mapping</AppButton>
+                        <AppButton v-if="!planningMapLocked" type="submit">Save mapping</AppButton>
+                    </div>
+                </form>
+            </AppCard>
         </div>
 
         <div v-else-if="tab === 'procurement' && can.view_material_requirements" class="space-y-4">

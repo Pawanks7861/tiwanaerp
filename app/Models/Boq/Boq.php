@@ -34,6 +34,16 @@ class Boq extends Model implements Approvable
     /** Columns that may still change once the BOQ has left draft/rejected. */
     private const LIFECYCLE_COLUMNS = ['status', 'is_current', 'approved_by', 'approved_at', 'updated_by', 'updated_at'];
 
+    /**
+     * Request-scoped Advanced revision clone counts. Never persisted.
+     *
+     * @var array<string, mixed>|null
+     */
+    public ?array $advancedCloneSummary = null;
+
+    /** Request-scoped source BOQ id for the clone. Never persisted. */
+    public ?int $sourceRevisionId = null;
+
     protected static function booted(): void
     {
         static::updating(function (self $boq) {

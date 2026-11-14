@@ -7,16 +7,19 @@ use App\Enums\Boq\BbsCountMode;
 use App\Enums\Boq\BbsLapMode;
 use App\Enums\Boq\BbsShapeCode;
 use App\Enums\Boq\BbsStatus;
+use App\Enums\Boq\CircleConstantMode;
 use App\Enums\Boq\CostCalculationBasis;
 use App\Enums\Boq\CostComponentType;
-use App\Enums\Boq\CircleConstantMode;
 use App\Enums\Boq\CostRateSource;
-use App\Enums\Boq\SteelUnitWeightMethod;
 use App\Enums\Boq\MeasurementFormulaType;
 use App\Enums\Boq\MeasurementSheetStatus;
+use App\Enums\Boq\PlanningBoqMappingMethod;
 use App\Enums\Boq\QuantitySource;
+use App\Enums\Boq\RateComparisonGstMode;
+use App\Enums\Boq\SteelUnitWeightMethod;
 use App\Exports\BbsExport;
 use App\Exports\BbsTemplateExport;
+use App\Exports\MaterialNormTemplateExport;
 use App\Http\Controllers\Boq\Concerns\RequiresAdvancedBoqCalculations;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Projects\ProjectHeader;
@@ -24,13 +27,16 @@ use App\Models\Boq\Boq;
 use App\Models\Boq\BoqBbs;
 use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqMeasurementSheet;
-use App\Models\Boq\MaterialRecipeTemplate;
 use App\Models\Boq\CostingRateLibraryEntry;
+use App\Models\Boq\MaterialRecipeTemplate;
 use App\Models\Documents\DrawingRevision;
 use App\Models\Masters\EquipmentType;
 use App\Models\Masters\LabourTrade;
 use App\Models\Masters\Material;
+use App\Models\Masters\Vendor;
+use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
+use App\Services\Boq\AdvancedBoqRateRefreshService;
 use App\Services\Boq\BbsImportService;
 use App\Services\Boq\BbsService;
 use App\Services\Boq\CostBuildUpService;
@@ -39,6 +45,8 @@ use App\Services\Boq\MaterialNormService;
 use App\Services\Boq\MaterialRecipeService;
 use App\Services\Boq\MaterialRequirementService;
 use App\Services\Boq\MeasurementSheetService;
+use App\Services\Boq\PlanningBoqMappingService;
+use App\Services\Boq\RateComparisonService;
 use App\Support\Boq\BoqCompanySettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -63,6 +71,9 @@ class BoqItemWorkspaceController extends Controller
         private readonly BbsImportService $bbsImport,
         private readonly EstimatedActualCostService $costVariance,
         private readonly MaterialRecipeService $recipes,
+        private readonly RateComparisonService $rateComparisons,
+        private readonly PlanningBoqMappingService $planningMaps,
+        private readonly AdvancedBoqRateRefreshService $rateRefresh,
     ) {}
 
     public function show(Request $request, Project $project, Boq $boq, BoqItem $item): Response
@@ -88,6 +99,8 @@ class BoqItemWorkspaceController extends Controller
         $includeMats = $advanced && $viewMats && $request->boolean('materials');
         $includeProc = $viewMats && $request->boolean('procurement');
         $includeBbs = $advanced && $viewBbs && $request->boolean('bbs');
+        $includeRateCompare = $advanced && $withCosts && $request->boolean('rate_comparison');
+        $includePlanningMap = $advanced && $request->boolean('planning_map');
         $bbsPayload = $includeBbs ? $this->bbs->workspacePayload($item) : null;
         $bbsModel = $includeBbs && ($bbsPayload['bbs']['id'] ?? null)
             ? BoqBbs::query()->find($bbsPayload['bbs']['id'])
@@ -124,6 +137,12 @@ class BoqItemWorkspaceController extends Controller
             'material_options' => ($includeMats || $includeBbs) ? $this->materialOptions() : [],
             'item_procurement' => $includeProc ? $this->requirements->itemProcurement($item) : null,
             'bbs_workspace' => $bbsPayload,
+            'rate_comparison' => $includeRateCompare ? $this->rateComparisons->workspacePayload($item) : null,
+            'rate_comparison_gst_modes' => $withCosts ? RateComparisonGstMode::options() : [],
+            'vendor_options' => $includeRateCompare ? $this->vendorOptions() : [],
+            'planning_map' => $includePlanningMap ? $this->planningMaps->workspacePayload($item) : null,
+            'planning_task_options' => $includePlanningMap ? $this->planningTaskOptions($project) : [],
+            'planning_mapping_methods' => $advanced ? PlanningBoqMappingMethod::options() : [],
             'advanced_boq_calculations' => $advanced,
             'can' => [
                 'edit' => $user->can('update', $boq) && $boq->isEditable() && $sheet->isEditable(),
@@ -145,6 +164,7 @@ class BoqItemWorkspaceController extends Controller
                     && (config('approvals.allow_self_approval') || (int) $bbsModel->submitted_by !== (int) $user->id),
                 'map_bbs_steel' => $manageBbs && $boq->isEditable(),
                 'manage_bbs_adjustments' => $user->can('boq.manage_bbs_adjustments') && $manageBbs && $boq->isEditable(),
+                'manage_planning_map' => $user->can('update', $boq) && $boq->isEditable(),
             ],
         ]);
     }
@@ -280,6 +300,59 @@ class BoqItemWorkspaceController extends Controller
             ->with('success', 'Cost build-up saved. Cost rate recalculated on the server.');
     }
 
+    public function saveRateComparison(Request $request, Project $project, Boq $boq, BoqItem $item): RedirectResponse
+    {
+        $this->requireAdvancedBoqCalculations();
+        $this->assertScope($project, $boq, $item);
+        Gate::authorize('view', $boq);
+        abort_unless($request->user()->can('boq.view_costs'), 403);
+        abort_unless($request->user()->can('boq.manage_cost'), 403);
+        Gate::authorize('update', $boq);
+
+        $data = $request->validate([
+            'quotes' => ['present', 'array', 'max:100'],
+            'quotes.*.id' => ['nullable', 'integer'],
+            'quotes.*.vendor_id' => ['nullable', 'integer'],
+            'quotes.*.vendor_name' => ['nullable', 'string', 'max:160'],
+            'quotes.*.quoted_rate' => ['required', 'numeric', 'min:0'],
+            'quotes.*.gst_mode' => ['required', Rule::enum(RateComparisonGstMode::class)],
+            'quotes.*.gst_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'quotes.*.remarks' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $this->rateComparisons->saveQuotes($item, $data['quotes'], $request->user());
+
+        return redirect()
+            ->route('projects.boqs.items.workspace', [$project, $boq, $item, 'rate_comparison' => 1])
+            ->with('success', 'Rate comparison saved. Variances recalculated on the server. No vendor was awarded.');
+    }
+
+    public function savePlanningMap(Request $request, Project $project, Boq $boq, BoqItem $item): RedirectResponse
+    {
+        $this->requireAdvancedBoqCalculations();
+        $this->assertScope($project, $boq, $item);
+        Gate::authorize('update', $boq);
+
+        $data = $request->validate([
+            'maps' => ['present', 'array', 'max:100'],
+            'maps.*.id' => ['nullable', 'integer'],
+            'maps.*.project_task_id' => ['required', 'integer'],
+            'maps.*.mapping_method' => ['required', Rule::enum(PlanningBoqMappingMethod::class)],
+            'maps.*.allocated_boq_qty' => ['required', 'numeric', 'min:0'],
+            'maps.*.boq_unit_symbol' => ['nullable', 'string', 'max:40'],
+            'maps.*.planning_qty' => ['required', 'numeric', 'min:0'],
+            'maps.*.planning_unit_symbol' => ['nullable', 'string', 'max:40'],
+            'maps.*.conversion_factor' => ['nullable', 'numeric', 'min:0'],
+            'maps.*.remarks' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $this->planningMaps->saveMaps($item, $data['maps'], $request->user());
+
+        return redirect()
+            ->route('projects.boqs.items.workspace', [$project, $boq, $item, 'planning_map' => 1])
+            ->with('success', 'Planning mapping saved. Conversion factors calculated on the server.');
+    }
+
     public function suggestCostRate(Request $request, Project $project, Boq $boq, BoqItem $item): JsonResponse
     {
         $this->requireAdvancedBoqCalculations();
@@ -302,6 +375,46 @@ class BoqItemWorkspaceController extends Controller
         );
 
         return response()->json($suggestion);
+    }
+
+    public function previewRateRefresh(Request $request, Project $project, Boq $boq, BoqItem $item): JsonResponse
+    {
+        $this->requireAdvancedBoqCalculations();
+        $this->assertScope($project, $boq, $item);
+        Gate::authorize('view', $boq);
+        abort_unless($request->user()->can('boq.view_costs'), 403);
+        abort_unless($request->user()->can('boq.manage_cost'), 403);
+        Gate::authorize('update', $boq);
+
+        $data = $request->validate([
+            'scope' => ['required', Rule::in(['material', 'labour'])],
+        ]);
+
+        return response()->json($this->rateRefresh->preview($item, $data['scope']));
+    }
+
+    public function applyRateRefresh(Request $request, Project $project, Boq $boq, BoqItem $item): RedirectResponse
+    {
+        $this->requireAdvancedBoqCalculations();
+        $this->assertScope($project, $boq, $item);
+        Gate::authorize('view', $boq);
+        abort_unless($request->user()->can('boq.view_costs'), 403);
+        abort_unless($request->user()->can('boq.manage_cost'), 403);
+        Gate::authorize('update', $boq);
+
+        $data = $request->validate([
+            'scope' => ['required', Rule::in(['material', 'labour'])],
+            'confirm' => ['accepted'],
+        ]);
+
+        $result = $this->rateRefresh->apply($item, $data['scope'], $request->user());
+        $count = count($result['changes']);
+
+        return redirect()
+            ->route('projects.boqs.items.workspace', [$project, $boq, $item, 'cost' => 1])
+            ->with('success', $count > 0
+                ? "Refreshed {$count} {$data['scope']} rate(s) from current masters."
+                : 'No rate changes to apply.');
     }
 
     public function saveMaterialNorms(Request $request, Project $project, Boq $boq, BoqItem $item): RedirectResponse
@@ -531,7 +644,7 @@ class BoqItemWorkspaceController extends Controller
         $this->assertScope($project, $boq, $item);
         abort_unless($request->user()->can('boq.view_material_requirements') || $request->user()->can('boq.manage_material_norms'), 403);
 
-        return Excel::download(new \App\Exports\MaterialNormTemplateExport, 'material-norm-import-template.xlsx');
+        return Excel::download(new MaterialNormTemplateExport, 'material-norm-import-template.xlsx');
     }
 
     public function importBbs(Request $request, Project $project, Boq $boq, BoqItem $item, BoqBbs $bbs): RedirectResponse
@@ -629,6 +742,40 @@ class BoqItemWorkspaceController extends Controller
     }
 
     /**
+     * @return list<array{value: int, label: string}>
+     */
+    private function vendorOptions(): array
+    {
+        return Vendor::query()->active()->orderBy('name')->limit(2000)
+            ->get(['id', 'code', 'name'])
+            ->map(fn (Vendor $v) => [
+                'value' => $v->id,
+                'label' => trim(($v->code ? $v->code.' — ' : '').$v->name),
+            ])->all();
+    }
+
+    /**
+     * @return list<array{value: int, label: string, planned_qty: string, unit: string|null}>
+     */
+    private function planningTaskOptions(Project $project): array
+    {
+        return ProjectTask::query()
+            ->where('project_id', $project->id)
+            ->whereNotNull('parent_id')
+            ->with('unit:id,symbol')
+            ->orderBy('wbs_code')
+            ->orderBy('name')
+            ->limit(2000)
+            ->get(['id', 'name', 'wbs_code', 'planned_qty', 'unit_id', 'parent_id'])
+            ->map(fn (ProjectTask $t) => [
+                'value' => $t->id,
+                'label' => trim(($t->wbs_code ? $t->wbs_code.' — ' : '').$t->name),
+                'planned_qty' => (string) ($t->planned_qty ?? '0'),
+                'unit' => $t->unit?->symbol,
+            ])->all();
+    }
+
+    /**
      * @return array{materials: list<array<string, mixed>>, labour_trades: list<array<string, mixed>>, equipment_types: list<array<string, mixed>>, rate_library: list<array<string, mixed>>}
      */
     private function costMasters(): array
@@ -680,7 +827,7 @@ class BoqItemWorkspaceController extends Controller
             'status_label' => $sheet->status->label(),
             'total_quantity' => (string) $sheet->total_quantity,
             'drawing_revision_id' => $sheet->drawing_revision_id,
-            'circle_constant_mode' => $sheet->circle_constant_mode instanceof \App\Enums\Boq\CircleConstantMode
+            'circle_constant_mode' => $sheet->circle_constant_mode instanceof CircleConstantMode
                 ? $sheet->circle_constant_mode->value
                 : (string) ($sheet->circle_constant_mode ?? CircleConstantMode::MathematicalPi->value),
             'circle_constant_value' => $sheet->circle_constant_value !== null ? (string) $sheet->circle_constant_value : null,

@@ -48,8 +48,24 @@ function toggle(name) {
     form.permissions = selected.value.has(name) ? form.permissions.filter((p) => p !== name) : [...form.permissions, name];
 }
 
+/** Only permissions the current user can grant — drives Select all / checkbox state. */
+function grantableNames(names) {
+    return names.filter(grantable);
+}
+
+function moduleGrantableNames(module) {
+    return grantableNames(module.actions.map((a) => perm(module, a)));
+}
+
 function moduleState(module) {
-    const names = module.actions.map((a) => perm(module, a));
+    const names = moduleGrantableNames(module);
+    if (names.length === 0) {
+        // Module has only permissions this user cannot grant — show from full selection.
+        const all = module.actions.map((a) => perm(module, a));
+        const count = all.filter((n) => selected.value.has(n)).length;
+
+        return count === 0 ? 'none' : count === all.length ? 'all' : 'some';
+    }
     const count = names.filter((n) => selected.value.has(n)).length;
 
     return count === 0 ? 'none' : count === names.length ? 'all' : 'some';
@@ -59,15 +75,29 @@ function setMany(names, on) {
     if (readonly) {
         return;
     }
-    const allowed = names.filter(grantable);
+    const allowed = grantableNames(names);
+    if (allowed.length === 0) {
+        return;
+    }
     const set = new Set(form.permissions);
     allowed.forEach((n) => (on ? set.add(n) : set.delete(n)));
     form.permissions = [...set];
 }
 
-const toggleModule = (module) => setMany(module.actions.map((a) => perm(module, a)), moduleState(module) !== 'all');
+const toggleModule = (module) => {
+    const names = moduleGrantableNames(module);
+    if (names.length === 0) {
+        return;
+    }
+    setMany(names, moduleState(module) !== 'all');
+};
 const groupNames = (group) => group.modules.flatMap((m) => m.actions.map((a) => perm(m, a)));
-const groupAll = (group) => groupNames(group).every((n) => selected.value.has(n));
+const groupGrantableNames = (group) => grantableNames(groupNames(group));
+const groupAll = (group) => {
+    const names = groupGrantableNames(group);
+
+    return names.length > 0 && names.every((n) => selected.value.has(n));
+};
 
 function submit() {
     if (editing) {
@@ -124,10 +154,10 @@ function submit() {
                     <div class="flex items-center justify-between bg-slate-50 px-4 py-2">
                         <h3 class="text-xs font-semibold tracking-wider text-slate-600 uppercase">{{ group.group }}</h3>
                         <button
-                            v-if="!readonly"
+                            v-if="!readonly && groupGrantableNames(group).length"
                             type="button"
                             class="text-xs font-medium text-brand-600 hover:text-brand-700"
-                            @click="setMany(groupNames(group), !groupAll(group))"
+                            @click="setMany(groupGrantableNames(group), !groupAll(group))"
                         >
                             {{ groupAll(group) ? 'Clear all' : 'Select all' }}
                         </button>
@@ -140,7 +170,7 @@ function submit() {
                                     class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                                     :checked="moduleState(module) === 'all'"
                                     :indeterminate="moduleState(module) === 'some'"
-                                    :disabled="readonly"
+                                    :disabled="readonly || moduleGrantableNames(module).length === 0"
                                     @change="toggleModule(module)"
                                 />
                                 {{ module.label }}

@@ -18,8 +18,10 @@ use App\Models\Masters\Unit;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
+use App\Services\Boq\BoqRevisionDiffService;
 use App\Services\Boq\BoqRevisionService;
 use App\Services\Boq\BoqService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -216,13 +218,26 @@ class BoqController extends Controller
             'revision_reason' => ['required', 'string', 'min:3', 'max:255'],
         ]);
 
-        $revision = $this->revisions->revise($boq, $data['revision_reason']);
+        $revision = $this->revisions->revise($boq, $data['revision_reason'], $request->user());
+        $summary = $revision->advancedCloneSummary;
+        $detail = is_array($summary)
+            ? sprintf(
+                ' Cloned: %d items, %d measurements, %d norms, %d cost rows, %d BBS, %d quotes, %d planning maps.',
+                (int) ($summary['items'] ?? 0),
+                (int) ($summary['measurements'] ?? 0),
+                (int) ($summary['material_norms'] ?? 0),
+                (int) ($summary['cost_components'] ?? 0),
+                (int) ($summary['bbs'] ?? 0),
+                (int) ($summary['rate_comparison_quotes'] ?? 0),
+                (int) ($summary['planning_maps'] ?? 0),
+            )
+            : '';
 
         return redirect()->route('projects.boqs.show', [$project, $revision])
-            ->with('success', "Revision v{$revision->version} created as a draft.");
+            ->with('success', "Revision v{$revision->version} created as a draft.{$detail}");
     }
 
-    public function compare(Request $request, Project $project, Boq $boq): \Illuminate\Http\JsonResponse
+    public function compare(Request $request, Project $project, Boq $boq): JsonResponse
     {
         Gate::authorize('view', $boq);
 
@@ -234,7 +249,7 @@ class BoqController extends Controller
             ->firstOrFail();
 
         $withCosts = $request->user()->can('boq.view_costs');
-        $diff = app(\App\Services\Boq\BoqRevisionDiffService::class)->compare($previous, $boq, $withCosts);
+        $diff = app(BoqRevisionDiffService::class)->compare($previous, $boq, $withCosts);
 
         return response()->json($diff);
     }

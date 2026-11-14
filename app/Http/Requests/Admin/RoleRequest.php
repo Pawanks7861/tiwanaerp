@@ -20,6 +20,38 @@ class RoleRequest extends FormRequest
             : $this->user()->can('create', Role::class);
     }
 
+    /**
+     * Re-attach permissions already on the role that the editor cannot grant, so omitting
+     * them from the form (or a partial "Select all") cannot strip privileges they do not hold.
+     */
+    protected function prepareForValidation(): void
+    {
+        $user = $this->user();
+        if ($user === null || $user->isSuperAdmin()) {
+            return;
+        }
+
+        $role = $this->route('role');
+        if (! ($role instanceof Role)) {
+            return;
+        }
+
+        $held = $user->getAllPermissions()->pluck('name');
+        $preserved = $role->permissions()->pluck('name')->diff($held);
+        if ($preserved->isEmpty()) {
+            return;
+        }
+
+        $this->merge([
+            'permissions' => collect($this->input('permissions', []))
+                ->filter()
+                ->merge($preserved)
+                ->unique()
+                ->values()
+                ->all(),
+        ]);
+    }
+
     public function rules(): array
     {
         $role = $this->route('role');
@@ -46,20 +78,33 @@ class RoleRequest extends FormRequest
     }
 
     /**
-     * A role manager cannot grant permissions they do not hold (no privilege escalation).
+     * A role manager cannot newly grant permissions they do not hold (no privilege escalation).
+     * Permissions already on the role that the editor does not hold are allowed to remain.
      */
     public function after(): array
     {
         return [
             function (Validator $validator) {
                 $user = $this->user();
-                if ($user->isSuperAdmin() || $validator->errors()->isNotEmpty()) {
+                if ($user === null || $user->isSuperAdmin() || $validator->errors()->isNotEmpty()) {
                     return;
                 }
 
-                $missing = collect($this->input('permissions', []))->diff($user->getAllPermissions()->pluck('name'));
-                if ($missing->isNotEmpty()) {
-                    $validator->errors()->add('permissions', 'You cannot grant permissions you do not hold: '.$missing->take(5)->implode(', '));
+                $held = $user->getAllPermissions()->pluck('name');
+                $role = $this->route('role');
+                $existing = $role instanceof Role
+                    ? $role->permissions()->pluck('name')
+                    : collect();
+
+                $illegal = collect($this->input('permissions', []))
+                    ->diff($held)
+                    ->diff($existing);
+
+                if ($illegal->isNotEmpty()) {
+                    $validator->errors()->add(
+                        'permissions',
+                        'You cannot grant permissions you do not hold: '.$illegal->take(5)->implode(', ')
+                    );
                 }
             },
         ];
