@@ -9,7 +9,7 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import { previewReading } from '@/lib/electricity';
 import { formatNumber } from '@/lib/format';
 import { Link, useForm } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 
 const props = defineProps({
     reading: { type: Object, default: null },
@@ -29,7 +29,7 @@ const form = useForm({
     billing_month: r?.billing_month ?? '',
     from_date: r?.from_date ?? '',
     to_date: r?.to_date ?? '',
-    opening_kwh: r?.opening_kwh ?? '',
+    opening_kwh: r?.opening_kwh ?? '0',
     closing_kwh: r?.closing_kwh ?? '',
     opening_kvah: r?.opening_kvah ?? '',
     closing_kvah: r?.closing_kvah ?? '',
@@ -57,7 +57,7 @@ const filteredConnections = computed(() => {
         return props.connections;
     }
 
-    return props.connections.filter((c) => c.utility_site_id === form.utility_site_id);
+    return props.connections.filter((c) => c.utility_site_id == form.utility_site_id);
 });
 
 const filteredMeters = computed(() => {
@@ -65,7 +65,37 @@ const filteredMeters = computed(() => {
         return props.meters;
     }
 
-    return props.meters.filter((m) => m.electricity_connection_id === form.electricity_connection_id);
+    return props.meters.filter((m) => m.electricity_connection_id == form.electricity_connection_id);
+});
+
+const selectedMeter = computed(() => props.meters.find((m) => m.value == form.electricity_meter_id) ?? null);
+
+watch(
+    () => form.utility_site_id,
+    () => {
+        if (!filteredConnections.value.some((c) => c.value == form.electricity_connection_id)) {
+            form.electricity_connection_id = null;
+            form.electricity_meter_id = null;
+        }
+    },
+);
+
+watch(
+    () => form.electricity_connection_id,
+    () => {
+        if (!filteredMeters.value.some((m) => m.value == form.electricity_meter_id)) {
+            form.electricity_meter_id = null;
+        }
+    },
+);
+
+watch(selectedMeter, (meter) => {
+    if (!meter || editing.value) {
+        return;
+    }
+    form.multiplication_factor = meter.multiplication_factor ?? form.multiplication_factor;
+    form.opening_kwh = meter.opening_kwh ?? '0';
+    form.opening_kvah = meter.opening_kvah ?? '';
 });
 
 function submit() {
@@ -96,15 +126,14 @@ function submit() {
                             <DecimalInput v-model="form.multiplication_factor" label="MF" required :error="form.errors.multiplication_factor" />
                         </div>
                     </AppCard>
-                    <AppCard title="Registers">
+                    <AppCard title="Registers" subtitle="Enter the current meter reading. Opening is taken from the previous confirmed closing automatically.">
                         <div class="grid gap-4 sm:grid-cols-2">
-                            <DecimalInput v-model="form.opening_kwh" label="Opening kWh" required :error="form.errors.opening_kwh" />
-                            <DecimalInput v-model="form.closing_kwh" label="Closing kWh" required :error="form.errors.closing_kwh" />
-                            <DecimalInput v-model="form.opening_kvah" label="Opening kVAh" :error="form.errors.opening_kvah" />
-                            <DecimalInput v-model="form.closing_kvah" label="Closing kVAh" :error="form.errors.closing_kvah" />
+                            <DecimalInput v-model="form.closing_kwh" label="kWh" required :error="form.errors.closing_kwh" help="Current meter reading (closing)." />
+                            <DecimalInput v-model="form.closing_kvah" label="kVAh" :error="form.errors.closing_kvah" help="Optional current kVAh reading." />
                             <DecimalInput v-model="form.mdi_reading" label="MDI (demand)" :error="form.errors.mdi_reading" />
                             <FormInput v-model="form.remarks" label="Remarks" multiline :rows="2" class="sm:col-span-2" :error="form.errors.remarks" />
                         </div>
+                        <p v-if="form.errors.opening_kwh" class="mt-2 text-sm text-red-600">{{ form.errors.opening_kwh }}</p>
                     </AppCard>
                     <AppCard v-if="tod_slots.length" title="TOD slots" subtitle="Optional time-of-day unit splits.">
                         <p class="text-sm text-slate-500">TOD rows are edited on the show page after save when enabled on the connection.</p>
@@ -112,6 +141,7 @@ function submit() {
                 </div>
                 <AppCard title="Calculated (preview)" subtitle="Saved values are computed on the server when you submit.">
                     <dl class="space-y-3 text-sm">
+                        <div class="flex justify-between gap-4"><dt class="text-slate-500">Opening kWh</dt><dd class="font-medium tabular">{{ form.opening_kwh !== '' && form.opening_kwh != null ? formatNumber(form.opening_kwh, 0, 4) : '—' }}</dd></div>
                         <div class="flex justify-between gap-4"><dt class="text-slate-500">Days</dt><dd class="font-medium tabular">{{ preview.days ?? (reading?.days ?? '—') }}</dd></div>
                         <div class="flex justify-between gap-4"><dt class="text-slate-500">kWh</dt><dd class="font-medium tabular">{{ preview.kwh_consumption ? formatNumber(preview.kwh_consumption, 0, 4) : (reading?.kwh_consumption ? formatNumber(reading.kwh_consumption, 0, 4) : '—') }}</dd></div>
                         <div class="flex justify-between gap-4"><dt class="text-slate-500">kVAh</dt><dd class="font-medium tabular">{{ preview.kvah_consumption ? formatNumber(preview.kvah_consumption, 0, 4) : (reading?.kvah_consumption ? formatNumber(reading.kvah_consumption, 0, 4) : '—') }}</dd></div>

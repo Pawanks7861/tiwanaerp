@@ -13,6 +13,7 @@ use App\Models\Utilities\ElectricityMeterReading;
 use App\Models\Utilities\ElectricityTariff;
 use App\Models\Utilities\ElectricityTariffComponent;
 use App\Models\Utilities\UtilitySite;
+use Carbon\Carbon;
 
 final class ElectricityPresenter
 {
@@ -391,7 +392,7 @@ final class ElectricityPresenter
         $months = $byMonth->keys()->sort()->values()->map(fn (string $m) => [
             'key' => $m,
             'month' => $m,
-            'label' => \Carbon\Carbon::parse($m)->format('M Y'),
+            'label' => Carbon::parse($m)->format('M Y'),
         ])->all();
 
         $metricDefs = [
@@ -446,7 +447,11 @@ final class ElectricityPresenter
     public static function readingOptionsForBill(): array
     {
         return ElectricityMeterReading::query()
-            ->with(['site:id,name', 'connection:id,connection_number', 'meter:id,meter_number'])
+            ->with([
+                'site:id,code,name',
+                'connection:id,connection_number',
+                'meter:id,meter_number',
+            ])
             ->where('status', 'confirmed')
             ->whereDoesntHave('bill')
             ->latest('billing_month')

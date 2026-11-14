@@ -30,7 +30,7 @@ class ElectricityBillController extends Controller
         ]);
 
         $page = ElectricityBill::query()
-            ->with('site:id,name')
+            ->with('site:id,code,name,state_code,city,address,is_active')
             ->when($filters['search'] ?? null, fn ($q, $term) => $q->where('bill_number', 'like', '%'.addcslashes($term, '%_\\').'%'))
             ->when(isset($filters['utility_site_id']) && $filters['utility_site_id'] !== 'all', fn ($q) => $q->where('utility_site_id', $filters['utility_site_id']))
             ->when(isset($filters['status']) && $filters['status'] !== 'all', fn ($q) => $q->where('status', $filters['status']))

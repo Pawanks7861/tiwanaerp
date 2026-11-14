@@ -9,6 +9,7 @@ use App\Models\Utilities\ElectricityMeter;
 use App\Models\Utilities\ElectricityMeterReading;
 use App\Models\Utilities\ElectricityMeterTodReading;
 use App\Support\Math\Decimal;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -47,6 +48,7 @@ final class ElectricityMeterReadingService
             [$meter, $connection] = $this->resolveMeterAndConnection($data);
             $this->assertHierarchy($data, $meter, $connection);
             $this->assertNoActiveDuplicate($meter, (string) $data['billing_month']);
+            $data = $this->applyDefaultOpenings($data, $meter);
 
             $computed = $this->calculator->compute($this->readingPayload($data, $meter));
 
@@ -103,6 +105,7 @@ final class ElectricityMeterReadingService
                 'mdi_reading' => $reading->mdi_reading !== null ? (string) $reading->mdi_reading : null,
                 'multiplication_factor' => (string) $reading->multiplication_factor,
             ], $data);
+            $payload = $this->applyDefaultOpenings($payload, $meter);
 
             $computed = $this->calculator->compute($payload);
 
@@ -209,6 +212,25 @@ final class ElectricityMeterReadingService
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
+    private function applyDefaultOpenings(array $data, ElectricityMeter $meter): array
+    {
+        $defaults = $this->defaultOpenings($meter);
+
+        if (! array_key_exists('opening_kwh', $data) || $data['opening_kwh'] === null || $data['opening_kwh'] === '') {
+            $data['opening_kwh'] = $defaults['opening_kwh'];
+        }
+
+        if (! array_key_exists('opening_kvah', $data) || $data['opening_kvah'] === null || $data['opening_kvah'] === '') {
+            $data['opening_kvah'] = $defaults['opening_kvah'];
+        }
+
+        return $data;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
     private function readingPayload(array $data, ElectricityMeter $meter): array
     {
         return [
@@ -248,6 +270,6 @@ final class ElectricityMeterReadingService
 
     private function monthStart(string $billingMonth): string
     {
-        return \Carbon\Carbon::parse($billingMonth)->startOfMonth()->toDateString();
+        return Carbon::parse($billingMonth)->startOfMonth()->toDateString();
     }
 }

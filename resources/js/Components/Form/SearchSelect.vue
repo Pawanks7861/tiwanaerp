@@ -27,7 +27,8 @@ const open = ref(false);
 const query = ref('');
 const highlighted = ref(0);
 
-const selected = computed(() => props.options.find((o) => o.value === model.value) ?? null);
+// Loose equality: Inertia often sends numeric ids while v-model may coerce to string.
+const selected = computed(() => props.options.find((o) => o.value == model.value) ?? null);
 const filtered = computed(() => {
     const q = query.value.trim().toLowerCase();
     const list = q
@@ -44,7 +45,7 @@ async function toggle() {
     open.value = !open.value;
     if (open.value) {
         query.value = '';
-        highlighted.value = Math.max(0, filtered.value.findIndex((o) => o.value === model.value));
+        highlighted.value = Math.max(0, filtered.value.findIndex((o) => o.value == model.value));
         await nextTick();
         search.value?.focus();
     }
@@ -127,9 +128,9 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onClickOutside))
                         v-for="(option, index) in filtered"
                         :key="option.value"
                         role="option"
-                        :aria-selected="option.value === model"
-                        class="cursor-pointer px-3 py-2 text-sm"
-                        :class="index === highlighted ? 'bg-brand-50 text-brand-900' : 'text-slate-700'"
+                        :aria-selected="option.value == model"
+                        class="cursor-pointer px-3 py-2 text-sm text-slate-800"
+                        :class="index === highlighted ? 'bg-brand-50 text-brand-900' : 'hover:bg-slate-50'"
                         @mouseenter="highlighted = index"
                         @mousedown.prevent="choose(option)"
                     >

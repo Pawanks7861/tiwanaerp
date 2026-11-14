@@ -12,6 +12,7 @@ use App\Models\Utilities\ElectricityMeterTodReading;
 use App\Models\Utilities\UtilitySite;
 use App\Rules\ExistsInCompany;
 use App\Services\Utilities\ElectricityMeterReadingService;
+use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -34,13 +35,17 @@ class ElectricityMeterReadingController extends Controller
         ]);
 
         $page = ElectricityMeterReading::query()
-            ->with(['site:id,name', 'connection:id,connection_number', 'meter:id,meter_number'])
+            ->with([
+                'site:id,code,name,state_code,city,address,is_active',
+                'connection:id,connection_number',
+                'meter:id,meter_number',
+            ])
             ->when($filters['search'] ?? null, fn ($q, $term) => $q->where(fn ($w) => $w
                 ->whereHas('meter', fn ($m) => $m->where('meter_number', 'like', '%'.addcslashes($term, '%_\\').'%'))
                 ->orWhereHas('connection', fn ($c) => $c->where('connection_number', 'like', '%'.addcslashes($term, '%_\\').'%'))))
             ->when(isset($filters['utility_site_id']) && $filters['utility_site_id'] !== 'all', fn ($q) => $q->where('utility_site_id', $filters['utility_site_id']))
             ->when(isset($filters['status']) && $filters['status'] !== 'all', fn ($q) => $q->where('status', $filters['status']))
-            ->when($filters['billing_month'] ?? null, fn ($q, $d) => $q->whereDate('billing_month', \Carbon\Carbon::parse($d)->startOfMonth()))
+            ->when($filters['billing_month'] ?? null, fn ($q, $d) => $q->whereDate('billing_month', Carbon::parse($d)->startOfMonth()))
             ->latest('billing_month')
             ->paginate(25)
             ->withQueryString();
@@ -126,14 +131,27 @@ class ElectricityMeterReadingController extends Controller
     {
         $sites = UtilitySite::query()->where('is_active', true)->orderBy('name')->get(['id', 'code', 'name'])
             ->map(fn (UtilitySite $s) => ['value' => $s->id, 'label' => "{$s->code} — {$s->name}"])->all();
-        $connections = ElectricityConnection::query()->where('is_active', true)->get(['id', 'utility_site_id', 'connection_number'])
+        $connections = ElectricityConnection::query()->where('is_active', true)->orderBy('connection_number')
+            ->get(['id', 'utility_site_id', 'connection_number'])
             ->map(fn (ElectricityConnection $c) => [
-                'id' => $c->id,
+                'value' => $c->id,
+                'label' => $c->connection_number,
                 'utility_site_id' => $c->utility_site_id,
-                'connection_number' => $c->connection_number,
             ])->all();
-        $meters = ElectricityMeter::query()->where('is_active', true)->get(['id', 'electricity_connection_id', 'meter_number', 'multiplication_factor'])
-            ->map(fn (ElectricityMeter $m) => ElectricityPresenter::meter($m))->all();
+        $meters = ElectricityMeter::query()->where('is_active', true)->orderBy('meter_number')
+            ->get(['id', 'electricity_connection_id', 'meter_number', 'multiplication_factor'])
+            ->map(function (ElectricityMeter $m) {
+                $defaults = $this->readings->defaultOpenings($m);
+
+                return [
+                    'value' => $m->id,
+                    'label' => $m->meter_number,
+                    'electricity_connection_id' => $m->electricity_connection_id,
+                    'multiplication_factor' => (string) $m->multiplication_factor,
+                    'opening_kwh' => $defaults['opening_kwh'],
+                    'opening_kvah' => $defaults['opening_kvah'],
+                ];
+            })->all();
 
         $payload = $reading ? [
             ...ElectricityPresenter::reading($reading),
@@ -167,10 +185,11 @@ class ElectricityMeterReadingController extends Controller
             'billing_month' => ['required', 'date'],
             'from_date' => ['required', 'date'],
             'to_date' => ['required', 'date', 'after_or_equal:from_date'],
-            'opening_kwh' => ['required', 'numeric', 'min:0'],
-            'closing_kwh' => ['required', 'numeric', 'gte:opening_kwh'],
+            // Opening is optional on the form — filled from the previous confirmed closing when omitted.
+            'opening_kwh' => ['nullable', 'numeric', 'min:0'],
+            'closing_kwh' => ['required', 'numeric', 'min:0'],
             'opening_kvah' => ['nullable', 'numeric', 'min:0'],
-            'closing_kvah' => ['nullable', 'numeric'],
+            'closing_kvah' => ['nullable', 'numeric', 'min:0'],
             'mdi_reading' => ['nullable', 'numeric', 'min:0'],
             'multiplication_factor' => ['nullable', 'numeric', 'min:0'],
             'remarks' => ['nullable', 'string', 'max:2000'],

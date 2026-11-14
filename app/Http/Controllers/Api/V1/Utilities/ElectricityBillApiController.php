@@ -23,7 +23,7 @@ class ElectricityBillApiController extends Controller
         ]);
 
         $page = ElectricityBill::query()
-            ->with('site:id,name')
+            ->with('site:id,code,name,state_code,city,address,is_active')
             ->when($filters['utility_site_id'] ?? null, fn ($q, $id) => $q->where('utility_site_id', $id))
             ->when($filters['status'] ?? null, fn ($q, $s) => $q->where('status', $s))
             ->latest('billing_month')
