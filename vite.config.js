@@ -11,7 +11,7 @@ export default defineConfig({
     //     port: 5173,
     //     strictPort: true,
     // },
-    // build: {
+    build: {
         sourcemap: false,
         chunkSizeWarningLimit: 700,
         // Vite 8 / Rolldown: PLUGIN_TIMINGS is informational (Tailwind/Vue dominate wall time).
