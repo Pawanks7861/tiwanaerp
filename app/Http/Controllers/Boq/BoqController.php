@@ -9,6 +9,7 @@ use App\Http\Controllers\Projects\ProjectHeader;
 use App\Http\Requests\Boq\BoqItemsRequest;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
+use App\Models\Boq\BoqRevisionChangeOrder;
 use App\Models\Boq\BoqSection;
 use App\Models\Boq\RateAnalysis;
 use App\Models\Documents\Drawing;
@@ -18,9 +19,15 @@ use App\Models\Masters\Unit;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
-use App\Services\Boq\BoqRevisionDiffService;
+use App\Services\Boq\AdvancedBoqRevisionComparisonService;
+use App\Services\Boq\AdvancedBoqTechnicalApprovalValidator;
+use App\Services\Boq\BoqBudgetMaterialSyncService;
 use App\Services\Boq\BoqRevisionService;
 use App\Services\Boq\BoqService;
+use App\Support\Boq\AdvancedBoqApprovalStage;
+use App\Support\Boq\BoqCompanySettings;
+use App\Support\Boq\BoqRevisionPairResolver;
+use App\Support\Math\Decimal;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -44,13 +51,15 @@ class BoqController extends Controller
 
         $user = $request->user();
         $withCosts = $user->can('boq.view_costs');
+        $advanced = BoqCompanySettings::enabled();
         $filters = $request->validate([
             'status' => ['nullable', Rule::enum(BoqStatus::class)],
+            'approval_stage' => ['nullable', 'string', Rule::in(array_column(AdvancedBoqApprovalStage::filterSelectOptions(), 'value'))],
             'search' => ['nullable', 'string', 'max:100'],
         ]);
 
         $boqs = $project->boqs()
-            ->with('approver:id,name')
+            ->with(['approver:id,name', 'technicalApprover:id,name', 'latestApprovalRequest.actions'])
             ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
             ->when($filters['search'] ?? null, fn ($q, $term) => $q->where(fn ($w) => $w
                 ->where('boq_number', 'like', '%'.addcslashes($term, '%_\\').'%')
@@ -61,6 +70,11 @@ class BoqController extends Controller
             ->get()
             ->each->setRelation('project', $project);
 
+        if ($advanced && ($filters['approval_stage'] ?? null)) {
+            $stageFilter = AdvancedBoqApprovalStage::from($filters['approval_stage']);
+            $boqs = $boqs->filter(fn (Boq $boq) => AdvancedBoqApprovalStage::for($boq) === $stageFilter)->values();
+        }
+
         return Inertia::render('Boq/Index', [
             'project' => ProjectHeader::for($project),
             'boqs' => $boqs->map(fn (Boq $boq) => [
@@ -69,6 +83,7 @@ class BoqController extends Controller
             ])->all(),
             'filters' => $filters,
             'statuses' => BoqStatus::options(),
+            'approval_stages' => $advanced ? AdvancedBoqApprovalStage::filterSelectOptions() : [],
             'approved_drawings' => $this->drawingOptions($project, $this->boqs->eligibleDrawingRevisions($project), $user),
             'can' => [
                 'create' => $user->can('create', [Boq::class, $project]),
@@ -102,7 +117,8 @@ class BoqController extends Controller
 
         $user = $request->user();
         $withCosts = $user->can('boq.view_costs');
-        $boq->load(['approver:id,name', 'sourceImport.uploader:id,name']);
+        $advanced = BoqCompanySettings::enabled();
+        $boq->load(['approver:id,name', 'technicalApprover:id,name', 'sourceImport.uploader:id,name', 'creator:id,name']);
 
         $sections = $boq->sections()->orderBy('sort_order')->orderBy('id')->get();
         $items = $boq->items()
@@ -121,9 +137,15 @@ class BoqController extends Controller
             : [];
 
         $pending = $boq->pendingApprovalRequest();
+        if ($pending) {
+            $pending->load(['actions.user:id,name', 'submitter:id,name']);
+        }
         $canViewDrawings = $user->can('viewAny', [Drawing::class, $project]);
         $linked = $this->linkedDrawingRevisions($boq);
         $drawings = $linked->map(fn (DrawingRevision $revision) => BoqPresenter::drawingRevision($revision, $project, $canViewDrawings))->all();
+
+        $approvalStage = $advanced ? AdvancedBoqApprovalStage::for($boq, $pending) : null;
+        $atCommercial = $advanced && $boq->isTechnicallyApproved() && $pending?->isLastLevel();
 
         return Inertia::render('Boq/Show', [
             'project' => ProjectHeader::for($project),
@@ -142,10 +164,52 @@ class BoqController extends Controller
                 'level' => $pending->current_level,
                 'levels' => count($pending->steps ?? []),
                 'step_name' => $pending->currentStep()['name'] ?? null,
+                'is_last_level' => $pending->isLastLevel(),
+                'is_commercial_level' => (bool) $atCommercial,
                 'can_act' => $this->approvals->canAct($pending, $user),
                 'can_cancel' => (int) $pending->submitted_by === (int) $user->id,
+                'submitted_by' => $pending->submitter?->name,
+                'submitted_at' => $pending->submitted_at?->toIso8601String(),
+                'expected_updated_at' => $boq->updated_at?->toIso8601String(),
             ] : null,
-            'can' => [...BoqPresenter::abilities($user, $boq), 'view_costs' => $withCosts, 'view_drawings' => $canViewDrawings],
+            'approval_stage' => $approvalStage?->value,
+            'approval_stage_label' => $approvalStage?->label(),
+            'approval_timeline' => $advanced ? $this->approvalTimeline($boq) : [],
+            'technical_review' => $advanced ? [
+                'status' => $approvalStage?->label(),
+                'technical_approved_at' => $boq->technical_approved_at?->toIso8601String(),
+                'technical_approved_by' => $boq->technicalApprover?->name,
+                'blocking_issues' => $boq->isEditable()
+                    ? app(AdvancedBoqTechnicalApprovalValidator::class)->errors($boq)
+                    : [],
+                'snapshot_hash' => $boq->technical_snapshot_hash,
+                'internal_cost' => $withCosts
+                    ? ($boq->technical_approval_snapshot['totals']['grand_internal'] ?? $boq->total_cost_amount)
+                    : null,
+            ] : null,
+            'commercial_review' => $advanced && $withCosts ? [
+                'status' => $approvalStage?->label(),
+                'internal_cost' => $boq->technical_approval_snapshot['totals']['grand_internal'] ?? $boq->total_cost_amount,
+                'commercial_value' => $boq->total_client_amount,
+                'margin' => Decimal::of((string) $boq->total_client_amount)
+                    ->minus((string) ($boq->technical_approval_snapshot['totals']['grand_internal'] ?? $boq->total_cost_amount))
+                    ->toMoney(),
+                'margin_pct' => Decimal::of((string) $boq->total_client_amount)->isZero()
+                    ? null
+                    : Decimal::of((string) $boq->total_client_amount)
+                        ->minus((string) ($boq->technical_approval_snapshot['totals']['grand_internal'] ?? $boq->total_cost_amount))
+                        ->dividedBy((string) $boq->total_client_amount, Decimal::PERCENT_SCALE)
+                        ->times(100)
+                        ->round(Decimal::PERCENT_SCALE)
+                        ->toString(),
+                'technical_approved_at' => $boq->technical_approved_at?->toIso8601String(),
+            ] : null,
+            'can' => [
+                ...BoqPresenter::abilities($user, $boq),
+                'view_costs' => $withCosts,
+                'view_drawings' => $canViewDrawings,
+                'create_change_order' => $user->can('create', [BoqRevisionChangeOrder::class, $project]),
+            ],
             'source_import' => $boq->sourceImport ? [
                 'id' => $boq->sourceImport->id,
                 'original_filename' => $boq->sourceImport->original_filename,
@@ -156,7 +220,85 @@ class BoqController extends Controller
             ] : null,
             'import_history' => $this->boqImportHistory($boq),
             'source_imports' => $this->boqSourceImports($boq),
+            'budget_sync' => $withCosts && $advanced
+                ? $this->budgetSyncCard($project, $boq)
+                : null,
+            'advanced_boq' => $advanced,
         ]);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function approvalTimeline(Boq $boq): array
+    {
+        $events = [];
+        $events[] = [
+            'at' => $boq->created_at?->toIso8601String(),
+            'label' => 'Created',
+            'by' => $boq->creator?->name,
+            'remarks' => null,
+        ];
+
+        $requests = $boq->approvalRequests()->with(['actions.user:id,name', 'submitter:id,name'])->get();
+        foreach ($requests as $request) {
+            foreach ($request->actions as $action) {
+                $events[] = [
+                    'at' => $action->acted_at?->toIso8601String() ?? $action->created_at?->toIso8601String(),
+                    'label' => ($request->stepForLevel((int) $action->level)['name'] ?? 'Level '.$action->level)
+                        .' — '.$action->action->label(),
+                    'by' => $action->user?->name,
+                    'remarks' => $action->comments,
+                ];
+            }
+        }
+
+        if ($boq->technical_approved_at) {
+            $events[] = [
+                'at' => $boq->technical_approved_at->toIso8601String(),
+                'label' => 'Technical Approved',
+                'by' => $boq->technicalApprover?->name,
+                'remarks' => null,
+            ];
+        }
+
+        if ($boq->approved_at) {
+            $events[] = [
+                'at' => $boq->approved_at->toIso8601String(),
+                'label' => 'Final Approved',
+                'by' => $boq->approver?->name,
+                'remarks' => null,
+            ];
+        }
+
+        return collect($events)
+            ->filter(fn (array $e) => filled($e['at']))
+            ->sortBy('at')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function budgetSyncCard(Project $project, Boq $boq): array
+    {
+        $sync = app(BoqBudgetMaterialSyncService::class);
+        $proposed = $sync->proposedSyncPayload($boq);
+        $status = $sync->syncStatus($project, $boq);
+        $internal = $proposed['reconciliation']['grand'];
+        $budgetGenerated = $status['variance'] !== null && $status['status'] !== 'never_synced'
+            ? Decimal::of($internal)->plus((string) ($status['variance'] ?? '0'))->toMoney()
+            : null;
+
+        return [
+            ...$status,
+            'advanced_internal_cost' => $internal,
+            'material_cost_a' => $proposed['reconciliation']['material'],
+            'labour_cost_b' => $proposed['reconciliation']['labour'],
+            'budget_generated_cost' => $budgetGenerated,
+            'budget_index_url' => route('projects.budget.index', $project),
+        ];
     }
 
     public function update(Request $request, Project $project, Boq $boq): RedirectResponse
@@ -241,15 +383,11 @@ class BoqController extends Controller
     {
         Gate::authorize('view', $boq);
 
-        $previousId = (int) $request->validate(['previous_id' => ['required', 'integer']])['previous_id'];
-        $previous = Boq::query()
-            ->where('project_id', $project->id)
-            ->where('boq_number', $boq->boq_number)
-            ->whereKey($previousId)
-            ->firstOrFail();
+        [$from, $to] = app(BoqRevisionPairResolver::class)->resolve($project, $boq, $request);
+        Gate::authorize('view', $from);
 
         $withCosts = $request->user()->can('boq.view_costs');
-        $diff = app(BoqRevisionDiffService::class)->compare($previous, $boq, $withCosts);
+        $diff = app(AdvancedBoqRevisionComparisonService::class)->compare($from, $to, $withCosts);
 
         return response()->json($diff);
     }
@@ -260,13 +398,24 @@ class BoqController extends Controller
     private function versionHistory(Project $project, Boq $boq, bool $withCosts): array
     {
         $versions = Boq::query()
-            ->with(['creator:id,name', 'approver:id,name', 'drawingRevisions.drawing:id,drawing_number,title'])
+            ->with(['creator:id,name', 'approver:id,name', 'technicalApprover:id,name', 'drawingRevisions.drawing:id,drawing_number,title'])
             ->where('project_id', $project->id)
             ->where('boq_number', $boq->boq_number)
             ->orderByDesc('version')
             ->get();
 
-        return $versions->map(function (Boq $b) use ($withCosts) {
+        /** @var array<int, string|null> $prevCommercial */
+        $prevCommercial = [];
+        $orderedAsc = $versions->sortBy('version')->values();
+        foreach ($orderedAsc as $b) {
+            $prevCommercial[(int) $b->id] = null;
+            $prior = $orderedAsc->firstWhere('version', $b->version - 1);
+            if ($prior !== null) {
+                $prevCommercial[(int) $b->id] = (string) $prior->total_client_amount;
+            }
+        }
+
+        return $versions->map(function (Boq $b) use ($withCosts, $prevCommercial) {
             $drawings = $b->drawingRevisions->map(fn (DrawingRevision $rev) => [
                 'id' => $rev->id,
                 'drawing_number' => $rev->drawing?->drawing_number,
@@ -285,8 +434,13 @@ class BoqController extends Controller
                 'created_by' => $b->creator?->name,
                 'approved_at' => $b->approved_at?->toIso8601String(),
                 'approved_by' => $b->approver?->name,
+                'technical_approved_at' => $b->technical_approved_at?->toIso8601String(),
+                'technical_approved_by' => $b->technicalApprover?->name,
                 'total_client_amount' => (string) $b->total_client_amount,
                 'total_cost_amount' => $withCosts ? (string) $b->total_cost_amount : null,
+                'commercial_change_from_prev' => $prevCommercial[(int) $b->id] !== null
+                    ? Decimal::of((string) $b->total_client_amount)->minus($prevCommercial[(int) $b->id])->toMoney()
+                    : null,
                 'parent_boq_id' => $b->parent_boq_id,
                 'drawings' => $drawings,
             ];

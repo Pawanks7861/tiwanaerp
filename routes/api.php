@@ -7,55 +7,56 @@ use App\Http\Controllers\Api\V1\DataImportController;
 use App\Http\Controllers\Api\V1\Documents\DocumentApiController;
 use App\Http\Controllers\Api\V1\Documents\DocumentFolderApiController;
 use App\Http\Controllers\Api\V1\Documents\DrawingController;
-use App\Http\Controllers\Api\V1\Quality\QualityChecklistApiController;
-use App\Http\Controllers\Api\V1\Site\NcrApiController;
-use App\Http\Controllers\Api\V1\Site\QualityInspectionApiController;
-use App\Http\Controllers\Api\V1\Site\QualitySummaryApiController;
 use App\Http\Controllers\Api\V1\FileController;
 use App\Http\Controllers\Api\V1\LookupController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\ProjectController;
+use App\Http\Controllers\Api\V1\Quality\QualityChecklistApiController;
+use App\Http\Controllers\Api\V1\Scrap\ScrapBalanceApiController;
+use App\Http\Controllers\Api\V1\Scrap\ScrapGenerationApiController;
+use App\Http\Controllers\Api\V1\Scrap\ScrapLedgerApiController;
+use App\Http\Controllers\Api\V1\Scrap\ScrapLookupController;
 use App\Http\Controllers\Api\V1\Site\ApprovalController;
 use App\Http\Controllers\Api\V1\Site\AttendanceController;
-use App\Http\Controllers\Api\V1\Site\LabourAdvanceApiController;
-use App\Http\Controllers\Api\V1\Site\LabourPaymentApiController;
-use App\Http\Controllers\Api\V1\Site\LabourRegisterController;
-use App\Http\Controllers\Api\V1\Site\SubcontractorApiController;
-use App\Http\Controllers\Api\V1\Site\SubcontractorBillApiController;
-use App\Http\Controllers\Api\V1\Site\WorkOrderApiController;
-use App\Http\Controllers\Api\V1\Site\GRNController;
-use App\Http\Controllers\Api\V1\Site\InventoryController;
-use App\Http\Controllers\Api\V1\Site\LabourController;
-use App\Http\Controllers\Api\V1\Site\MaterialIssueController;
-use App\Http\Controllers\Api\V1\Site\MaterialRequisitionController;
-use App\Http\Controllers\Api\V1\Site\MaterialReturnController;
-use App\Http\Controllers\Api\V1\Site\ProcurementSummaryController;
-use App\Http\Controllers\Api\V1\Site\PurchaseOrderController;
+use App\Http\Controllers\Api\V1\Site\ClientRaBillApiController;
 use App\Http\Controllers\Api\V1\Site\DprController;
 use App\Http\Controllers\Api\V1\Site\EquipmentFuelApiController;
 use App\Http\Controllers\Api\V1\Site\EquipmentRegisterController;
 use App\Http\Controllers\Api\V1\Site\EquipmentRepairApiController;
 use App\Http\Controllers\Api\V1\Site\EquipmentSummaryController;
 use App\Http\Controllers\Api\V1\Site\EquipmentUsageApiController;
-use App\Http\Controllers\Api\V1\Site\ClientRaBillApiController;
 use App\Http\Controllers\Api\V1\Site\ExpenseApiController;
 use App\Http\Controllers\Api\V1\Site\FinanceSummaryApiController;
 use App\Http\Controllers\Api\V1\Site\GatePassApiController;
-use App\Http\Controllers\Api\V1\Site\PaymentApiController;
-use App\Http\Controllers\Api\V1\Site\RetentionReleaseApiController;
-use App\Http\Controllers\Api\V1\Scrap\ScrapBalanceApiController;
-use App\Http\Controllers\Api\V1\Scrap\ScrapGenerationApiController;
-use App\Http\Controllers\Api\V1\Scrap\ScrapLedgerApiController;
-use App\Http\Controllers\Api\V1\Scrap\ScrapLookupController;
-use App\Http\Controllers\Api\V1\Site\VendorBillApiController;
-use App\Http\Controllers\Api\V1\Site\VendorLedgerApiController;
+use App\Http\Controllers\Api\V1\Site\GRNController;
+use App\Http\Controllers\Api\V1\Site\InventoryController;
+use App\Http\Controllers\Api\V1\Site\LabourAdvanceApiController;
+use App\Http\Controllers\Api\V1\Site\LabourController;
+use App\Http\Controllers\Api\V1\Site\LabourPaymentApiController;
+use App\Http\Controllers\Api\V1\Site\LabourRegisterController;
+use App\Http\Controllers\Api\V1\Site\MaterialControlApiController;
+use App\Http\Controllers\Api\V1\Site\MaterialIssueController;
+use App\Http\Controllers\Api\V1\Site\MaterialRequisitionController;
+use App\Http\Controllers\Api\V1\Site\MaterialReturnController;
 use App\Http\Controllers\Api\V1\Site\MilestoneApiController;
+use App\Http\Controllers\Api\V1\Site\NcrApiController;
+use App\Http\Controllers\Api\V1\Site\PaymentApiController;
+use App\Http\Controllers\Api\V1\Site\ProcurementSummaryController;
 use App\Http\Controllers\Api\V1\Site\ProgressController;
+use App\Http\Controllers\Api\V1\Site\PurchaseOrderController;
+use App\Http\Controllers\Api\V1\Site\QualityInspectionApiController;
+use App\Http\Controllers\Api\V1\Site\QualitySummaryApiController;
+use App\Http\Controllers\Api\V1\Site\RetentionReleaseApiController;
 use App\Http\Controllers\Api\V1\Site\SiteDiaryController;
 use App\Http\Controllers\Api\V1\Site\SiteSummaryController;
 use App\Http\Controllers\Api\V1\Site\StockAdjustmentController;
 use App\Http\Controllers\Api\V1\Site\StockTransferController;
+use App\Http\Controllers\Api\V1\Site\SubcontractorApiController;
+use App\Http\Controllers\Api\V1\Site\SubcontractorBillApiController;
 use App\Http\Controllers\Api\V1\Site\TaskController;
+use App\Http\Controllers\Api\V1\Site\VendorBillApiController;
+use App\Http\Controllers\Api\V1\Site\VendorLedgerApiController;
+use App\Http\Controllers\Api\V1\Site\WorkOrderApiController;
 use App\Http\Controllers\Api\V1\Utilities\ElectricityBillApiController;
 use App\Http\Controllers\Api\V1\Utilities\ElectricityComparisonApiController;
 use App\Http\Controllers\Api\V1\Utilities\ElectricityConnectionApiController;
@@ -64,6 +65,7 @@ use App\Http\Controllers\Api\V1\Utilities\ElectricityMeterReadingApiController;
 use App\Http\Controllers\Api\V1\Utilities\ElectricitySummaryApiController;
 use App\Http\Controllers\Api\V1\Utilities\ElectricityTariffApiController;
 use App\Http\Controllers\Api\V1\Utilities\UtilitySiteApiController;
+use App\Http\Controllers\Boq\BoqRevisionCompareController;
 use App\Http\Controllers\Core\DeviceTokenController;
 use App\Http\Controllers\Uploads\UploadController;
 use App\Services\Files\FileSourceResolver;
@@ -179,6 +181,12 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             Route::get('/projects/{project}/setup-status', [ProjectController::class, 'setupStatus'])->name('projects.setup-status');
             Route::get('/projects/{project}/procurement/summary', [ProcurementSummaryController::class, 'show'])
                 ->name('projects.procurement.summary');
+            Route::get('/projects/{project}/material-control', [MaterialControlApiController::class, 'index'])
+                ->name('projects.material-control.index');
+            Route::get('/projects/{project}/material-control/materials/{material}', [MaterialControlApiController::class, 'show'])
+                ->whereNumber('material')
+                ->withoutScopedBindings()
+                ->name('projects.material-control.show');
             Route::get('/projects/{project}/attendance', [AttendanceController::class, 'index'])
                 ->name('projects.attendance.index');
             Route::post('/projects/{project}/attendance/approve', [AttendanceController::class, 'approve'])
@@ -1162,6 +1170,9 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
                 Route::post('/projects/{project}/boqs/{boq}/submit', [BoqController::class, 'submit'])
                     ->whereNumber('boq')
                     ->name('projects.boqs.submit');
+                Route::get('/projects/{project}/boqs/{boq}/revisions/compare', [BoqRevisionCompareController::class, 'json'])
+                    ->whereNumber('boq')
+                    ->name('projects.boqs.revisions.compare');
             });
         });
     });

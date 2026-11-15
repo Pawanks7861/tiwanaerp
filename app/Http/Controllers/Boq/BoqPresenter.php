@@ -12,6 +12,8 @@ use App\Models\Documents\DrawingRevision;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Boq\SimpleBoqMaterialCostService;
+use App\Support\Boq\AdvancedBoqApprovalStage;
+use App\Support\Boq\BoqCompanySettings;
 use App\Support\Math\Decimal;
 
 /**
@@ -27,10 +29,18 @@ final class BoqPresenter
     {
         $boq->loadMissing(['parent:id,version,title', 'creator:id,name']);
 
+        $stage = BoqCompanySettings::enabled()
+            ? AdvancedBoqApprovalStage::for($boq)
+            : null;
+
         $data = [
             ...$boq->only(['id', 'boq_number', 'version', 'title', 'revision_reason', 'is_current', 'parent_boq_id', 'total_client_amount']),
             'status' => $boq->status->value,
             'status_label' => $boq->status->label(),
+            'approval_stage' => $stage?->value,
+            'approval_stage_label' => $stage?->label(),
+            'technical_approved_at' => $boq->technical_approved_at?->toIso8601String(),
+            'technical_approved_by' => $boq->relationLoaded('technicalApprover') ? $boq->technicalApprover?->name : null,
             'approved_at' => $boq->approved_at?->toIso8601String(),
             'approved_by' => $boq->relationLoaded('approver') ? $boq->approver?->name : null,
             'created_at' => $boq->created_at?->toIso8601String(),
@@ -126,8 +136,11 @@ final class BoqPresenter
      */
     public static function abilities(User $user, Boq $boq): array
     {
-        $editable = $boq->isEditable();
+        $editable = $boq->isEditable() && ! $boq->isTechnicallyApproved();
         $revisable = $boq->status === BoqStatus::Approved && $boq->is_current;
+        $commercial = $boq->allowsCommercialRateEdits()
+            && $user->can('boq.view_costs')
+            && $user->can('boq.manage_cost');
 
         return [
             'update' => $editable && $user->can('update', $boq),
@@ -136,6 +149,7 @@ final class BoqPresenter
             'delete' => $editable && $user->can('delete', $boq),
             'import' => $editable && $user->can('import', $boq),
             'export' => $user->can('export', $boq),
+            'edit_commercial' => $commercial,
         ];
     }
 

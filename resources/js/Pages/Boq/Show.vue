@@ -33,6 +33,12 @@ const props = defineProps({
     analyses: { type: Array, required: true },
     versions: { type: Array, required: true },
     approval: { type: Object, default: null },
+    approval_stage: { type: String, default: null },
+    approval_stage_label: { type: String, default: null },
+    approval_timeline: { type: Array, default: () => [] },
+    technical_review: { type: Object, default: null },
+    commercial_review: { type: Object, default: null },
+    advanced_boq: { type: Boolean, default: false },
     can: { type: Object, required: true },
     drawings: { type: Array, default: () => [] },
     approved_drawings: { type: Array, default: () => [] },
@@ -40,6 +46,7 @@ const props = defineProps({
     source_import: { type: Object, default: null },
     source_imports: { type: Array, default: () => [] },
     import_history: { type: Array, default: () => [] },
+    budget_sync: { type: Object, default: null },
 });
 
 const COST_FIELDS = ['material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent'];
@@ -78,9 +85,22 @@ function saveDrawings() {
     });
 }
 const costs = computed(() => props.can.view_costs);
-/** Full cost-build columns/editor — only when Advanced BOQ Calculations is enabled. */
-const detailedCosts = computed(() => costs.value && advanced.value);
+/**
+ * Advanced BOQ: commercial grid only. Internal material/labour costing lives in Item Workspace
+ * (Measurement & Costing). Do not expose legacy Labour Rate or cost-build columns on the BOQ table.
+ */
+const detailedCosts = computed(() => false);
+/** Legacy simplified-only Labour Rate column (retired for Advanced BOQ). */
+const showLegacyLabourRateColumn = computed(() => costs.value && !advanced.value);
 const showSimpleMaterials = computed(() => costs.value && !advanced.value);
+
+function itemWorkspaceUrl(row) {
+    if (!row?.id) {
+        return null;
+    }
+
+    return route('projects.boqs.items.workspace', [props.project.id, props.boq.id, row.id]);
+}
 
 let tempId = 0;
 
@@ -393,7 +413,13 @@ function save() {
                 line_uid,
                 ...data
             } = r;
-            if (!detailedCosts.value) {
+            if (advanced.value) {
+                // Advanced: commercial columns only — never overwrite workbook cost snapshots from this grid.
+                delete data.rate_analysis_id;
+                COST_FIELDS.forEach((f) => {
+                    delete data[f];
+                });
+            } else if (!detailedCosts.value) {
                 delete data.rate_analysis_id;
                 COST_FIELDS.forEach((f) => {
                     if (f !== 'labour_rate') {
@@ -404,7 +430,7 @@ function save() {
                     data.labour_rate = '0';
                 }
             }
-            // Persist shown defaults on first save (incl. untouched PCC defaults).
+            // Persist shown defaults on first save (incl. untouched PCC defaults). Legacy simplified only.
             if (showSimpleMaterials.value && (simple_materials_dirty || simple_materials_initialized || isPccWork(r))) {
                 data.simple_materials = (simple_materials || []).map((m) => ({
                     material_id: m.material_id || null,
@@ -526,23 +552,69 @@ async function viewChanges(previousId) {
     }
 }
 
+function compareHref(fromId, toId = props.boq.id) {
+    return `${route('projects.boqs.revisions.compare', [props.project.id, props.boq.id])}?from=${fromId}&to=${toId}`;
+}
+
 const approvalAction = ref(null);
-const approvalForm = useForm({ comments: '' });
-const APPROVAL = {
-    approve: { title: 'Approve BOQ', route: 'approvals.approve', button: 'Approve', variant: 'primary', required: false },
-    sendBack: { title: 'Send back for changes', route: 'approvals.send-back', button: 'Send back', variant: 'secondary', required: true },
-    reject: { title: 'Reject BOQ', route: 'approvals.reject', button: 'Reject', variant: 'danger', required: true },
-    cancel: { title: 'Withdraw approval request', route: 'approvals.cancel', button: 'Withdraw', variant: 'danger', required: false },
-};
+const approvalForm = useForm({ comments: '', expected_updated_at: null });
+const APPROVAL = computed(() => {
+    const commercial = !!props.approval?.is_commercial_level;
+    return {
+        approve: {
+            title: commercial ? 'Approve Commercial' : 'Approve Technical',
+            route: 'approvals.approve',
+            button: commercial ? 'Approve Commercial' : 'Approve Technical',
+            variant: 'primary',
+            required: false,
+        },
+        sendBack: {
+            title: commercial ? 'Return to Technical Review' : 'Send back for changes',
+            route: 'approvals.send-back',
+            button: commercial ? 'Return to Technical' : 'Send back',
+            variant: 'secondary',
+            required: true,
+        },
+        requestChanges: {
+            title: 'Request commercial changes',
+            route: 'approvals.request-changes',
+            button: 'Request changes',
+            variant: 'secondary',
+            required: true,
+        },
+        reject: { title: 'Reject BOQ', route: 'approvals.reject', button: 'Reject', variant: 'danger', required: true },
+        cancel: { title: 'Withdraw approval request', route: 'approvals.cancel', button: 'Withdraw', variant: 'danger', required: false },
+    };
+});
 function openApproval(action) {
     approvalForm.reset();
     approvalForm.clearErrors();
+    approvalForm.expected_updated_at = props.approval?.expected_updated_at ?? props.boq.updated_at ?? null;
     approvalAction.value = action;
 }
 function submitApproval() {
-    approvalForm.post(route(APPROVAL[approvalAction.value].route, props.approval.id), {
+    approvalForm.post(route(APPROVAL.value[approvalAction.value].route, props.approval.id), {
         preserveScroll: true,
         onSuccess: () => (approvalAction.value = null),
+    });
+}
+
+const commercialForm = useForm({ reason: '', rows: [] });
+const showCommercialEdit = ref(false);
+function openCommercialEdit() {
+    commercialForm.reason = '';
+    commercialForm.rows = props.items.map((item) => ({
+        id: item.id,
+        client_rate: item.client_rate,
+        margin_percent: item.margin_percent ?? null,
+    }));
+    commercialForm.clearErrors();
+    showCommercialEdit.value = true;
+}
+function saveCommercialRates() {
+    commercialForm.put(route('projects.boqs.commercial-rates.update', [props.project.id, props.boq.id]), {
+        preserveScroll: true,
+        onSuccess: () => (showCommercialEdit.value = false),
     });
 }
 
@@ -597,8 +669,8 @@ const lockedReason = computed(() => {
         revised: 'Superseded by a later revision. This version is kept for history.',
     }[props.boq.status] ?? null;
 });
-/** Base 8 (# Code Item Unit Qty Rate Amount Actions) + Labour Rate when costs visible + 7 advanced cost cols. */
-const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value ? 7 : 0));
+/** Base 8 (# Code Item Unit Qty Rate Amount Actions) + legacy Labour Rate when simplified costs visible. */
+const colCount = computed(() => 8 + (showLegacyLabourRateColumn.value ? 1 : 0));
 </script>
 
 <template>
@@ -651,24 +723,70 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                             </template>
                             <AppButton v-if="can.submit && !dirty" size="sm" @click="confirming = 'submit'">Submit for approval</AppButton>
                             <template v-if="approval?.can_act">
-                                <AppButton size="sm" @click="openApproval('approve')">Approve</AppButton>
-                                <AppButton size="sm" variant="secondary" @click="openApproval('sendBack')">Send back</AppButton>
+                                <AppButton size="sm" @click="openApproval('approve')">
+                                    {{ approval.is_commercial_level ? 'Approve Commercial' : 'Approve Technical' }}
+                                </AppButton>
+                                <AppButton
+                                    v-if="approval.is_commercial_level"
+                                    size="sm"
+                                    variant="secondary"
+                                    @click="openApproval('requestChanges')"
+                                >
+                                    Request commercial changes
+                                </AppButton>
+                                <AppButton size="sm" variant="secondary" @click="openApproval('sendBack')">
+                                    {{ approval.is_commercial_level ? 'Return to Technical' : 'Send back' }}
+                                </AppButton>
                                 <AppButton size="sm" variant="ghost" class="text-red-600" @click="openApproval('reject')">Reject</AppButton>
                             </template>
+                            <AppButton v-if="can.edit_commercial" size="sm" variant="secondary" @click="openCommercialEdit">Edit commercial rates</AppButton>
                             <AppButton v-if="approval?.can_cancel" size="sm" variant="secondary" @click="openApproval('cancel')">Withdraw</AppButton>
                             <AppButton v-if="can.revise" size="sm" variant="secondary" @click="openRevise">Create revision</AppButton>
+                            <Link
+                                v-if="versions.length > 1"
+                                :href="compareHref(boq.parent_boq_id || versions.find((v) => v.version === boq.version - 1)?.id, boq.id)"
+                                class="inline-flex h-8 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                            >Compare revisions</Link>
+                            <Link
+                                v-if="can.create_change_order"
+                                :href="route('projects.boqs.change-orders.index', [project.id, boq.id])"
+                                class="inline-flex h-8 items-center rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                            >Change orders</Link>
                             <AppButton v-if="can.import && !dirty" size="sm" icon="folder" @click="showImport = true">Import Excel / CSV</AppButton>
+                            <Link
+                                v-if="advanced && can.import && !dirty"
+                                :href="route('projects.boqs.workbook-import.create-for-boq', [project.id, boq.id])"
+                                class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                            >
+                                Import Costing Workbook
+                            </Link>
                             <ImportTemplateDownload v-if="can.import" module="boq.items" :project-id="project.id" size="sm" label="Download template" />
                             <AppButton v-if="editable" size="sm" variant="secondary" @click="addRow">Add item manually</AppButton>
                             <a v-if="can.export" :href="route('projects.boqs.export', [project.id, boq.id])" class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">
                                 <Icon name="download" :size="14" /> Export
+                            </a>
+                            <a
+                                v-if="advanced && can.view_costs"
+                                :href="route('projects.boqs.advanced-costing.pdf', [project.id, boq.id])"
+                                class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                            >
+                                <Icon name="download" :size="14" /> Costing Report
+                            </a>
+                            <a
+                                v-if="advanced && can.view_costs"
+                                :href="route('projects.boqs.advanced-costing.pdf', [project.id, boq.id]) + '?mode=summary'"
+                                class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                            >
+                                Costing Summary
                             </a>
                             <AppButton v-if="can.delete" size="sm" variant="ghost" icon="trash" aria-label="Delete BOQ" @click="confirming = 'delete'" />
                         </div>
                     </div>
                 </div>
                 <div v-if="approval" class="border-t border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900 sm:px-5">
+                    <template v-if="approval_stage_label">{{ approval_stage_label }} · </template>
                     Awaiting approval · level {{ approval.level }} of {{ approval.levels }}<template v-if="approval.step_name"> ({{ approval.step_name }})</template>
+                    <span v-if="boq.technical_approved_at" class="ml-2 inline-flex rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">Technical Approved</span>
                 </div>
                 <div v-else-if="lockedReason" class="border-t border-line bg-slate-50 px-4 py-2.5 text-xs text-slate-600 sm:px-5">
                     <Icon name="info" :size="14" class="mr-1 inline align-text-bottom" />{{ lockedReason }}
@@ -678,6 +796,76 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
             <div v-if="has_newer_approved_revision" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 A newer approved drawing revision is available. Review whether this BOQ requires an update.
             </div>
+
+            <div v-if="advanced_boq && (technical_review || commercial_review)" class="grid gap-4 lg:grid-cols-2">
+                <AppCard v-if="technical_review" title="Technical Review" subtitle="Engineering quantities, measurements, costing, BBS">
+                    <dl class="grid gap-2 text-sm">
+                        <div class="flex justify-between gap-3"><dt class="text-slate-500">Status</dt><dd class="font-medium">{{ technical_review.status }}</dd></div>
+                        <div class="flex justify-between gap-3"><dt class="text-slate-500">Technical approver</dt><dd>{{ technical_review.technical_approved_by || '—' }}</dd></div>
+                        <div class="flex justify-between gap-3"><dt class="text-slate-500">Approved at</dt><dd>{{ technical_review.technical_approved_at ? formatDateTime(technical_review.technical_approved_at) : '—' }}</dd></div>
+                        <div v-if="can.view_costs" class="flex justify-between gap-3"><dt class="text-slate-500">Internal cost</dt><dd class="tabular">{{ formatMoney(technical_review.internal_cost) }}</dd></div>
+                    </dl>
+                    <ul v-if="technical_review.blocking_issues?.length" class="mt-3 space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                        <li v-for="(issue, idx) in technical_review.blocking_issues" :key="idx">{{ issue }}</li>
+                    </ul>
+                </AppCard>
+                <AppCard v-if="commercial_review" title="Commercial Review" subtitle="Client rate, margin, and commercial value">
+                    <dl class="grid gap-2 text-sm">
+                        <div class="flex justify-between gap-3"><dt class="text-slate-500">Status</dt><dd class="font-medium">{{ commercial_review.status }}</dd></div>
+                        <div class="flex justify-between gap-3"><dt class="text-slate-500">Internal cost</dt><dd class="tabular">{{ formatMoney(commercial_review.internal_cost) }}</dd></div>
+                        <div class="flex justify-between gap-3"><dt class="text-slate-500">Commercial value</dt><dd class="tabular">{{ formatMoney(commercial_review.commercial_value) }}</dd></div>
+                        <div class="flex justify-between gap-3"><dt class="text-slate-500">Margin</dt><dd class="tabular">{{ formatMoney(commercial_review.margin) }}</dd></div>
+                        <div class="flex justify-between gap-3"><dt class="text-slate-500">Margin %</dt><dd class="tabular">{{ commercial_review.margin_pct != null ? formatPercent(commercial_review.margin_pct) : '—' }}</dd></div>
+                    </dl>
+                </AppCard>
+            </div>
+
+            <AppCard v-if="advanced_boq && approval_timeline.length" title="Approval Timeline" :padded="false">
+                <ul class="divide-y divide-line text-sm">
+                    <li v-for="(event, idx) in approval_timeline" :key="idx" class="flex flex-wrap items-start justify-between gap-2 px-4 py-2.5">
+                        <div>
+                            <p class="font-medium text-slate-900">{{ event.label }}</p>
+                            <p class="text-xs text-slate-500">{{ event.by || '—' }}<span v-if="event.remarks"> · {{ event.remarks }}</span></p>
+                        </div>
+                        <p class="text-xs tabular text-slate-500">{{ event.at ? formatDateTime(event.at) : '' }}</p>
+                    </li>
+                </ul>
+            </AppCard>
+
+            <AppCard
+                v-if="advanced && budget_sync && can.view_costs"
+                title="Budget Sync"
+                subtitle="Workbook-driven Material Cost (A) + Labour Cost (B) + BBS/equipment → Project Budget. Commercial Rate is not the budget source."
+            >
+                <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+                    <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
+                        <p class="text-[11px] uppercase text-slate-500">Sync status</p>
+                        <p class="mt-0.5 font-semibold text-slate-900">{{ budget_sync.label }}</p>
+                    </div>
+                    <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
+                        <p class="text-[11px] uppercase text-slate-500">Advanced internal cost</p>
+                        <p class="mt-0.5 font-semibold tabular">{{ formatMoney(budget_sync.advanced_internal_cost) }}</p>
+                        <p class="text-[11px] text-slate-500">A {{ formatMoney(budget_sync.material_cost_a) }} · B {{ formatMoney(budget_sync.labour_cost_b) }}</p>
+                    </div>
+                    <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
+                        <p class="text-[11px] uppercase text-slate-500">Budget version</p>
+                        <p class="mt-0.5 font-semibold">{{ budget_sync.budget_version != null ? `v${budget_sync.budget_version}` : '—' }}</p>
+                        <p v-if="budget_sync.last_synced_at" class="text-[11px] text-slate-500">
+                            Last synced {{ formatDateTime(budget_sync.last_synced_at) }}
+                            <span v-if="budget_sync.last_synced_by"> · {{ budget_sync.last_synced_by.name }}</span>
+                        </p>
+                    </div>
+                    <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
+                        <p class="text-[11px] uppercase text-slate-500">Variance</p>
+                        <p class="mt-0.5 font-semibold tabular">{{ budget_sync.variance != null ? formatMoney(budget_sync.variance) : '—' }}</p>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <Link :href="budget_sync.budget_index_url" class="text-sm font-medium text-brand-700 hover:underline">
+                        Open Project Budget → Sync from BOQ
+                    </Link>
+                </div>
+            </AppCard>
 
             <AppCard
                 v-if="(source_imports?.length || source_import)"
@@ -733,8 +921,11 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                                 <th class="px-4 py-2 text-left">Status</th>
                                 <th class="px-4 py-2 text-left">Reason</th>
                                 <th class="px-4 py-2 text-left">Created</th>
-                                <th class="px-4 py-2 text-left">Approved</th>
+                                <th class="px-4 py-2 text-left">Technical</th>
+                                <th class="px-4 py-2 text-left">Commercial</th>
                                 <th class="px-4 py-2 text-right">BOQ value</th>
+                                <th v-if="can.view_costs" class="px-4 py-2 text-right">Internal cost</th>
+                                <th class="px-4 py-2 text-right">Δ vs prior</th>
                                 <th class="px-4 py-2 text-left">Drawings</th>
                                 <th class="px-4 py-2 text-right">Changes</th>
                             </tr>
@@ -752,10 +943,16 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                                     <div v-if="v.created_by" class="text-xs text-slate-500">{{ v.created_by }}</div>
                                 </td>
                                 <td class="px-4 py-2 text-slate-700">
+                                    <div>{{ v.technical_approved_at ? formatDateTime(v.technical_approved_at) : '—' }}</div>
+                                    <div v-if="v.technical_approved_by" class="text-xs text-slate-500">{{ v.technical_approved_by }}</div>
+                                </td>
+                                <td class="px-4 py-2 text-slate-700">
                                     <div>{{ v.approved_at ? formatDateTime(v.approved_at) : '—' }}</div>
                                     <div v-if="v.approved_by" class="text-xs text-slate-500">{{ v.approved_by }}</div>
                                 </td>
                                 <td class="px-4 py-2 text-right tabular">{{ formatMoney(v.total_client_amount) }}</td>
+                                <td v-if="can.view_costs" class="px-4 py-2 text-right tabular">{{ v.total_cost_amount ? formatMoney(v.total_cost_amount) : '—' }}</td>
+                                <td class="px-4 py-2 text-right tabular">{{ v.commercial_change_from_prev != null ? formatMoney(v.commercial_change_from_prev) : '—' }}</td>
                                 <td class="px-4 py-2 text-xs text-slate-600">
                                     <template v-if="v.drawings?.length">
                                         <div v-for="d in v.drawings" :key="d.id">{{ d.drawing_number }} {{ d.revision_code }}</div>
@@ -763,12 +960,10 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                                     <template v-else>—</template>
                                 </td>
                                 <td class="px-4 py-2 text-right">
-                                    <button
-                                        v-if="v.parent_boq_id && v.id === boq.id"
-                                        type="button"
-                                        class="text-xs font-medium text-brand-700 hover:underline"
-                                        @click="viewChanges(v.parent_boq_id)"
-                                    >View changes</button>
+                                    <template v-if="v.parent_boq_id">
+                                        <button type="button" class="mr-2 text-xs font-medium text-brand-700 hover:underline" @click="viewChanges(v.parent_boq_id)">Quick view</button>
+                                        <Link :href="compareHref(v.parent_boq_id, v.id)" class="text-xs font-medium text-brand-700 hover:underline">Compare</Link>
+                                    </template>
                                     <span v-else class="text-slate-400">—</span>
                                 </td>
                             </tr>
@@ -911,7 +1106,7 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                                     <th class="px-2 py-2 text-right">Margin %</th>
                                 </template>
                                 <th class="px-2 py-2 text-right">Rate</th>
-                                <th v-if="costs" class="px-2 py-2 text-right whitespace-nowrap">Labour Rate</th>
+                                <th v-if="showLegacyLabourRateColumn" class="px-2 py-2 text-right whitespace-nowrap">Labour Rate</th>
                                 <th class="px-2 py-2 text-right">Amount</th>
                                 <th class="px-2 py-2"><span class="sr-only">Actions</span></th>
                             </tr>
@@ -962,7 +1157,7 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                                                 <span v-if="materialAutoActive(row)" class="block px-1.5 py-1 text-right text-xs tabular text-slate-800" title="Auto-calculated from materials">{{ formatMoney(calc[row._key].client_rate) }}</span>
                                                 <CellDecimal v-else v-model="row.client_rate" :placeholder="detailedCosts ? calc[row._key].selling_rate : null" :error="!!cellError(row, 'client_rate')" />
                                             </td>
-                                            <td v-if="costs" class="px-2 py-1.5 text-right tabular text-slate-700" title="Labour rate / BOQ unit (edit in item details)">{{ formatMoney(row.labour_rate || 0) }}</td>
+                                            <td v-if="showLegacyLabourRateColumn" class="px-2 py-1.5 text-right tabular text-slate-700" title="Labour rate / BOQ unit (edit in item details)">{{ formatMoney(row.labour_rate || 0) }}</td>
                                         </template>
                                         <template v-else>
                                             <td class="px-2 py-1.5 font-mono text-slate-600">{{ row.item_code || '—' }}</td>
@@ -982,10 +1177,19 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                                                 <td class="px-2 py-1.5 text-right tabular">{{ formatPercent(row.margin_percent) }}</td>
                                             </template>
                                             <td class="px-2 py-1.5 text-right tabular">{{ formatRate(calc[row._key].client_rate) }}</td>
-                                            <td v-if="costs" class="px-2 py-1.5 text-right tabular text-slate-700">{{ formatMoney(row.labour_rate || 0) }}</td>
+                                            <td v-if="showLegacyLabourRateColumn" class="px-2 py-1.5 text-right tabular text-slate-700">{{ formatMoney(row.labour_rate || 0) }}</td>
                                         </template>
                                         <td class="px-2 py-1.5 text-right font-medium text-slate-900 tabular">{{ formatMoney(calc[row._key].client_amount) }}</td>
                                         <td class="px-1 py-1 text-right whitespace-nowrap">
+                                            <Link
+                                                v-if="advanced && row.id"
+                                                :href="itemWorkspaceUrl(row)"
+                                                class="rounded p-1 text-brand-600 hover:bg-brand-50"
+                                                :title="'Measurement & Costing'"
+                                                aria-label="Open Measurement & Costing"
+                                            >
+                                                <Icon name="clipboard" :size="14" />
+                                            </Link>
                                             <button type="button" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" :aria-label="editable ? 'Edit details' : 'View details'" @click="editingRow = row">
                                                 <Icon :name="editable ? 'pencil' : 'info'" :size="14" />
                                             </button>
@@ -1036,7 +1240,8 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                                     <div class="min-w-0">
                                         <p class="truncate text-sm font-medium text-slate-900">{{ row.name || 'New item' }}</p>
                                         <p class="text-xs text-slate-500"><span v-if="row.item_code" class="font-mono">{{ row.item_code }} · </span>{{ formatQty(row.quantity) }} {{ unitLabel(row.unit_id) }} × {{ formatRate(calc[row._key].client_rate) }}</p>
-                                        <p v-if="costs" class="text-xs text-slate-500">Labour Rate {{ formatMoney(row.labour_rate || 0) }}</p>
+                                        <p v-if="showLegacyLabourRateColumn" class="text-xs text-slate-500">Labour Rate {{ formatMoney(row.labour_rate || 0) }}</p>
+                                        <p v-else-if="advanced && row.id" class="text-xs text-brand-700">Open Measurement &amp; Costing for materials / labour</p>
                                     </div>
                                     <p class="shrink-0 text-sm font-semibold text-slate-900 tabular">{{ formatMoney(calc[row._key].client_amount) }}</p>
                                 </div>
@@ -1345,31 +1550,35 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
             <div v-else-if="diffError" class="text-sm text-red-700">{{ diffError }}</div>
             <div v-else-if="diffPayload" class="space-y-3 text-sm">
                 <p class="text-slate-600">
-                    Comparing v{{ diffPayload.previous.version }} → v{{ diffPayload.current.version }}
-                    <template v-if="diffPayload.total_amount_changed"> · Total {{ formatMoney(diffPayload.previous.total_client_amount) }} → {{ formatMoney(diffPayload.current.total_client_amount) }}</template>
+                    Comparing {{ diffPayload.header?.previous?.label || diffPayload.previous?.version }} → {{ diffPayload.header?.current?.label || diffPayload.current?.version }}
+                    <template v-if="diffPayload.summary?.commercial_variance"> · Commercial Δ {{ formatMoney(diffPayload.summary.commercial_variance) }}</template>
                 </p>
                 <div class="flex flex-wrap gap-2 text-xs text-slate-600">
-                    <span>Added {{ diffPayload.summary.added }}</span>
-                    <span>Removed {{ diffPayload.summary.removed }}</span>
-                    <span>Qty {{ diffPayload.summary.quantity_changed }}</span>
-                    <span>Rate {{ diffPayload.summary.rate_changed }}</span>
-                    <span>Labour {{ diffPayload.summary.labour_rate_changed }}</span>
+                    <span>Added {{ diffPayload.summary?.added ?? 0 }}</span>
+                    <span>Removed {{ diffPayload.summary?.removed ?? 0 }}</span>
+                    <span>Modified {{ diffPayload.summary?.modified ?? 0 }}</span>
                 </div>
                 <ul class="max-h-80 divide-y divide-line overflow-auto rounded-lg border border-line">
-                    <li v-for="(c, i) in diffPayload.changes" :key="i" class="px-3 py-2">
+                    <li v-for="(c, i) in (diffPayload.items || diffPayload.changes || [])" :key="i" class="px-3 py-2">
                         <p class="font-medium text-slate-900">
-                            <span class="uppercase text-[10px] text-slate-500">{{ c.kind }}</span>
-                            {{ c.item_code }} {{ c.name }}
+                            <span class="uppercase text-[10px] text-slate-500">{{ c.status || c.kind }}</span>
+                            {{ c.item_code }} {{ c.description || c.name }}
                         </p>
-                        <div v-for="(change, field) in c.fields" :key="field" class="text-xs text-slate-600">
-                            {{ field }}: {{ change.from }} → {{ change.to }}
-                        </div>
+                        <p v-if="c.change_types?.length" class="text-xs text-slate-600">{{ c.change_types.join(' · ') }}</p>
+                        <p v-else-if="c.fields" class="text-xs text-slate-600">
+                            <span v-for="(change, field) in c.fields" :key="field">{{ field }}: {{ change.from }} → {{ change.to }}; </span>
+                        </p>
                     </li>
-                    <li v-if="!diffPayload.changes.length" class="px-3 py-4 text-slate-500">No line differences.</li>
+                    <li v-if="!(diffPayload.items || diffPayload.changes || []).length" class="px-3 py-4 text-slate-500">No line differences.</li>
                 </ul>
             </div>
             <template #footer>
                 <AppButton variant="secondary" @click="diffOpen = false">Close</AppButton>
+                <Link
+                    v-if="diffPayload?.header"
+                    :href="compareHref(diffPayload.header.previous?.id, diffPayload.header.current?.id)"
+                    class="inline-flex h-9 items-center rounded-lg bg-brand-600 px-3 text-sm font-medium text-white hover:bg-brand-700"
+                >Full comparison</Link>
             </template>
         </AppModal>
 
@@ -1390,13 +1599,27 @@ const colCount = computed(() => 8 + (costs.value ? 1 : 0) + (detailedCosts.value
                 multiline
                 :rows="3"
                 :required="approvalAction ? APPROVAL[approvalAction].required : false"
-                :error="approvalForm.errors.comments || approvalForm.errors.approval"
+                :error="approvalForm.errors.comments || approvalForm.errors.approval || approvalForm.errors.expected_updated_at"
             />
             <template #footer>
                 <AppButton variant="secondary" @click="approvalAction = null">Cancel</AppButton>
                 <AppButton :variant="approvalAction ? APPROVAL[approvalAction].variant : 'primary'" :loading="approvalForm.processing" @click="submitApproval">
                     {{ approvalAction ? APPROVAL[approvalAction].button : '' }}
                 </AppButton>
+            </template>
+        </AppModal>
+
+        <AppModal :show="showCommercialEdit" title="Edit commercial rates" @close="showCommercialEdit = false">
+            <FormInput v-model="commercialForm.reason" label="Reason" required maxlength="500" :error="commercialForm.errors.reason" class="mb-3" />
+            <div class="max-h-80 space-y-2 overflow-auto">
+                <div v-for="(row, idx) in commercialForm.rows" :key="row.id" class="grid grid-cols-[1fr_8rem] items-center gap-2 text-sm">
+                    <p class="truncate text-slate-700">{{ items.find((i) => i.id === row.id)?.name || row.id }}</p>
+                    <DecimalInput v-model="row.client_rate" :decimals="4" prefix="₹" :error="commercialForm.errors[`rows.${idx}.client_rate`]" />
+                </div>
+            </div>
+            <template #footer>
+                <AppButton variant="secondary" @click="showCommercialEdit = false">Cancel</AppButton>
+                <AppButton :loading="commercialForm.processing" @click="saveCommercialRates">Save rates</AppButton>
             </template>
         </AppModal>
 

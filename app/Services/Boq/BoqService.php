@@ -3,6 +3,7 @@
 namespace App\Services\Boq;
 
 use App\Enums\Boq\BoqStatus;
+use App\Enums\Boq\QuantitySource;
 use App\Enums\Boq\RateAnalysisStatus;
 use App\Enums\Documents\DrawingRevisionStatus;
 use App\Models\Boq\Boq;
@@ -14,8 +15,8 @@ use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
-use App\Support\Boq\BoqCompanySettings;
 use App\Services\Numbering\DocumentNumberService;
+use App\Support\Boq\BoqCompanySettings;
 use App\Support\Math\Decimal;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -303,17 +304,17 @@ class BoqService
             $row['client_rate'] = $costs['client_rate'];
         }
 
-        $source = $item->quantity_source instanceof \App\Enums\Boq\QuantitySource
+        $source = $item->quantity_source instanceof QuantitySource
             ? $item->quantity_source
-            : \App\Enums\Boq\QuantitySource::tryFrom((string) ($row['quantity_source'] ?? $item->getAttribute('quantity_source') ?? 'direct'))
-                ?? \App\Enums\Boq\QuantitySource::Direct;
+            : QuantitySource::tryFrom((string) ($row['quantity_source'] ?? $item->getAttribute('quantity_source') ?? 'direct'))
+                ?? QuantitySource::Direct;
 
         if (array_key_exists('quantity_source', $row) && $canEditCosts) {
             // quantity_source is managed via item workspace / measurement service; ignore silent client changes here
         }
 
         $quantity = (string) ($row['quantity'] ?? '0');
-        if ($source === \App\Enums\Boq\QuantitySource::Measurement && $item->exists) {
+        if ($source === QuantitySource::Measurement && $item->exists) {
             // Authoritative qty comes from approved measurement sheet — do not trust grid quantity.
             $quantity = (string) $item->quantity;
         }
@@ -415,6 +416,10 @@ class BoqService
 
         if (! $boq->items()->exists()) {
             throw ValidationException::withMessages(['boq' => 'Add at least one line before submitting the BOQ.']);
+        }
+
+        if (BoqCompanySettings::enabled()) {
+            app(AdvancedBoqTechnicalApprovalValidator::class)->assertReady($boq);
         }
 
         $this->approvals->submit($boq, $user);

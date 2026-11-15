@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * BOQ line. Derived amounts (cost_rate, cost_amount, selling_rate, client_amount) are always
@@ -33,13 +34,33 @@ class BoqItem extends Model
         'margin_percent', 'selling_rate',
     ];
 
+    /** Fields writable during Advanced BOQ commercial review (after technical approval). */
+    public const COMMERCIAL_EDIT_FIELDS = [
+        'client_rate', 'client_amount', 'margin_percent', 'selling_rate', 'updated_at',
+    ];
+
     protected static function booted(): void
     {
         $guard = function (self $item) {
             $boq = $item->relationLoaded('boq') && $item->boq?->id === $item->boq_id
                 ? $item->boq
                 : Boq::query()->withoutGlobalScopes()->find($item->boq_id);
-            $boq?->assertEditable();
+            if ($boq === null) {
+                return;
+            }
+
+            if ($boq->isEditable() && ! $boq->isTechnicallyApproved()) {
+                return;
+            }
+
+            if ($boq->allowsCommercialRateEdits()) {
+                $dirty = array_keys($item->getDirty());
+                if ($dirty === [] || array_diff($dirty, self::COMMERCIAL_EDIT_FIELDS) === []) {
+                    return;
+                }
+            }
+
+            $boq->assertEditable();
         };
 
         static::saving($guard);
@@ -123,9 +144,19 @@ class BoqItem extends Model
         return $this->hasMany(BoqItemMaterialCost::class)->orderBy('sequence')->orderBy('id');
     }
 
-    public function bbs(): \Illuminate\Database\Eloquent\Relations\HasOne
+    public function bbs(): HasOne
     {
         return $this->hasOne(BoqBbs::class);
+    }
+
+    public function rateComparisonQuotes(): HasMany
+    {
+        return $this->hasMany(BoqRateComparisonQuote::class)->orderBy('sequence')->orderBy('id');
+    }
+
+    public function planningMaps(): HasMany
+    {
+        return $this->hasMany(BoqPlanningMap::class)->orderBy('sequence')->orderBy('id');
     }
 
     /**

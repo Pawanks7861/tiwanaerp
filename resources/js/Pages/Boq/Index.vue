@@ -18,6 +18,7 @@ const props = defineProps({
     boqs: { type: Array, required: true },
     filters: { type: Object, required: true },
     statuses: { type: Array, required: true },
+    approval_stages: { type: Array, default: () => [] },
     can: { type: Object, required: true },
     approved_drawings: { type: Array, default: () => [] },
 });
@@ -26,6 +27,7 @@ const columns = computed(() => [
     { key: 'boq_number', label: 'BOQ' },
     { key: 'version', label: 'Version' },
     { key: 'status', label: 'Status' },
+    props.approval_stages.length && { key: 'approval_stage_label', label: 'Approval Stage', mobile: false },
     props.can.view_costs && { key: 'total_cost_amount', label: 'Cost', type: 'money', mobile: false },
     { key: 'total_client_amount', label: 'Client value', type: 'money' },
     { key: 'dates', label: 'Updated', mobile: false },
@@ -87,8 +89,17 @@ function confirmAction() {
             </template>
 
             <FilterBar
-                :filters="{ search: filters.search ?? '', status: filters.status ?? 'all' }"
-                :selects="[{ key: 'status', options: [{ value: 'all', label: 'All statuses' }, ...statuses] }]"
+                :filters="{
+                    search: filters.search ?? '',
+                    status: filters.status ?? 'all',
+                    approval_stage: filters.approval_stage ?? 'all',
+                }"
+                :selects="[
+                    { key: 'status', options: [{ value: 'all', label: 'All statuses' }, ...statuses] },
+                    ...(approval_stages.length
+                        ? [{ key: 'approval_stage', options: [{ value: 'all', label: 'All approval stages' }, ...approval_stages] }]
+                        : []),
+                ]"
                 placeholder="Search BOQ number or title…"
             />
 

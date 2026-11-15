@@ -263,7 +263,10 @@ class CompanyProvisioner
             'expense' => ['Expense', [$pm, $role(DefaultRoles::ACCOUNTANT)]],
             'vendor_bill' => ['Vendor Bill', [$pm, $role(DefaultRoles::DIRECTOR)]],
             'retention_release' => ['Retention Release', [$pm, $role(DefaultRoles::DIRECTOR)]],
-            'boq' => ['BOQ', [$pm, $role(DefaultRoles::DIRECTOR)]],
+            'boq' => ['BOQ', [
+                ['approver_type' => ApproverType::ProjectRole, 'project_role' => ProjectRole::Manager->value, 'name' => 'Technical Approval'],
+                ['approver_type' => ApproverType::Role, 'role_id' => $roles[DefaultRoles::DIRECTOR]->id, 'name' => 'Commercial Approval'],
+            ]],
             'gate_pass' => ['Gate Pass', [$pm]],
             'scrap_generation' => ['Scrap Generation', [$pm]],
             'scrap_adjustment' => ['Scrap Adjustment', [$pm]],

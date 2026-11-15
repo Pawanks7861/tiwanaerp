@@ -13,6 +13,7 @@ enum ApprovalActionType: string
     case Rejected = 'rejected';
     case SentBack = 'sent_back';
     case Cancelled = 'cancelled';
+    case ChangesRequested = 'changes_requested';
 
     public function label(): string
     {
@@ -22,6 +23,7 @@ enum ApprovalActionType: string
             self::Rejected => 'Rejected',
             self::SentBack => 'Sent Back',
             self::Cancelled => 'Cancelled',
+            self::ChangesRequested => 'Changes Requested',
         };
     }
 }

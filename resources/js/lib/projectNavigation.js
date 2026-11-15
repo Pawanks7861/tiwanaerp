@@ -24,6 +24,12 @@ export function buildProjectTabs({ projectId, can, procurementHome = null, finan
             icon: 'scale',
             href: route('projects.material-reconciliation.index', projectId),
         },
+        (advancedBoq ? can('boq.view_reconciliation') : can('reports.view')) && {
+            key: 'material-control',
+            label: 'Material Control',
+            icon: 'scale',
+            href: route('projects.material-control.index', projectId),
+        },
         advancedBoq && can('boq.view_reconciliation') && {
             key: 'steel-reconciliation',
             label: 'Steel Reconciliation',

@@ -19,6 +19,7 @@ return [
 
         'boq' => ['pattern' => 'BOQ-{PROJECT_CODE}-{SEQ:3}', 'reset' => 'never', 'assign_on' => 'create'],
         'boq_variation' => ['pattern' => 'VO-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
+        'boq_revision_change_order' => ['pattern' => 'CO-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
         'rate_analysis' => ['pattern' => 'RA-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],
 
         'material_request' => ['pattern' => 'MR-{PROJECT_CODE}-{SEQ:4}', 'reset' => 'never', 'assign_on' => 'create'],

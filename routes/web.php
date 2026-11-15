@@ -9,9 +9,15 @@ use App\Http\Controllers\Admin\DocumentTermsTemplateController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Ai\AiAssistantController;
+use App\Http\Controllers\Boq\AdvancedBoqCostingPdfController;
+use App\Http\Controllers\Boq\AdvancedBoqWorkbookImportController;
+use App\Http\Controllers\Boq\BoqCommercialRateController;
 use App\Http\Controllers\Boq\BoqController;
 use App\Http\Controllers\Boq\BoqExcelController;
 use App\Http\Controllers\Boq\BoqItemWorkspaceController;
+use App\Http\Controllers\Boq\BoqRevisionChangeOrderController;
+use App\Http\Controllers\Boq\BoqRevisionChangeOrderPdfController;
+use App\Http\Controllers\Boq\BoqRevisionCompareController;
 use App\Http\Controllers\Boq\BoqSectionController;
 use App\Http\Controllers\Boq\Coefficient\CostingRateLibraryController;
 use App\Http\Controllers\Boq\Coefficient\MaterialRecipeController;
@@ -20,6 +26,7 @@ use App\Http\Controllers\Boq\Coefficient\UnitConversionController;
 use App\Http\Controllers\Boq\MaterialReconciliationController;
 use App\Http\Controllers\Boq\MaterialRequirementController;
 use App\Http\Controllers\Boq\ProjectBudgetController;
+use App\Http\Controllers\Boq\ProjectMaterialControlController;
 use App\Http\Controllers\Boq\RateAnalysisController;
 use App\Http\Controllers\Chat\ChatController;
 use App\Http\Controllers\Core\ApprovalController;
@@ -192,17 +199,37 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/boqs', [BoqController::class, 'index'])->name('projects.boqs.index');
         Route::post('/boqs', [BoqController::class, 'store'])->name('projects.boqs.store');
         Route::get('/boqs/import-template', [BoqExcelController::class, 'template'])->name('projects.boqs.template');
+        Route::get('/boqs/workbook-import', [AdvancedBoqWorkbookImportController::class, 'create'])->name('projects.boqs.workbook-import.create');
+        Route::get('/boqs/{boq}/workbook-import', [AdvancedBoqWorkbookImportController::class, 'create'])->whereNumber('boq')->name('projects.boqs.workbook-import.create-for-boq');
+        Route::post('/boqs/workbook-import', [AdvancedBoqWorkbookImportController::class, 'upload'])->middleware('throttle:10,1')->name('projects.boqs.workbook-import.upload');
+        Route::get('/boqs/workbook-import/{import}', [AdvancedBoqWorkbookImportController::class, 'show'])->whereNumber('import')->name('projects.boqs.workbook-import.show');
+        Route::post('/boqs/workbook-import/{import}/preview', [AdvancedBoqWorkbookImportController::class, 'preview'])->whereNumber('import')->middleware('throttle:20,1')->name('projects.boqs.workbook-import.preview');
+        Route::post('/boqs/workbook-import/{import}/confirm', [AdvancedBoqWorkbookImportController::class, 'confirm'])->whereNumber('import')->middleware('throttle:5,1')->name('projects.boqs.workbook-import.confirm');
+        Route::get('/boqs/workbook-import/{import}/report', [AdvancedBoqWorkbookImportController::class, 'report'])->whereNumber('import')->name('projects.boqs.workbook-import.report');
         Route::prefix('/boqs/{boq}')->whereNumber('boq')->name('projects.boqs.')->group(function () {
             Route::get('/', [BoqController::class, 'show'])->name('show');
             Route::put('/', [BoqController::class, 'update'])->name('update');
             Route::put('/drawings', [BoqController::class, 'syncDrawings'])->name('drawings.sync');
             Route::delete('/', [BoqController::class, 'destroy'])->name('destroy');
             Route::put('/items', [BoqController::class, 'saveItems'])->name('items.save');
+            Route::put('/commercial-rates', [BoqCommercialRateController::class, 'update'])->name('commercial-rates.update');
             Route::post('/submit', [BoqController::class, 'submit'])->name('submit');
             Route::post('/revise', [BoqController::class, 'revise'])->name('revise');
             Route::get('/compare', [BoqController::class, 'compare'])->name('compare');
+            Route::get('/revisions/compare', [BoqRevisionCompareController::class, 'page'])->name('revisions.compare');
+            Route::get('/change-orders', [BoqRevisionChangeOrderController::class, 'index'])->name('change-orders.index');
+            Route::post('/change-orders', [BoqRevisionChangeOrderController::class, 'store'])->name('change-orders.store');
+            Route::get('/change-orders/{changeOrder}', [BoqRevisionChangeOrderController::class, 'show'])->whereNumber('changeOrder')->name('change-orders.show');
+            Route::post('/change-orders/{changeOrder}/submit', [BoqRevisionChangeOrderController::class, 'submit'])->whereNumber('changeOrder')->name('change-orders.submit');
+            Route::post('/change-orders/{changeOrder}/approve', [BoqRevisionChangeOrderController::class, 'approve'])->whereNumber('changeOrder')->name('change-orders.approve');
+            Route::post('/change-orders/{changeOrder}/reject', [BoqRevisionChangeOrderController::class, 'reject'])->whereNumber('changeOrder')->name('change-orders.reject');
+            Route::post('/change-orders/{changeOrder}/cancel', [BoqRevisionChangeOrderController::class, 'cancel'])->whereNumber('changeOrder')->name('change-orders.cancel');
+            Route::get('/change-orders/{changeOrder}/pdf/internal', [BoqRevisionChangeOrderPdfController::class, 'internal'])->whereNumber('changeOrder')->name('change-orders.pdf.internal');
+            Route::get('/change-orders/{changeOrder}/pdf/client', [BoqRevisionChangeOrderPdfController::class, 'client'])->whereNumber('changeOrder')->name('change-orders.pdf.client');
             Route::post('/import', [BoqExcelController::class, 'import'])->middleware('throttle:20,1')->name('import');
             Route::get('/export', [BoqExcelController::class, 'export'])->name('export');
+            Route::get('/advanced-costing/pdf', [AdvancedBoqCostingPdfController::class, 'pdf'])->name('advanced-costing.pdf');
+            Route::get('/advanced-costing/pdf/view', [AdvancedBoqCostingPdfController::class, 'pdf'])->name('advanced-costing.pdf.view');
             Route::post('/sections', [BoqSectionController::class, 'store'])->name('sections.store');
             Route::put('/sections/{section}', [BoqSectionController::class, 'update'])->whereNumber('section')->name('sections.update');
             Route::delete('/sections/{section}', [BoqSectionController::class, 'destroy'])->whereNumber('section')->name('sections.destroy');
@@ -262,6 +289,14 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/steel-reconciliation/export', [MaterialReconciliationController::class, 'steelExport'])->name('projects.steel-reconciliation.export');
         Route::get('/steel-reconciliation/diameter', [MaterialReconciliationController::class, 'steelShow'])->name('projects.steel-reconciliation.show');
 
+        // Material Control — Estimate vs Actual (BOQ → Budget → MR → PO → GRN → Issue)
+        Route::get('/material-control', [ProjectMaterialControlController::class, 'index'])->name('projects.material-control.index');
+        Route::get('/material-control/export', [ProjectMaterialControlController::class, 'export'])->name('projects.material-control.export');
+        Route::get('/material-control/materials/{material}', [ProjectMaterialControlController::class, 'show'])
+            ->whereNumber('material')
+            ->withoutScopedBindings()
+            ->name('projects.material-control.show');
+
         // Rate analysis
         Route::get('/rate-analyses', [RateAnalysisController::class, 'index'])->name('projects.rate-analyses.index');
         Route::get('/rate-analyses/create', [RateAnalysisController::class, 'create'])->name('projects.rate-analyses.create');
@@ -277,6 +312,7 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/budget', [ProjectBudgetController::class, 'index'])->name('projects.budget.index');
         Route::post('/budget/generate', [ProjectBudgetController::class, 'generate'])->name('projects.budget.generate');
         Route::post('/budget/sync-materials', [ProjectBudgetController::class, 'syncMaterials'])->name('projects.budget.sync-materials');
+        Route::get('/budget/sync-preview', [ProjectBudgetController::class, 'syncPreview'])->name('projects.budget.sync-preview');
         Route::post('/budget/new-version', [ProjectBudgetController::class, 'newVersion'])->name('projects.budget.new-version');
         Route::post('/budget/lines', [ProjectBudgetController::class, 'storeLine'])->name('projects.budget.lines.store');
         Route::put('/budget/lines/{budgetLine}', [ProjectBudgetController::class, 'updateLine'])->whereNumber('budgetLine')->name('projects.budget.lines.update');
@@ -924,6 +960,7 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::post('/approve', [ApprovalController::class, 'approve'])->name('approve');
         Route::post('/reject', [ApprovalController::class, 'reject'])->name('reject');
         Route::post('/send-back', [ApprovalController::class, 'sendBack'])->name('send-back');
+        Route::post('/request-changes', [ApprovalController::class, 'requestChanges'])->name('request-changes');
         Route::post('/cancel', [ApprovalController::class, 'cancel'])->name('cancel');
     });
 

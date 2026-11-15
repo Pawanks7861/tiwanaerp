@@ -16,7 +16,12 @@ final class BoqCompanySettings
             return false;
         }
 
-        $value = $company->setting(self::KEY);
+        // Explicit company: bypass tenant scope so reads work outside CurrentCompany context.
+        $value = $company->settings()
+            ->withoutGlobalScopes()
+            ->where('key', self::KEY)
+            ->value('value');
+
         if ($value === null) {
             return false;
         }
@@ -29,9 +34,11 @@ final class BoqCompanySettings
 
     public static function set(Company $company, bool $enabled): void
     {
-        $company->settings()->updateOrCreate(
-            ['key' => self::KEY],
-            ['value' => $enabled],
-        );
+        $company->settings()
+            ->withoutGlobalScopes()
+            ->updateOrCreate(
+                ['key' => self::KEY],
+                ['value' => $enabled],
+            );
     }
 }

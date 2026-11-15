@@ -35,6 +35,7 @@ use App\Models\Boq\BoqMeasurementLine;
 use App\Models\Boq\BoqMeasurementSheet;
 use App\Models\Boq\BoqPlanningMap;
 use App\Models\Boq\BoqRateComparisonQuote;
+use App\Models\Boq\BoqRevisionChangeOrder;
 use App\Models\Boq\BoqSection;
 use App\Models\Boq\BoqVariation;
 use App\Models\Boq\BoqVariationItem;
@@ -189,6 +190,7 @@ use App\Policies\ApprovalWorkflowPolicy;
 use App\Policies\AttachmentPolicy;
 use App\Policies\BoqItemPolicy;
 use App\Policies\BoqPolicy;
+use App\Policies\BoqRevisionChangeOrderPolicy;
 use App\Policies\CompanyPolicy;
 use App\Policies\Crm\LeadPolicy;
 use App\Policies\Crm\QuotationPolicy;
@@ -333,8 +335,10 @@ class AppServiceProvider extends ServiceProvider
             'steel_unit_weight_profile' => SteelUnitWeightProfile::class,
             'steel_unit_weight_profile_line' => SteelUnitWeightProfileLine::class,
             'costing_rate_library_entry' => CostingRateLibraryEntry::class,
+            'boq_revision_change_order' => BoqRevisionChangeOrder::class,
             'boq_variation' => BoqVariation::class,
             'boq_variation_item' => BoqVariationItem::class,
+            'boq_revision_change_order' => BoqRevisionChangeOrder::class,
             'rate_analysis' => RateAnalysis::class,
             'rate_analysis_item' => RateAnalysisItem::class,
             'project_budget' => ProjectBudget::class,
@@ -465,6 +469,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Site::class, SitePolicy::class);
         Gate::policy(Attachment::class, AttachmentPolicy::class);
         Gate::policy(Boq::class, BoqPolicy::class);
+        Gate::policy(BoqRevisionChangeOrder::class, BoqRevisionChangeOrderPolicy::class);
         Gate::policy(BoqItem::class, BoqItemPolicy::class);
         Gate::policy(RateAnalysis::class, RateAnalysisPolicy::class);
         Gate::policy(ProjectBudget::class, ProjectBudgetPolicy::class);

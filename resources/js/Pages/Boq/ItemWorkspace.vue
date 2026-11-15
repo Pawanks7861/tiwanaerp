@@ -48,9 +48,10 @@ const tab = ref('details');
 
 const tabs = computed(() => [
     { key: 'details', label: 'Details' },
-    advanced.value && { key: 'measurements', label: 'Measurements' },
-    advanced.value && props.can.view_costs && { key: 'cost', label: 'Cost Build-Up' },
-    advanced.value && props.can.view_material_requirements && { key: 'materials', label: 'Materials' },
+    // Workbook-driven: measurement rows + material/labour cost components (not legacy Materials / Labour Rate).
+    advanced.value && { key: 'measurements', label: 'Measurement & Costing' },
+    advanced.value && props.can.view_costs && { key: 'cost', label: 'Cost Summary' },
+    advanced.value && props.can.view_material_requirements && { key: 'materials', label: 'Material Norms' },
     advanced.value && props.can.view_bbs && { key: 'bbs', label: 'BBS / Steel' },
     advanced.value && props.can.view_costs && { key: 'rate_comparison', label: 'Rate Comparison' },
     advanced.value && { key: 'planning_map', label: 'Planning Mapping' },
@@ -169,11 +170,11 @@ const costCategoryTotals = computed(() => {
     };
 });
 const costCategoryCards = computed(() => ([
-    { key: 'material', label: 'Material', value: costCategoryTotals.value.material },
-    { key: 'labour', label: 'Labour', value: costCategoryTotals.value.labour },
-    { key: 'equipment', label: 'Equipment', value: costCategoryTotals.value.equipment },
-    { key: 'subcontract', label: 'Subcontract', value: costCategoryTotals.value.subcontract },
-    { key: 'other', label: 'Other', value: costCategoryTotals.value.other },
+    { key: 'material', label: 'Material Cost (A)', value: costCategoryTotals.value.material },
+    { key: 'labour', label: 'Labour Cost (B)', value: costCategoryTotals.value.labour },
+    { key: 'equipment', label: 'Equipment (optional)', value: costCategoryTotals.value.equipment },
+    { key: 'subcontract', label: 'Subcontract (optional)', value: costCategoryTotals.value.subcontract },
+    { key: 'other', label: 'Other (optional)', value: costCategoryTotals.value.other },
 ]));
 const costLocked = computed(() => !!props.cost_build_up?.locked || !props.can.manage_cost);
 
@@ -907,6 +908,14 @@ function confirmRefreshRates(scope) {
         </AppCard>
 
         <div v-else-if="tab === 'measurements'" class="space-y-4">
+            <AppCard title="Workbook-driven Measurement &amp; Costing">
+                <p class="text-sm text-slate-600">
+                    Enter Nos / L / W / H measurement lines here. Material consumption and labour rates belong in
+                    <button type="button" class="font-medium text-brand-700 hover:underline" @click="tab = 'cost'">Cost Summary</button>
+                    as cost components — not the legacy Materials drawer or Labour Rate column.
+                    Steel quantities come from <button type="button" class="font-medium text-brand-700 hover:underline" @click="tab = 'bbs'">BBS / Steel</button>.
+                </p>
+            </AppCard>
             <AppCard title="Measurement sheet">
                 <form class="space-y-4" @submit.prevent="saveMeasurements">
                     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1227,9 +1236,11 @@ function confirmRefreshRates(scope) {
         </div>
 
         <div v-else-if="tab === 'materials' && can.view_material_requirements" class="space-y-4">
-            <AppCard title="Material Norms">
+            <AppCard title="Material Norms (planning)">
                 <p class="mb-3 text-sm text-slate-600">
-                    Consumption per BOQ unit for planning. BOQ Qty: <span class="font-semibold tabular">{{ formatQty(item.quantity) }} {{ unitLabel }}</span>.
+                    Planning / MR consumption norms per BOQ unit — not the retired standalone Materials entry.
+                    Costing materials are cost components under Cost Summary. BOQ Qty:
+                    <span class="font-semibold tabular">{{ formatQty(item.quantity) }} {{ unitLabel }}</span>.
                     Does not post stock, MR, PO, or project cost.
                 </p>
                 <p v-if="normsLocked" class="mb-3 text-sm text-amber-800">

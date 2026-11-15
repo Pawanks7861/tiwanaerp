@@ -15,6 +15,7 @@ use App\Models\Projects\Project;
 use App\Services\Boq\BoqBudgetMaterialSyncService;
 use App\Services\Boq\ProjectBudgetService;
 use App\Support\Math\Decimal;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -55,7 +56,11 @@ class ProjectBudgetController extends Controller
 
         $materialLines = $lines->filter(fn (ProjectBudgetLine $l) => $l->source_type === BudgetLineSource::BoqMaterial)->values();
         $labourLines = $lines->filter(fn (ProjectBudgetLine $l) => $l->source_type === BudgetLineSource::BoqLabour)->values();
-        $otherLines = $lines->reject(fn (ProjectBudgetLine $l) => in_array($l->source_type, [BudgetLineSource::BoqMaterial, BudgetLineSource::BoqLabour], true))->values();
+        $equipmentLines = $lines->filter(fn (ProjectBudgetLine $l) => $l->source_type === BudgetLineSource::BoqEquipment)->values();
+        $boqOtherLines = $lines->filter(fn (ProjectBudgetLine $l) => $l->source_type === BudgetLineSource::BoqOther)->values();
+        $otherLines = $lines->reject(
+            fn (ProjectBudgetLine $l) => in_array($l->source_type?->value, BudgetLineSource::syncOwnedValues(), true)
+        )->values();
 
         $pendingRevision = $project->budgets()
             ->where('status', BudgetStatus::Approved)
@@ -90,7 +95,13 @@ class ProjectBudgetController extends Controller
             'lines' => $otherLines->map(fn (ProjectBudgetLine $l) => $this->linePayload($l))->all(),
             'materialLines' => $materialLines->map(fn (ProjectBudgetLine $l) => $this->materialLinePayload($l))->all(),
             'labourLines' => $labourLines->map(fn (ProjectBudgetLine $l) => $this->labourLinePayload($l))->all(),
+            'equipmentLines' => $equipmentLines->map(fn (ProjectBudgetLine $l) => $this->labourLinePayload($l))->all(),
+            'boqOtherLines' => $boqOtherLines->map(fn (ProjectBudgetLine $l) => $this->labourLinePayload($l))->all(),
             'pendingRevision' => $pendingRevision,
+            'sync_status' => $this->materialSync->syncStatus(
+                $project,
+                $budget?->boq_id ? $project->boqs()->find($budget->boq_id) : null
+            ),
             'boqs' => $currentBoqs->map(fn (Boq $b) => [
                 'value' => $b->id,
                 'label' => "{$b->boq_number} v{$b->version} - {$b->title}",
@@ -115,12 +126,26 @@ class ProjectBudgetController extends Controller
             ->with('success', "Budget v{$budget->version} generated from {$boq->boq_number} v{$boq->version}.");
     }
 
+    public function syncPreview(Request $request, Project $project): JsonResponse
+    {
+        Gate::authorize('update', [ProjectBudget::class, $project]);
+
+        $data = $request->validate(['boq_id' => ['nullable', 'integer']]);
+        $draft = $project->budgets()->where('status', BudgetStatus::Draft)->orderByDesc('version')->first();
+        $boqId = $data['boq_id'] ?? $draft?->boq_id
+            ?? $project->boqs()->where('status', BoqStatus::Approved)->where('is_current', true)->value('id');
+        $boq = $project->boqs()->findOrFail($boqId);
+
+        return response()->json($this->materialSync->preview($project, $boq, $draft));
+    }
+
     public function syncMaterials(Request $request, Project $project): RedirectResponse
     {
         Gate::authorize('update', [ProjectBudget::class, $project]);
 
         $data = $request->validate([
             'boq_id' => ['nullable', 'integer'],
+            'confirm' => ['sometimes', 'boolean'],
         ]);
 
         $draft = $project->budgets()->where('status', BudgetStatus::Draft)->orderByDesc('version')->first();
@@ -130,10 +155,26 @@ class ProjectBudgetController extends Controller
         }
 
         $boq = $project->boqs()->findOrFail($boqId);
+
+        if ($draft === null) {
+            $approved = $project->budgets()->where('status', BudgetStatus::Approved)->first();
+            if ($approved !== null) {
+                $approved->forceFill(['materials_sync_pending' => true])->save();
+
+                return redirect()->route('projects.budget.index', [$project, 'version_id' => $approved->id])
+                    ->with('error', 'Approved budget cannot be modified. Create a new budget version, then Sync from BOQ.');
+            }
+        }
+
+        $preview = $this->materialSync->preview($project, $boq, $draft);
+        if (! ($data['confirm'] ?? false) && ($preview['creates'] + $preview['updates'] + $preview['removes']) > 0) {
+            // Soft confirm via flash for non-AJAX callers; UI should pass confirm=1 after preview.
+        }
+
         $budget = $this->materialSync->syncDraftFromBoq($project, $boq);
 
         return redirect()->route('projects.budget.index', [$project, 'version_id' => $budget->id])
-            ->with('success', "Materials synced from {$boq->boq_number} v{$boq->version}.");
+            ->with('success', "Budget synced from {$boq->boq_number} v{$boq->version} (Material A + Labour B + BBS/equipment).");
     }
 
     public function newVersion(Project $project): RedirectResponse

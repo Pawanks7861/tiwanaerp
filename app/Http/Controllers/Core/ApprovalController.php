@@ -6,10 +6,12 @@ use App\Contracts\Approvable;
 use App\Enums\Approval\ApprovalStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Approval\ApprovalRequest;
+use App\Models\Boq\Boq;
 use App\Services\Approval\ApprovalService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -47,26 +49,50 @@ class ApprovalController extends Controller
 
     public function approve(Request $request, ApprovalRequest $approvalRequest): RedirectResponse
     {
-        $comments = $request->validate(['comments' => ['nullable', 'string', 'max:2000']])['comments'] ?? null;
-        $this->approvals->approve($approvalRequest, $request->user(), $comments);
+        $data = $request->validate([
+            'comments' => ['nullable', 'string', 'max:2000'],
+            'expected_updated_at' => ['nullable', 'date'],
+        ]);
+        $this->assertNotStale($approvalRequest, $data['expected_updated_at'] ?? null);
+        $this->approvals->approve($approvalRequest, $request->user(), $data['comments'] ?? null);
 
         return back()->with('success', 'Approved.');
     }
 
     public function reject(Request $request, ApprovalRequest $approvalRequest): RedirectResponse
     {
-        $comments = $request->validate(['comments' => ['required', 'string', 'max:2000']])['comments'];
-        $this->approvals->reject($approvalRequest, $request->user(), $comments);
+        $data = $request->validate([
+            'comments' => ['required', 'string', 'max:2000'],
+            'expected_updated_at' => ['nullable', 'date'],
+        ]);
+        $this->assertNotStale($approvalRequest, $data['expected_updated_at'] ?? null);
+        $this->approvals->reject($approvalRequest, $request->user(), $data['comments']);
 
         return back()->with('success', 'Rejected.');
     }
 
     public function sendBack(Request $request, ApprovalRequest $approvalRequest): RedirectResponse
     {
-        $comments = $request->validate(['comments' => ['required', 'string', 'max:2000']])['comments'];
-        $this->approvals->sendBack($approvalRequest, $request->user(), $comments);
+        $data = $request->validate([
+            'comments' => ['required', 'string', 'max:2000'],
+            'expected_updated_at' => ['nullable', 'date'],
+        ]);
+        $this->assertNotStale($approvalRequest, $data['expected_updated_at'] ?? null);
+        $this->approvals->sendBack($approvalRequest, $request->user(), $data['comments']);
 
         return back()->with('success', 'Sent back for changes.');
+    }
+
+    public function requestChanges(Request $request, ApprovalRequest $approvalRequest): RedirectResponse
+    {
+        $data = $request->validate([
+            'comments' => ['required', 'string', 'max:2000'],
+            'expected_updated_at' => ['nullable', 'date'],
+        ]);
+        $this->assertNotStale($approvalRequest, $data['expected_updated_at'] ?? null);
+        $this->approvals->requestChanges($approvalRequest, $request->user(), $data['comments']);
+
+        return back()->with('success', 'Changes requested. Approval remains pending.');
     }
 
     public function cancel(Request $request, ApprovalRequest $approvalRequest): RedirectResponse
@@ -75,6 +101,26 @@ class ApprovalController extends Controller
         $this->approvals->cancel($approvalRequest, $request->user(), $comments);
 
         return back()->with('success', 'Approval request withdrawn.');
+    }
+
+    private function assertNotStale(ApprovalRequest $approvalRequest, ?string $expectedUpdatedAt): void
+    {
+        if ($expectedUpdatedAt === null) {
+            return;
+        }
+
+        $document = $approvalRequest->approvable;
+        if (! $document instanceof Boq || $document->updated_at === null) {
+            return;
+        }
+
+        $expected = strtotime($expectedUpdatedAt);
+        $actual = $document->updated_at->getTimestamp();
+        if ($expected !== false && abs($actual - $expected) > 1) {
+            throw ValidationException::withMessages([
+                'expected_updated_at' => 'This BOQ changed since you loaded it. Refresh and review again before approving.',
+            ]);
+        }
     }
 
     /**

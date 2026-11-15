@@ -4,6 +4,11 @@ namespace App\Notifications\Approval;
 
 use App\Enums\Approval\ApprovalStatus;
 use App\Models\Approval\ApprovalRequest;
+use App\Models\Finance\ClientInvoice;
+use App\Models\Finance\Expense;
+use App\Models\Finance\RetentionRelease;
+use App\Models\Finance\VendorBill;
+use App\Models\Gate\GatePass;
 use App\Models\Inventory\MaterialIssue;
 use App\Models\Inventory\MaterialReturn;
 use App\Models\Planning\ProjectTask;
@@ -12,12 +17,7 @@ use App\Models\Procurement\MaterialRequest;
 use App\Models\Procurement\PurchaseOrder;
 use App\Models\SiteExecution\Dpr;
 use App\Models\SiteExecution\SiteDiary;
-use App\Models\Finance\ClientInvoice;
-use App\Models\Finance\Expense;
-use App\Models\Finance\RetentionRelease;
-use App\Models\Finance\VendorBill;
 use App\Models\Subcontract\SubcontractorBill;
-use App\Models\Gate\GatePass;
 use App\Models\Subcontract\WorkOrder;
 use App\Notifications\BaseNotification;
 use Illuminate\Database\Eloquent\Model;
@@ -55,16 +55,19 @@ class ApprovalDecisionNotification extends BaseNotification
 
     protected function payload(object $notifiable): array
     {
-        $verb = match ($this->status) {
-            ApprovalStatus::Approved => 'approved',
-            ApprovalStatus::Rejected => 'rejected',
-            ApprovalStatus::SentBack => 'sent back for changes',
+        $changesRequested = $this->status === ApprovalStatus::Pending && filled($this->comments);
+
+        $verb = match (true) {
+            $this->status === ApprovalStatus::Approved => 'approved',
+            $this->status === ApprovalStatus::Rejected => 'rejected',
+            $this->status === ApprovalStatus::SentBack => 'sent back for changes',
+            $changesRequested => 'flagged for changes',
             default => $this->status->value,
         };
 
         return [
-            'kind' => 'approval.'.$this->status->value,
-            'title' => 'Approval '.$this->status->label(),
+            'kind' => $changesRequested ? 'approval.changes_requested' : 'approval.'.$this->status->value,
+            'title' => $changesRequested ? 'Changes requested' : 'Approval '.$this->status->label(),
             'body' => trim("{$this->documentTitle} was {$verb}. ".($this->comments ?? '')),
             'url' => null,
             'project_id' => $this->projectId,

@@ -84,6 +84,8 @@ class ApprovalService
             $this->assertCanAct($request, $approver);
 
             $level = $request->current_level;
+            $document = $request->approvable;
+
             $this->recordAction($request, $approver, ApprovalActionType::Approved, $this->delegationComments($request, $approver, $comments));
 
             if (! $this->isLevelComplete($request, $level)) {
@@ -91,11 +93,18 @@ class ApprovalService
             }
 
             if ($request->isLastLevel()) {
+                if (method_exists($document, 'beforeApprovalCompleted')) {
+                    // Rolls back this approve action if commercial validation fails.
+                    $document->beforeApprovalCompleted($request, $approver);
+                }
                 $request->forceFill(['status' => ApprovalStatus::Approved, 'completed_at' => now()])->save();
                 // Pass the completing request so models do not guess via approvalRequests()->first() (R14).
-                $request->approvable->onApprovalCompleted($request);
+                $document->onApprovalCompleted($request);
                 $event = new ApprovalCompleted($request);
             } else {
+                if (method_exists($document, 'onApprovalLevelCompleted')) {
+                    $document->onApprovalLevelCompleted($request, $level, $approver);
+                }
                 $nextLevel = (int) collect($request->steps)->pluck('level')->filter(fn ($l) => $l > $level)->min();
                 $request->forceFill(['current_level' => $nextLevel])->save();
                 $event = new ApprovalRequested($request);
@@ -122,6 +131,33 @@ class ApprovalService
     public function sendBack(ApprovalRequest $request, User $approver, string $comments): ApprovalRequest
     {
         return $this->close($request, $approver, $comments, ApprovalStatus::SentBack, ApprovalActionType::SentBack);
+    }
+
+    /**
+     * Request changes without closing the approval (keeps Pending). Used for commercial-only send-back.
+     */
+    public function requestChanges(ApprovalRequest $request, User $approver, string $comments): ApprovalRequest
+    {
+        if (trim($comments) === '') {
+            throw ApprovalException::because('Please give a reason.');
+        }
+
+        $request = DB::transaction(function () use ($request, $approver, $comments) {
+            $request = $this->lockPending($request);
+            $this->assertCanAct($request, $approver);
+            $this->recordAction(
+                $request,
+                $approver,
+                ApprovalActionType::ChangesRequested,
+                $this->delegationComments($request, $approver, $comments),
+            );
+
+            return $request->fresh(['actions', 'submitter', 'approvable']);
+        });
+
+        ApprovalRejected::dispatch($request, $comments);
+
+        return $request;
     }
 
     /**

@@ -13,6 +13,7 @@ use App\Models\Boq\ProjectBudget;
 use App\Models\Boq\ProjectBudgetLine;
 use App\Models\Projects\Project;
 use App\Models\User;
+use App\Support\Boq\BoqCompanySettings;
 use App\Support\Math\Decimal;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -49,31 +50,35 @@ class ProjectBudgetService
 
             $budget->lines()->get()->each->delete();
 
-            $materials = app(SimpleBoqMaterialCostService::class);
-            $boq->items()->with('simpleMaterialCosts')->orderBy('sort_order')->orderBy('id')->get()
-                ->each(function (BoqItem $item) use ($budget, $materials) {
-                    $skipMaterialHead = $materials->drivesItemRate($item->simpleMaterialCosts);
-                    $skipLabourHead = Decimal::of((string) ($item->labour_rate ?? '0'))->isPositive();
-                    foreach ($this->headAmounts($item) as $head => $amount) {
-                        if ($skipMaterialHead && $head === CostHead::Material->value) {
-                            continue;
+            // Advanced BOQ: workbook cost components + BBS are the only estimate source.
+            // Do not also roll up item material_rate / labour_rate cost heads (double-count).
+            if (! BoqCompanySettings::enabled($project->company)) {
+                $materials = app(SimpleBoqMaterialCostService::class);
+                $boq->items()->with('simpleMaterialCosts')->orderBy('sort_order')->orderBy('id')->get()
+                    ->each(function (BoqItem $item) use ($budget, $materials) {
+                        $skipMaterialHead = $materials->drivesItemRate($item->simpleMaterialCosts);
+                        $skipLabourHead = Decimal::of((string) ($item->labour_rate ?? '0'))->isPositive();
+                        foreach ($this->headAmounts($item) as $head => $amount) {
+                            if ($skipMaterialHead && $head === CostHead::Material->value) {
+                                continue;
+                            }
+                            if ($skipLabourHead && $head === CostHead::Labour->value) {
+                                continue;
+                            }
+                            $line = new ProjectBudgetLine([
+                                'cost_head' => $head,
+                                'boq_item_id' => $item->id,
+                                'source_type' => BudgetLineSource::BoqCostHead->value,
+                                'description' => mb_substr(trim(($item->item_code ? $item->item_code.' ' : '').$item->name), 0, 255),
+                                'amount' => $amount,
+                            ]);
+                            $line->budget()->associate($budget);
+                            $line->save();
                         }
-                        if ($skipLabourHead && $head === CostHead::Labour->value) {
-                            continue;
-                        }
-                        $line = new ProjectBudgetLine([
-                            'cost_head' => $head,
-                            'boq_item_id' => $item->id,
-                            'source_type' => BudgetLineSource::BoqCostHead->value,
-                            'description' => mb_substr(trim(($item->item_code ? $item->item_code.' ' : '').$item->name), 0, 255),
-                            'amount' => $amount,
-                        ]);
-                        $line->budget()->associate($budget);
-                        $line->save();
-                    }
-                });
+                    });
 
-            $budget = $this->recalculate($budget);
+                $budget = $this->recalculate($budget);
+            }
 
             return app(BoqBudgetMaterialSyncService::class)->applyToDraft($budget, $boq);
         });
@@ -115,7 +120,8 @@ class ProjectBudgetService
             $budget->assertEditable();
 
             $line ??= new ProjectBudgetLine;
-            if ($line->exists && in_array($line->source_type, [BudgetLineSource::BoqMaterial, BudgetLineSource::BoqLabour], true)) {
+            if ($line->exists && $line->source_type instanceof BudgetLineSource
+                && in_array($line->source_type->value, BudgetLineSource::syncOwnedValues(), true)) {
                 throw ValidationException::withMessages([
                     'line' => 'BOQ-generated budget lines are updated by Sync from BOQ, not manual edit.',
                 ]);

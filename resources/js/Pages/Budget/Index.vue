@@ -23,7 +23,10 @@ const props = defineProps({
     lines: { type: Array, required: true },
     materialLines: { type: Array, default: () => [] },
     labourLines: { type: Array, default: () => [] },
+    equipmentLines: { type: Array, default: () => [] },
+    boqOtherLines: { type: Array, default: () => [] },
     pendingRevision: { type: Boolean, default: false },
+    sync_status: { type: Object, default: null },
     boqs: { type: Array, required: true },
     costHeads: { type: Array, required: true },
     can: { type: Object, required: true },
@@ -65,12 +68,40 @@ function generate() {
 }
 
 const syncing = ref(false);
-function syncMaterials() {
+const syncPreview = ref(null);
+async function openSyncPreview() {
+    syncing.value = true;
+    try {
+        const boqId = props.budget?.boq_id ?? props.boqs[0]?.value ?? null;
+        const url = route('projects.budget.sync-preview', props.project.id) + (boqId ? `?boq_id=${boqId}` : '');
+        const res = await fetch(url, { headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' });
+        if (!res.ok) {
+            throw new Error('Preview failed');
+        }
+        syncPreview.value = await res.json();
+    } catch {
+        syncPreview.value = null;
+        // Fall through to direct sync with confirm.
+        confirming.value = { action: 'sync' };
+    } finally {
+        syncing.value = false;
+    }
+}
+function confirmSync() {
     syncing.value = true;
     router.post(
         route('projects.budget.sync-materials', props.project.id),
-        { boq_id: props.budget?.boq_id ?? props.boqs[0]?.value ?? null },
-        { preserveScroll: true, onFinish: () => (syncing.value = false) },
+        {
+            boq_id: props.budget?.boq_id ?? props.boqs[0]?.value ?? null,
+            confirm: 1,
+        },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                syncing.value = false;
+                syncPreview.value = null;
+            },
+        },
     );
 }
 
@@ -101,6 +132,10 @@ function confirmAction() {
         router.post(route('projects.budget.approve', [props.project.id, props.budget.id]), {}, done);
     } else if (action === 'new') {
         router.post(route('projects.budget.new-version', props.project.id), {}, done);
+    } else if (action === 'sync') {
+        confirming.value = null;
+        processing.value = false;
+        confirmSync();
     } else {
         router.delete(route('projects.budget.lines.destroy', [props.project.id, line.id]), done);
     }
@@ -119,12 +154,12 @@ function confirmAction() {
                 </template>
                 <template v-if="can.update" #actions>
                     <AppButton v-if="boqs.length" size="sm" @click="showGenerate = true">Generate from BOQ</AppButton>
-                    <AppButton v-if="budget?.editable" size="sm" variant="secondary" :loading="syncing" @click="syncMaterials">Sync from BOQ</AppButton>
+                    <AppButton v-if="budget?.editable" size="sm" variant="secondary" :loading="syncing" @click="openSyncPreview">Sync from BOQ</AppButton>
                     <AppButton v-if="budget && !budget.editable" size="sm" variant="secondary" @click="confirming = { action: 'new' }">New version</AppButton>
                 </template>
 
-                <div v-if="pendingRevision || budget?.materials_sync_pending" class="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-5">
-                    Budget requires revision — BOQ material changes are pending a budget update. Create a new version or sync on a draft budget.
+                <div v-if="pendingRevision || budget?.materials_sync_pending || sync_status?.status === 'sync_required'" class="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-5">
+                    {{ sync_status?.label || 'Budget Sync Required' }} — Advanced BOQ workbook costing changed. Approved budgets are never overwritten; create a new version then Sync from BOQ.
                 </div>
 
                 <div v-if="versions.length" class="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 sm:px-5">
@@ -179,8 +214,8 @@ function confirmAction() {
 
                 <div v-if="budget" class="border-t border-line px-4 py-4 sm:px-5">
                     <div class="mb-3">
-                        <h3 class="text-sm font-semibold text-slate-900">Materials from BOQ</h3>
-                        <p class="mt-0.5 text-xs text-slate-500">Calculated from the material requirements saved against BOQ items.</p>
+                        <h3 class="text-sm font-semibold text-slate-900">Materials from Advanced BOQ</h3>
+                        <p class="mt-0.5 text-xs text-slate-500">Workbook costing components + BBS steel. Marked as generated — not manual.</p>
                     </div>
                     <DataTable
                         :columns="materialColumns"
@@ -205,15 +240,15 @@ function confirmAction() {
 
                 <div v-if="budget" class="border-t border-line px-4 py-4 sm:px-5">
                     <div class="mb-3">
-                        <h3 class="text-sm font-semibold text-slate-900">Labour from BOQ</h3>
-                        <p class="mt-0.5 text-xs text-slate-500">BOQ Qty × Labour Rate per BOQ unit. Source: BOQ.</p>
+                        <h3 class="text-sm font-semibold text-slate-900">Labour from Advanced BOQ</h3>
+                        <p class="mt-0.5 text-xs text-slate-500">Measured labour components (not standalone Labour Rate). Generated rows.</p>
                     </div>
                     <DataTable
                         :columns="labourColumns"
                         :rows="labourLines"
                         empty-icon="users"
                         empty-title="No BOQ labour"
-                        empty-description="Enter a labour rate on BOQ items, then generate or sync the budget."
+                        empty-description="Save labour cost components on Advanced BOQ items, then sync."
                     >
                         <template #cell-quantity="{ value }">{{ value != null ? formatNumber(value, 4) : '—' }}</template>
                         <template #cell-rate="{ value }">{{ value != null ? formatMoney(value) : '—' }}</template>
@@ -223,10 +258,32 @@ function confirmAction() {
                     </DataTable>
                 </div>
 
+                <div v-if="budget && equipmentLines.length" class="border-t border-line px-4 py-4 sm:px-5">
+                    <div class="mb-3">
+                        <h3 class="text-sm font-semibold text-slate-900">Equipment from Advanced BOQ</h3>
+                        <p class="mt-0.5 text-xs text-slate-500">Generated from equipment cost components. No equipment usage postings.</p>
+                    </div>
+                    <DataTable :columns="labourColumns" :rows="equipmentLines" empty-icon="cog" empty-title="No equipment">
+                        <template #cell-quantity="{ value }">{{ value != null ? formatNumber(value, 4) : '—' }}</template>
+                        <template #cell-rate="{ value }">{{ value != null ? formatMoney(value) : '—' }}</template>
+                    </DataTable>
+                </div>
+
+                <div v-if="budget && boqOtherLines.length" class="border-t border-line px-4 py-4 sm:px-5">
+                    <div class="mb-3">
+                        <h3 class="text-sm font-semibold text-slate-900">Other from Advanced BOQ</h3>
+                    </div>
+                    <DataTable :columns="labourColumns" :rows="boqOtherLines" empty-icon="document" empty-title="No other costs">
+                        <template #cell-quantity="{ value }">{{ value != null ? formatNumber(value, 4) : '—' }}</template>
+                        <template #cell-rate="{ value }">{{ value != null ? formatMoney(value) : '—' }}</template>
+                    </DataTable>
+                </div>
+
                 <DataTable v-if="budget" :columns="columns" :rows="visibleLines" empty-icon="banknotes" empty-title="No lines" :empty-description="headFilter !== 'all' ? 'No lines for this cost head.' : null">
                     <template #cell-description="{ row }">
                         <div class="text-slate-900">{{ row.description }}</div>
                         <div v-if="row.boq_item" class="text-xs text-slate-500">BOQ line</div>
+                        <div v-else-if="row.source_type === 'manual'" class="text-xs text-slate-500">Manual</div>
                     </template>
                     <template #cell-cost_head="{ value }">{{ headLabel(value) }}</template>
                     <template v-if="editable" #actions="{ row }">
@@ -304,11 +361,40 @@ function confirmAction() {
             </template>
         </AppModal>
 
+        <AppModal :show="!!syncPreview" title="Sync to Budget — preview" max-width="lg" @close="syncPreview = null">
+            <div v-if="syncPreview" class="space-y-3 text-sm">
+                <p class="text-slate-600">
+                    Source: <span class="font-medium text-slate-900">{{ syncPreview.boq_label }}</span>
+                    <span v-if="syncPreview.blocked_by_approved" class="mt-1 block text-amber-800">Approved budget blocks sync — create a new version first.</span>
+                </p>
+                <dl class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div><dt class="text-xs text-slate-500">Create</dt><dd class="font-semibold tabular">{{ syncPreview.creates }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Update</dt><dd class="font-semibold tabular">{{ syncPreview.updates }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Unchanged</dt><dd class="font-semibold tabular">{{ syncPreview.unchanged }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Remove</dt><dd class="font-semibold tabular">{{ syncPreview.removes }}</dd></div>
+                </dl>
+                <dl class="grid grid-cols-2 gap-2">
+                    <div><dt class="text-xs text-slate-500">Total before</dt><dd class="font-medium tabular">{{ formatMoney(syncPreview.total_before) }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Total after</dt><dd class="font-medium tabular">{{ formatMoney(syncPreview.total_after) }}</dd></div>
+                </dl>
+                <p class="text-xs text-slate-500">
+                    Material A {{ formatMoney(syncPreview.reconciliation?.material) }}
+                    · Labour B {{ formatMoney(syncPreview.reconciliation?.labour) }}
+                    · Grand {{ formatMoney(syncPreview.reconciliation?.grand) }}
+                </p>
+                <p class="text-xs text-slate-500">Manual budget rows are never changed. No MR / stock / finance postings.</p>
+            </div>
+            <template #footer>
+                <AppButton variant="secondary" @click="syncPreview = null">Cancel</AppButton>
+                <AppButton :disabled="!!syncPreview?.blocked_by_approved" :loading="syncing" @click="confirmSync">Confirm sync</AppButton>
+            </template>
+        </AppModal>
+
         <ConfirmDialog
             :show="!!confirming"
-            :title="{ approve: 'Approve this budget?', new: 'Start a new budget version?', delete: 'Delete this line?' }[confirming?.action] ?? ''"
-            :message="{ approve: 'The approved budget is locked. Any previously approved version is marked superseded.', new: 'A draft copy of the approved budget is created for editing. Pending BOQ material changes are synced when present.', delete: null }[confirming?.action] ?? null"
-            :confirm-label="{ approve: 'Approve', new: 'Create draft', delete: 'Delete' }[confirming?.action] ?? 'Confirm'"
+            :title="{ approve: 'Approve this budget?', new: 'Start a new budget version?', delete: 'Delete this line?', sync: 'Sync Advanced BOQ to Budget?' }[confirming?.action] ?? ''"
+            :message="{ approve: 'The approved budget is locked. Any previously approved version is marked superseded.', new: 'A draft copy of the approved budget is created for editing. Pending BOQ material changes are synced when present.', delete: null, sync: 'Generated Material / Labour / BBS / Equipment rows will be replaced. Manual lines stay.' }[confirming?.action] ?? null"
+            :confirm-label="{ approve: 'Approve', new: 'Create draft', delete: 'Delete', sync: 'Sync' }[confirming?.action] ?? 'Confirm'"
             :danger="confirming?.action === 'delete'"
             :processing="processing"
             @close="confirming = null"

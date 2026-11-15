@@ -35,6 +35,15 @@ class BoqPolicy
         return $user->can('boq.update') && $boq->isEditable() && $this->projects->view($user, $boq->project);
     }
 
+    public function editCommercialRates(User $user, Boq $boq): bool
+    {
+        return $user->can('boq.update')
+            && $user->can('boq.view_costs')
+            && $user->can('boq.manage_cost')
+            && $boq->allowsCommercialRateEdits()
+            && $this->projects->view($user, $boq->project);
+    }
+
     public function delete(User $user, Boq $boq): bool
     {
         return $user->can('boq.delete') && $boq->isEditable() && $this->projects->view($user, $boq->project);

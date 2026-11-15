@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Boq;
 
+use App\Enums\Boq\BoqStatus;
 use App\Exports\BoqExport;
 use App\Exports\BoqTemplateExport;
 use App\Http\Controllers\Controller;
@@ -44,7 +45,8 @@ class BoqExcelController extends Controller
     {
         Gate::authorize('export', $boq);
 
-        $name = Str::slug("{$boq->boq_number}-v{$boq->version}").'.xlsx';
+        $statusTag = $boq->status === BoqStatus::Approved ? 'APPROVED' : 'DRAFT';
+        $name = Str::slug("{$boq->boq_number}-v{$boq->version}-{$statusTag}").'.xlsx';
 
         return Excel::download(new BoqExport($boq, $request->user()->can('boq.view_costs')), $name);
     }
