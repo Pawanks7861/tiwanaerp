@@ -30,6 +30,7 @@ class DprItem extends Model
         'target_variance',
         'achievement_percent',
         'boq_line_uid',
+        'suggested_boq_qty',
         'updated_at',
     ];
 
@@ -42,6 +43,8 @@ class DprItem extends Model
             'previous_executed_qty' => 'decimal:4',
             'today_target_qty' => 'decimal:4',
             'executed_qty' => 'decimal:4',
+            'boq_executed_qty' => 'decimal:4',
+            'suggested_boq_qty' => 'decimal:4',
             'hold_quantity' => 'decimal:4',
             'cumulative_qty' => 'decimal:4',
             'balance_qty' => 'decimal:4',

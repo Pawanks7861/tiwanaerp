@@ -15,6 +15,60 @@ const d = (value) => {
 
 const round = (value, places) => value.toDecimalPlaces(places, Decimal.ROUND_HALF_UP);
 
+/**
+ * Preview Normal BOQ quantity from Nos/L/W/H. Server recalculates on save.
+ * formula: number | length | area | volume (or inferred from unitSymbol when auto).
+ */
+export function simpleBoqQty(row, unitSymbol = null) {
+    if (row.measurement_mode !== 'auto') {
+        return row.quantity == null || row.quantity === '' ? null : round(d(row.quantity), 4).toFixed(4);
+    }
+
+    const formula = row.measurement_formula || inferSimpleFormula(unitSymbol);
+    if (!formula) {
+        return null;
+    }
+
+    const nos = d(row.measurement_nos);
+    const length = d(row.measurement_length);
+    const width = d(row.measurement_width);
+    const height = d(row.measurement_height);
+
+    try {
+        let qty;
+        if (formula === 'number') {
+            qty = nos;
+        } else if (formula === 'length') {
+            qty = nos.times(length);
+        } else if (formula === 'area') {
+            qty = nos.times(length).times(width);
+        } else if (formula === 'volume') {
+            qty = nos.times(length).times(width).times(height);
+        } else {
+            return null;
+        }
+        if (qty.isNeg()) {
+            return null;
+        }
+
+        return round(qty, 4).toFixed(4);
+    } catch {
+        return null;
+    }
+}
+
+export function inferSimpleFormula(unitSymbol) {
+    const key = String(unitSymbol || '')
+        .toLowerCase()
+        .replace(/[.\s]/g, '');
+    if (['cum', 'm3', 'cum', 'cmt', 'cubicmetre', 'cubicmeter'].includes(key)) return 'volume';
+    if (['sqm', 'm2', 'sqmt', 'squaremetre', 'squaremeter'].includes(key)) return 'area';
+    if (['rmt', 'rm', 'rmt', 'mtr', 'm', 'metre', 'meter'].includes(key)) return 'length';
+    if (['nos', 'no', 'each', 'ea', 'nr', 'number'].includes(key)) return 'number';
+
+    return null;
+}
+
 export function boqLine(row) {
     const qty = round(d(row.quantity), 4);
     const costRate = round(

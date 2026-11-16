@@ -14,6 +14,7 @@ use App\Enums\Boq\CostRateSource;
 use App\Enums\Boq\MeasurementFormulaType;
 use App\Enums\Boq\MeasurementSheetStatus;
 use App\Enums\Boq\PlanningBoqMappingMethod;
+use App\Enums\Boq\PlanningTrackingBasis;
 use App\Enums\Boq\QuantitySource;
 use App\Enums\Boq\RateComparisonGstMode;
 use App\Enums\Boq\SteelUnitWeightMethod;
@@ -338,9 +339,10 @@ class BoqItemWorkspaceController extends Controller
             'maps.*.id' => ['nullable', 'integer'],
             'maps.*.project_task_id' => ['required', 'integer'],
             'maps.*.mapping_method' => ['required', Rule::enum(PlanningBoqMappingMethod::class)],
-            'maps.*.allocated_boq_qty' => ['required', 'numeric', 'min:0'],
+            'maps.*.tracking_basis' => ['nullable', 'string', Rule::enum(PlanningTrackingBasis::class)],
+            'maps.*.allocated_boq_qty' => ['nullable', 'numeric', 'min:0'],
             'maps.*.boq_unit_symbol' => ['nullable', 'string', 'max:40'],
-            'maps.*.planning_qty' => ['required', 'numeric', 'min:0'],
+            'maps.*.planning_qty' => ['nullable', 'numeric', 'min:0'],
             'maps.*.planning_unit_symbol' => ['nullable', 'string', 'max:40'],
             'maps.*.conversion_factor' => ['nullable', 'numeric', 'min:0'],
             'maps.*.remarks' => ['nullable', 'string', 'max:500'],

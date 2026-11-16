@@ -3,6 +3,8 @@
 namespace App\Models\Boq;
 
 use App\Enums\Boq\QuantitySource;
+use App\Enums\Boq\SimpleBoqMeasurementFormula;
+use App\Enums\Boq\SimpleBoqMeasurementMode;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Masters\Unit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -18,7 +20,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  */
 #[Fillable([
     'boq_section_id', 'line_uid', 'item_code', 'name', 'description', 'hsn_sac', 'unit_id', 'quantity',
-    'quantity_source', 'takeoff_reference', 'bbs_applicable',
+    'quantity_source', 'measurement_mode', 'measurement_formula',
+    'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
+    'takeoff_reference', 'bbs_applicable',
     'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'cost_rate', 'cost_amount',
     'margin_percent', 'selling_rate', 'client_rate', 'client_amount', 'gst_rate', 'rate_analysis_id',
     'origin_variation_item_id', 'is_variation_originated', 'sort_order', 'simple_materials_initialized',
@@ -72,6 +76,12 @@ class BoqItem extends Model
         return [
             'quantity' => 'decimal:4',
             'quantity_source' => QuantitySource::class,
+            'measurement_mode' => SimpleBoqMeasurementMode::class,
+            'measurement_formula' => SimpleBoqMeasurementFormula::class,
+            'measurement_nos' => 'decimal:4',
+            'measurement_length' => 'decimal:4',
+            'measurement_width' => 'decimal:4',
+            'measurement_height' => 'decimal:4',
             'bbs_applicable' => 'boolean',
             'is_variation_originated' => 'boolean',
             'simple_materials_initialized' => 'boolean',

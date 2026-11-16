@@ -18,7 +18,7 @@ import EmptyState from '@/Components/UI/EmptyState.vue';
 import Icon from '@/Components/UI/Icon.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
-import { boqLine, sum } from '@/lib/boqCalc';
+import { boqLine, inferSimpleFormula, simpleBoqQty, sum } from '@/lib/boqCalc';
 import Decimal from 'decimal.js';
 import { formatDate, formatDateTime, formatMoney, formatPercent, formatQty, formatRate } from '@/lib/format';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
@@ -237,6 +237,13 @@ function toRow(item) {
         hsn_sac: item.hsn_sac ?? '',
         unit_id: item.unit_id ?? null,
         quantity: item.quantity ?? null,
+        measurement_mode: item.measurement_mode ?? null,
+        measurement_formula: item.measurement_formula ?? null,
+        measurement_nos: item.measurement_nos ?? null,
+        measurement_length: item.measurement_length ?? null,
+        measurement_width: item.measurement_width ?? null,
+        measurement_height: item.measurement_height ?? null,
+        gst_rate: item.gst_rate ?? null,
         client_rate: item.client_rate ?? null,
         labour_rate: item.labour_rate ?? null,
         rate_analysis_id: item.rate_analysis_id ?? null,
@@ -419,6 +426,10 @@ function save() {
                 COST_FIELDS.forEach((f) => {
                     delete data[f];
                 });
+                [
+                    'measurement_mode', 'measurement_formula',
+                    'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
+                ].forEach((f) => delete data[f]);
             } else if (!detailedCosts.value) {
                 delete data.rate_analysis_id;
                 COST_FIELDS.forEach((f) => {
@@ -669,8 +680,57 @@ const lockedReason = computed(() => {
         revised: 'Superseded by a later revision. This version is kept for history.',
     }[props.boq.status] ?? null;
 });
-/** Base 8 (# Code Item Unit Qty Rate Amount Actions) + legacy Labour Rate when simplified costs visible. */
-const colCount = computed(() => 8 + (showLegacyLabourRateColumn.value ? 1 : 0));
+const showSimpleMeasurements = computed(() => !advanced.value);
+/** Base columns + Nos/L/W/H when simplified + GST + legacy Labour Rate when simplified costs visible. */
+const colCount = computed(() => {
+    let n = 8; // # Code Item Unit Qty Rate Amount Actions
+    if (showSimpleMeasurements.value) {
+        n += 4; // Nos Length Width Height
+        n += 1; // GST
+    }
+    if (showLegacyLabourRateColumn.value) {
+        n += 1;
+    }
+
+    return n;
+});
+
+function unitSymbol(unitId) {
+    return props.units.find((u) => u.value === unitId)?.label?.split('—')[0]?.trim()
+        || props.units.find((u) => u.value === unitId)?.label
+        || '';
+}
+
+function applyMeasurementPreview(row) {
+    if (!showSimpleMeasurements.value || row.measurement_mode !== 'auto') {
+        return;
+    }
+    const preview = simpleBoqQty(row, unitSymbol(row.unit_id));
+    if (preview !== null) {
+        row.quantity = preview;
+    }
+}
+
+function onMeasurementModeChange(row) {
+    if (row.measurement_mode === 'auto') {
+        if (row.measurement_nos == null || row.measurement_nos === '') {
+            row.measurement_nos = '1';
+        }
+        if (!row.measurement_formula) {
+            row.measurement_formula = inferSimpleFormula(unitSymbol(row.unit_id));
+        }
+        applyMeasurementPreview(row);
+    }
+}
+
+function heightDepthLabel(row) {
+    const formula = row?.measurement_formula || inferSimpleFormula(unitSymbol(row?.unit_id));
+    if (formula === 'volume') {
+        return 'Height / Depth';
+    }
+
+    return 'Height';
+}
 </script>
 
 <template>
@@ -1095,6 +1155,12 @@ const colCount = computed(() => 8 + (showLegacyLabourRateColumn.value ? 1 : 0));
                                 <th class="px-2 py-2 text-left">Code</th>
                                 <th class="min-w-[16rem] px-2 py-2 text-left">Item</th>
                                 <th class="px-2 py-2 text-left">Unit</th>
+                                <template v-if="showSimpleMeasurements">
+                                    <th class="px-2 py-2 text-right">Nos</th>
+                                    <th class="px-2 py-2 text-right">Length</th>
+                                    <th class="px-2 py-2 text-right">Width</th>
+                                    <th class="px-2 py-2 text-right whitespace-nowrap">Height</th>
+                                </template>
                                 <th class="px-2 py-2 text-right">Qty</th>
                                 <template v-if="detailedCosts">
                                     <th class="px-2 py-2 text-right">Material</th>
@@ -1107,6 +1173,7 @@ const colCount = computed(() => 8 + (showLegacyLabourRateColumn.value ? 1 : 0));
                                 </template>
                                 <th class="px-2 py-2 text-right">Rate</th>
                                 <th v-if="showLegacyLabourRateColumn" class="px-2 py-2 text-right whitespace-nowrap">Labour Rate</th>
+                                <th v-if="showSimpleMeasurements" class="px-2 py-2 text-right">GST</th>
                                 <th class="px-2 py-2 text-right">Amount</th>
                                 <th class="px-2 py-2"><span class="sr-only">Actions</span></th>
                             </tr>
@@ -1138,12 +1205,21 @@ const colCount = computed(() => 8 + (showLegacyLabourRateColumn.value ? 1 : 0));
                                                 <div v-if="row.rate_analysis_id" class="mt-0.5 text-[10px] text-brand-700">From rate analysis {{ analyses.find((a) => a.id === row.rate_analysis_id)?.code ?? '' }}</div>
                                             </td>
                                             <td class="px-1 py-1">
-                                                <select v-model="row.unit_id" class="w-20 rounded py-1 pr-6 pl-1.5 text-xs" :class="cellError(row, 'unit_id') ? 'border-red-400 bg-red-50' : 'border-slate-200'">
+                                                <select v-model="row.unit_id" class="w-20 rounded py-1 pr-6 pl-1.5 text-xs" :class="cellError(row, 'unit_id') ? 'border-red-400 bg-red-50' : 'border-slate-200'" @change="onMeasurementModeChange(row)">
                                                     <option :value="null">—</option>
                                                     <option v-for="u in units" :key="u.value" :value="u.value">{{ u.label }}</option>
                                                 </select>
                                             </td>
-                                            <td class="px-1 py-1"><CellDecimal v-model="row.quantity" :error="!!cellError(row, 'quantity')" /></td>
+                                            <template v-if="showSimpleMeasurements">
+                                                <td class="px-1 py-1"><CellDecimal v-model="row.measurement_nos" :error="!!cellError(row, 'measurement_nos')" @update:model-value="applyMeasurementPreview(row)" /></td>
+                                                <td class="px-1 py-1"><CellDecimal v-model="row.measurement_length" :error="!!cellError(row, 'measurement_length')" @update:model-value="applyMeasurementPreview(row)" /></td>
+                                                <td class="px-1 py-1"><CellDecimal v-model="row.measurement_width" :error="!!cellError(row, 'measurement_width')" @update:model-value="applyMeasurementPreview(row)" /></td>
+                                                <td class="px-1 py-1"><CellDecimal v-model="row.measurement_height" :error="!!cellError(row, 'measurement_height')" @update:model-value="applyMeasurementPreview(row)" /></td>
+                                            </template>
+                                            <td class="px-1 py-1">
+                                                <CellDecimal v-if="row.measurement_mode !== 'auto'" v-model="row.quantity" :error="!!cellError(row, 'quantity')" />
+                                                <span v-else class="block px-1.5 py-1 text-right text-xs tabular text-slate-800" title="Auto-calculated from measurements">{{ formatQty(row.quantity) }}</span>
+                                            </td>
                                             <template v-if="detailedCosts">
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.material_rate" :error="!!cellError(row, 'material_rate')" /></td>
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.labour_rate" :error="!!cellError(row, 'labour_rate')" /></td>
@@ -1158,6 +1234,7 @@ const colCount = computed(() => 8 + (showLegacyLabourRateColumn.value ? 1 : 0));
                                                 <CellDecimal v-else v-model="row.client_rate" :placeholder="detailedCosts ? calc[row._key].selling_rate : null" :error="!!cellError(row, 'client_rate')" />
                                             </td>
                                             <td v-if="showLegacyLabourRateColumn" class="px-2 py-1.5 text-right tabular text-slate-700" title="Labour rate / BOQ unit (edit in item details)">{{ formatMoney(row.labour_rate || 0) }}</td>
+                                            <td v-if="showSimpleMeasurements" class="px-1 py-1"><CellDecimal v-model="row.gst_rate" :error="!!cellError(row, 'gst_rate')" /></td>
                                         </template>
                                         <template v-else>
                                             <td class="px-2 py-1.5 font-mono text-slate-600">{{ row.item_code || '—' }}</td>
@@ -1166,6 +1243,12 @@ const colCount = computed(() => 8 + (showLegacyLabourRateColumn.value ? 1 : 0));
                                                 <div v-if="row.description" class="text-[11px] text-slate-500">{{ row.description }}</div>
                                             </td>
                                             <td class="px-2 py-1.5">{{ unitLabel(row.unit_id) }}</td>
+                                            <template v-if="showSimpleMeasurements">
+                                                <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_nos != null ? formatQty(row.measurement_nos) : '—' }}</td>
+                                                <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_length != null ? formatQty(row.measurement_length) : '—' }}</td>
+                                                <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_width != null ? formatQty(row.measurement_width) : '—' }}</td>
+                                                <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_height != null ? formatQty(row.measurement_height) : '—' }}</td>
+                                            </template>
                                             <td class="px-2 py-1.5 text-right tabular">{{ formatQty(row.quantity) }}</td>
                                             <template v-if="detailedCosts">
                                                 <td class="px-2 py-1.5 text-right tabular">{{ formatRate(row.material_rate) }}</td>
@@ -1178,6 +1261,7 @@ const colCount = computed(() => 8 + (showLegacyLabourRateColumn.value ? 1 : 0));
                                             </template>
                                             <td class="px-2 py-1.5 text-right tabular">{{ formatRate(calc[row._key].client_rate) }}</td>
                                             <td v-if="showLegacyLabourRateColumn" class="px-2 py-1.5 text-right tabular text-slate-700">{{ formatMoney(row.labour_rate || 0) }}</td>
+                                            <td v-if="showSimpleMeasurements" class="px-2 py-1.5 text-right tabular">{{ row.gst_rate != null ? formatPercent(row.gst_rate) : '—' }}</td>
                                         </template>
                                         <td class="px-2 py-1.5 text-right font-medium text-slate-900 tabular">{{ formatMoney(calc[row._key].client_amount) }}</td>
                                         <td class="px-1 py-1 text-right whitespace-nowrap">
@@ -1287,8 +1371,55 @@ const colCount = computed(() => 8 + (showLegacyLabourRateColumn.value ? 1 : 0));
                         @update:model-value="refreshMaterialsForNameChange(editingRow)"
                     />
                     <div class="grid grid-cols-2 gap-3">
-                        <SearchSelect v-model="editingRow.unit_id" label="Unit" required :options="unitOptions" :error="cellError(editingRow, 'unit_id')" />
-                        <DecimalInput v-model="editingRow.quantity" label="Quantity" required :decimals="4" :error="cellError(editingRow, 'quantity')" />
+                        <SearchSelect v-model="editingRow.unit_id" label="Unit" required :options="unitOptions" :error="cellError(editingRow, 'unit_id')" @update:model-value="onMeasurementModeChange(editingRow)" />
+                        <FormSelect
+                            v-if="showSimpleMeasurements"
+                            v-model="editingRow.measurement_mode"
+                            label="Measurement mode"
+                            :options="[
+                                { value: null, label: '— (historical / unset)' },
+                                { value: 'manual', label: 'Manual quantity' },
+                                { value: 'auto', label: 'Auto measurement' },
+                            ]"
+                            :error="cellError(editingRow, 'measurement_mode')"
+                            @update:model-value="onMeasurementModeChange(editingRow)"
+                        />
+                        <div v-if="editingRow.measurement_mode === 'auto'">
+                            <p class="text-xs font-medium text-slate-600">Quantity (calculated)</p>
+                            <p class="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm tabular text-slate-900">{{ formatQty(editingRow.quantity) }}</p>
+                            <p class="mt-1 text-xs text-slate-500">From Nos × dimensions. Server recalculates on save.</p>
+                        </div>
+                        <DecimalInput
+                            v-else
+                            v-model="editingRow.quantity"
+                            label="Quantity"
+                            required
+                            :decimals="4"
+                            :error="cellError(editingRow, 'quantity')"
+                        />
+                    </div>
+                    <div v-if="showSimpleMeasurements && editingRow.measurement_mode === 'auto'" class="grid grid-cols-2 gap-3 rounded-lg border border-line bg-slate-50 p-3">
+                        <FormSelect
+                            v-model="editingRow.measurement_formula"
+                            label="Formula"
+                            :options="[
+                                { value: 'volume', label: 'Cum (Nos × L × W × H)' },
+                                { value: 'area', label: 'Sqm (Nos × L × W)' },
+                                { value: 'length', label: 'RMT (Nos × L)' },
+                                { value: 'number', label: 'Nos' },
+                            ]"
+                            :error="cellError(editingRow, 'measurement_formula')"
+                            @update:model-value="applyMeasurementPreview(editingRow)"
+                        />
+                        <DecimalInput v-model="editingRow.measurement_nos" label="Nos" :decimals="4" :error="cellError(editingRow, 'measurement_nos')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                        <DecimalInput v-model="editingRow.measurement_length" label="Length" :decimals="4" :error="cellError(editingRow, 'measurement_length')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                        <DecimalInput v-model="editingRow.measurement_width" label="Width" :decimals="4" :error="cellError(editingRow, 'measurement_width')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                        <DecimalInput v-model="editingRow.measurement_height" :label="heightDepthLabel(editingRow)" :decimals="4" :error="cellError(editingRow, 'measurement_height')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                        <DecimalInput v-model="editingRow.gst_rate" label="GST %" :decimals="4" :error="cellError(editingRow, 'gst_rate')" />
+                    </div>
+                    <div v-else-if="showSimpleMeasurements" class="grid grid-cols-2 gap-3">
+                        <DecimalInput v-model="editingRow.measurement_nos" label="Nos (optional)" :decimals="4" :error="cellError(editingRow, 'measurement_nos')" />
+                        <DecimalInput v-model="editingRow.gst_rate" label="GST %" :decimals="4" :error="cellError(editingRow, 'gst_rate')" />
                     </div>
                     <template v-if="detailedCosts">
                         <SearchSelect

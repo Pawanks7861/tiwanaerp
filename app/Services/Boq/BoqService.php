@@ -11,6 +11,7 @@ use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqSection;
 use App\Models\Boq\RateAnalysis;
 use App\Models\Documents\DrawingRevision;
+use App\Models\Masters\Unit;
 use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
 use App\Models\User;
@@ -34,6 +35,12 @@ class BoqService
     private const LINE_FIELDS = [
         'item_code', 'name', 'description', 'hsn_sac', 'unit_id', 'gst_rate',
         'source_type', 'source_import_id', 'source_sheet', 'source_row',
+    ];
+
+    /** Simplified BOQ measurement columns (ignored as qty authority for Advanced BOQ). */
+    private const MEASUREMENT_FIELDS = [
+        'measurement_mode', 'measurement_formula',
+        'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
     ];
 
     public function __construct(
@@ -317,6 +324,60 @@ class BoqService
         if ($source === QuantitySource::Measurement && $item->exists) {
             // Authoritative qty comes from approved measurement sheet — do not trust grid quantity.
             $quantity = (string) $item->quantity;
+        }
+
+        // Simplified BOQ: server-authoritative Nos/L/W/H → Qty. Advanced BOQ ignores these fields.
+        if (! BoqCompanySettings::enabled() && $source !== QuantitySource::Measurement) {
+            $unitSymbol = null;
+            if (! empty($row['unit_id'])) {
+                $unitSymbol = Unit::query()->whereKey((int) $row['unit_id'])->value('symbol');
+            } elseif ($item->unit_id) {
+                $unitSymbol = $item->relationLoaded('unit')
+                    ? $item->unit?->symbol
+                    : Unit::query()->whereKey($item->unit_id)->value('symbol');
+            }
+
+            $measurementInput = [
+                'measurement_mode' => $row['measurement_mode'] ?? $item->getAttribute('measurement_mode')?->value ?? $item->getAttribute('measurement_mode'),
+                'measurement_formula' => $row['measurement_formula'] ?? $item->getAttribute('measurement_formula')?->value ?? $item->getAttribute('measurement_formula'),
+                'measurement_nos' => array_key_exists('measurement_nos', $row) ? $row['measurement_nos'] : $item->measurement_nos,
+                'measurement_length' => array_key_exists('measurement_length', $row) ? $row['measurement_length'] : $item->measurement_length,
+                'measurement_width' => array_key_exists('measurement_width', $row) ? $row['measurement_width'] : $item->measurement_width,
+                'measurement_height' => array_key_exists('measurement_height', $row) ? $row['measurement_height'] : $item->measurement_height,
+                'quantity' => $quantity,
+                'unit_symbol' => $unitSymbol,
+                'allow_zero' => true,
+            ];
+
+            try {
+                $resolved = SimpleBoqMeasurementCalculator::resolve($measurementInput);
+            } catch (ValidationException $e) {
+                $messages = [];
+                foreach ($e->errors() as $field => $errs) {
+                    $messages["{$errorKey}.{$field}"] = $errs;
+                }
+                throw ValidationException::withMessages($messages);
+            }
+
+            $quantity = $resolved['quantity'];
+            $item->fill([
+                'measurement_mode' => $resolved['measurement_mode'],
+                'measurement_formula' => $resolved['measurement_formula'],
+                'measurement_nos' => $resolved['measurement_nos'],
+                'measurement_length' => $resolved['measurement_length'],
+                'measurement_width' => $resolved['measurement_width'],
+                'measurement_height' => $resolved['measurement_height'],
+            ]);
+
+            $dirtyMeas = [];
+            foreach (self::MEASUREMENT_FIELDS as $field) {
+                if ($item->wasChanged($field) || $item->isDirty($field)) {
+                    $dirtyMeas[$field] = $item->getAttribute($field);
+                }
+            }
+            if ($dirtyMeas !== [] && $item->exists) {
+                // Audit trail via BOQ writeAudit when parent is available after save (see syncItems caller).
+            }
         }
 
         $calc = BoqCalculator::line([

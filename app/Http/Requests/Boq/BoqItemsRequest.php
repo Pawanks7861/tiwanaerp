@@ -25,6 +25,7 @@ class BoqItemsRequest extends FormRequest
         return [
             'rows.*.quantity', 'rows.*.material_rate', 'rows.*.labour_rate', 'rows.*.equipment_rate',
             'rows.*.subcontract_rate', 'rows.*.margin_percent', 'rows.*.client_rate',
+            'rows.*.measurement_nos', 'rows.*.measurement_length', 'rows.*.measurement_width', 'rows.*.measurement_height',
             'rows.*.simple_materials.*.quantity', 'rows.*.simple_materials.*.rate',
         ];
     }
@@ -32,6 +33,7 @@ class BoqItemsRequest extends FormRequest
     public function rules(): array
     {
         $rate = ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'];
+        $qty = ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'];
 
         return [
             'rows' => ['present', 'array', 'max:5000'],
@@ -43,12 +45,19 @@ class BoqItemsRequest extends FormRequest
             'rows.*.hsn_sac' => ['nullable', 'string', 'max:10'],
             'rows.*.unit_id' => ['required', ExistsInCompany::active(Unit::class)],
             'rows.*.quantity' => ['required', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
+            'rows.*.measurement_mode' => ['nullable', 'string', 'in:manual,auto'],
+            'rows.*.measurement_formula' => ['nullable', 'string', 'in:number,length,area,volume'],
+            'rows.*.measurement_nos' => $qty,
+            'rows.*.measurement_length' => $qty,
+            'rows.*.measurement_width' => $qty,
+            'rows.*.measurement_height' => $qty,
             'rows.*.material_rate' => $rate,
             'rows.*.labour_rate' => $rate,
             'rows.*.equipment_rate' => $rate,
             'rows.*.subcontract_rate' => $rate,
             'rows.*.margin_percent' => ['nullable', 'numeric', 'min:-100', 'max:999', 'decimal:0,4'],
             'rows.*.client_rate' => $rate,
+            'rows.*.gst_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,4'],
             'rows.*.rate_analysis_id' => ['nullable', 'integer'],
             'rows.*.sort_order' => ['nullable', 'integer', 'min:0'],
             'rows.*.simple_materials' => ['sometimes', 'array', 'max:200'],

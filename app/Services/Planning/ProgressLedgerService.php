@@ -3,13 +3,17 @@
 namespace App\Services\Planning;
 
 use App\Enums\Boq\BoqStatus;
+use App\Enums\Boq\PlanningBoqMappingMethod;
+use App\Enums\Boq\PlanningTrackingBasis;
 use App\Models\Boq\BoqItem;
+use App\Models\Boq\BoqPlanningMap;
 use App\Models\Planning\ProgressEntry;
 use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
 use App\Models\SiteExecution\Dpr;
 use App\Models\SiteExecution\DprItem;
 use App\Services\Boq\EffectiveBoqQuantityService;
+use App\Services\Boq\PlanningBoqMappingService;
 use App\Support\Math\Decimal;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -32,6 +36,7 @@ class ProgressLedgerService
     public function __construct(
         private readonly TaskProgressService $taskProgress,
         private readonly EffectiveBoqQuantityService $effectiveQty,
+        private readonly PlanningBoqMappingService $planningMaps,
     ) {}
 
     public static function postingRef(Dpr $dpr, DprItem $item): string
@@ -65,6 +70,7 @@ class ProgressLedgerService
                     'boq_line_uid' => $row['boq']?->line_uid,
                     'entry_date' => $dpr->dpr_date->toDateString(),
                     'quantity' => $row['qty']->toQuantity(),
+                    'boq_quantity' => $row['boq_qty']?->toQuantity(),
                     'source_type' => $item->getMorphClass(),
                     'source_id' => $item->id,
                     'posting_ref' => self::postingRef($dpr, $item),
@@ -117,6 +123,9 @@ class ProgressLedgerService
                 ->get();
 
             foreach ($forward as $original) {
+                $boqQty = $original->boq_quantity !== null
+                    ? Decimal::of($original->boq_quantity)->negate()->toQuantity()
+                    : null;
                 $reversal = new ProgressEntry;
                 $reversal->forceFill([
                     'project_id' => $original->project_id,
@@ -125,6 +134,7 @@ class ProgressLedgerService
                     'boq_line_uid' => $original->boq_line_uid,
                     'entry_date' => $original->entry_date->toDateString(),
                     'quantity' => Decimal::of($original->quantity)->negate()->toQuantity(),
+                    'boq_quantity' => $boqQty,
                     'source_type' => $original->source_type,
                     'source_id' => $original->source_id,
                     'posting_ref' => "reversal:{$original->id}",
@@ -206,6 +216,11 @@ class ProgressLedgerService
                 ? $today->times(100)->dividedBy($target, 4)->toRate()
                 : null;
 
+            $map = $task ? $this->planningMaps->activeMapForTask($task) : null;
+            $suggested = $map
+                ? $this->planningMaps->suggestedBoqQty($map, $today->toQuantity())
+                : null;
+
             $item->forceFill([
                 'boq_line_uid' => $uid,
                 'planned_qty' => $planned?->toQuantity(),
@@ -215,6 +230,7 @@ class ProgressLedgerService
                 'completion_percent' => $completion,
                 'target_variance' => $variance,
                 'achievement_percent' => $achievement,
+                'suggested_boq_qty' => $suggested,
             ])->save();
         }
     }
@@ -231,10 +247,22 @@ class ProgressLedgerService
             ->whereNotNull('boq_line_uid')
             ->groupBy('boq_line_uid')
             ->toBase()
-            ->selectRaw('boq_line_uid, COALESCE(SUM(quantity), 0) as total')
+            ->selectRaw('boq_line_uid, COALESCE(SUM(COALESCE(boq_quantity, quantity)), 0) as total')
             ->pluck('total', 'boq_line_uid')
             ->map(fn ($v) => Decimal::of(is_float($v) ? sprintf('%.6F', $v) : (string) $v)->toQuantity())
             ->all();
+    }
+
+    /**
+     * BOQ-side executed quantity for a line_uid (uses boq_quantity when posted).
+     */
+    public static function sumBoqQty(Builder $query): Decimal
+    {
+        $value = $query->toBase()
+            ->selectRaw('COALESCE(SUM(COALESCE(boq_quantity, quantity)), 0) as total')
+            ->value('total');
+
+        return Decimal::of(is_float($value) ? sprintf('%.6F', $value) : (string) $value);
     }
 
     /**
@@ -265,7 +293,7 @@ class ProgressLedgerService
      * Validates project, task, BOQ line and unit of every line and refuses over-progress.
      *
      * @param  Collection<int, DprItem>  $items
-     * @return list<array{item: DprItem, task: ?ProjectTask, boq: ?BoqItem, qty: Decimal}>
+     * @return list<array{item: DprItem, task: ?ProjectTask, boq: ?BoqItem, qty: Decimal, boq_qty: ?Decimal}>
      */
     private function check(Project $project, Collection $items): array
     {
@@ -289,20 +317,36 @@ class ProgressLedgerService
                 throw ValidationException::withMessages(['items' => "{$label}: the BOQ item does not belong to this project."]);
             }
 
-            if (($task?->unit_id !== null && (int) $task->unit_id !== (int) $item->unit_id) || ($boq?->unit_id !== null && (int) $boq->unit_id !== (int) $item->unit_id)) {
-                throw ValidationException::withMessages(['items' => "{$label}: the unit does not match the task / BOQ item unit."]);
+            $map = $task ? $this->planningMaps->activeMapForTask($task) : null;
+            $nosBasis = $map?->tracking_basis === PlanningTrackingBasis::Nos;
+
+            if ($task?->unit_id !== null && (int) $task->unit_id !== (int) $item->unit_id) {
+                throw ValidationException::withMessages(['items' => "{$label}: the unit does not match the task unit."]);
+            }
+            if (! $nosBasis && $boq?->unit_id !== null && (int) $boq->unit_id !== (int) $item->unit_id) {
+                throw ValidationException::withMessages(['items' => "{$label}: the unit does not match the BOQ item unit."]);
             }
 
             if (! $qty->isPositive() || ($task === null && $boq === null)) {
                 continue;
             }
 
-            $rows[] = ['item' => $item, 'task' => $task, 'boq' => $boq, 'qty' => $qty];
+            [$boqQty, $suggested] = $this->resolveBoqPostedQty($item, $map, $qty, $boq, $label);
+            $item->setAttribute('suggested_boq_qty', $suggested);
+
+            $rows[] = [
+                'item' => $item,
+                'task' => $task,
+                'boq' => $boq,
+                'qty' => $qty,
+                'boq_qty' => $boqQty,
+                'suggested_boq_qty' => $suggested,
+            ];
             if ($task) {
                 $byTask[$task->id] = Decimal::of($byTask[$task->id] ?? '0')->plus($qty);
             }
             if ($boq) {
-                $byLine[$boq->line_uid] = Decimal::of($byLine[$boq->line_uid] ?? '0')->plus($qty);
+                $byLine[$boq->line_uid] = Decimal::of($byLine[$boq->line_uid] ?? '0')->plus($boqQty ?? $qty);
             }
         }
 
@@ -330,7 +374,7 @@ class ProgressLedgerService
             if (! $cap->isPositive()) {
                 continue;
             }
-            $done = TaskProgressService::sum(ProgressEntry::query()->where('project_id', $project->id)->where('boq_line_uid', $uid));
+            $done = self::sumBoqQty(ProgressEntry::query()->where('project_id', $project->id)->where('boq_line_uid', $uid));
             if ($done->plus($qty)->greaterThan($cap)) {
                 throw ValidationException::withMessages(['items' => sprintf(
                     'Over-progress on BOQ item %s: effective BOQ quantity %s, already executed %s, this DPR %s.',
@@ -340,6 +384,55 @@ class ProgressLedgerService
         }
 
         return $rows;
+    }
+
+    /**
+     * @return array{0: ?Decimal, 1: ?string}
+     */
+    private function resolveBoqPostedQty(
+        DprItem $item,
+        ?BoqPlanningMap $map,
+        Decimal $planningQty,
+        ?BoqItem $boq,
+        string $label,
+    ): array {
+        if ($boq === null) {
+            return [null, null];
+        }
+
+        if ($map === null || $map->tracking_basis !== PlanningTrackingBasis::Nos) {
+            $boqQty = $item->boq_executed_qty !== null && $item->boq_executed_qty !== ''
+                ? Decimal::of($item->boq_executed_qty)
+                : $planningQty;
+
+            return [$boqQty->round(Decimal::QTY_SCALE), null];
+        }
+
+        $suggested = $this->planningMaps->suggestedBoqQty($map, $planningQty->toQuantity());
+
+        if ($map->mapping_method === PlanningBoqMappingMethod::ActualMeasurement
+            || $map->mapping_method === PlanningBoqMappingMethod::ManualCertification) {
+            if ($item->boq_executed_qty === null || $item->boq_executed_qty === '') {
+                throw ValidationException::withMessages([
+                    'items' => "{$label}: enter the actual BOQ quantity for this Nos-tracked activity.",
+                ]);
+            }
+
+            return [Decimal::of($item->boq_executed_qty)->round(Decimal::QTY_SCALE), $suggested];
+        }
+
+        // Conversion based: actual override wins when provided.
+        if ($item->boq_executed_qty !== null && $item->boq_executed_qty !== '') {
+            return [Decimal::of($item->boq_executed_qty)->round(Decimal::QTY_SCALE), $suggested];
+        }
+
+        if ($suggested === null) {
+            throw ValidationException::withMessages([
+                'items' => "{$label}: conversion factor is missing for Nos-based BOQ progress.",
+            ]);
+        }
+
+        return [Decimal::of($suggested), $suggested];
     }
 
     /**

@@ -6,6 +6,7 @@ use App\Enums\Imports\ImportMode;
 use App\Enums\Imports\ImportStatus;
 use App\Models\Boq\Boq;
 use App\Models\Imports\DataImport;
+use App\Models\Masters\Unit;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Boq\BoqImportService;
@@ -79,7 +80,7 @@ class BoqItemsImportDefinition extends ImportDefinition
             [
                 'title' => 'Units',
                 'headings' => ['Symbol', 'Name'],
-                'rows' => \App\Models\Masters\Unit::query()->orderBy('name')->limit(300)->get(['symbol', 'name'])
+                'rows' => Unit::query()->orderBy('name')->limit(300)->get(['symbol', 'name'])
                     ->map(fn ($u) => [$u->symbol, $u->name])->all(),
                 'note' => 'Unit symbols are matched to company units; unknown units are created automatically.',
             ],
@@ -114,6 +115,21 @@ class BoqItemsImportDefinition extends ImportDefinition
             new ImportField('unit', 'Unit', true, [
                 'unit', 'uom', 'u.o.m.', 'u.o.m', 'measurement unit', 'uom_name',
             ]),
+            new ImportField('measurement_nos', 'Nos', false, [
+                'nos', 'no', 'numbers', 'measurement_nos', 'no of',
+            ], 'number'),
+            new ImportField('measurement_length', 'Length', false, [
+                'length', 'l', 'measurement_length',
+            ], 'number'),
+            new ImportField('measurement_width', 'Width', false, [
+                'width', 'w', 'breadth', 'measurement_width',
+            ], 'number'),
+            new ImportField('measurement_height', 'Height', false, [
+                'height', 'h', 'depth', 'height/depth', 'measurement_height',
+            ], 'number'),
+            new ImportField('measurement_mode', 'Measurement Mode', false, [
+                'measurement mode', 'mode', 'qty mode', 'measurement_mode',
+            ], help: 'auto or manual. Auto recalculates Qty from Nos/L/W/H.'),
             new ImportField('quantity', 'Quantity', true, [
                 'qty', 'quantity', 'boq qty', 'total qty',
             ], 'number'),
@@ -401,5 +417,4 @@ class BoqItemsImportDefinition extends ImportDefinition
             return $boq;
         });
     }
-
 }

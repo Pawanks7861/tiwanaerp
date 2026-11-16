@@ -33,7 +33,11 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
             ? ['Material Rate', 'Labour Rate', 'Equipment Rate', 'Subcontract Rate', 'Cost Rate', 'Cost Amount', 'Margin %']
             : [];
 
-        return ['Section', 'Code', 'Name', 'Description', 'HSN/SAC', 'Unit', 'Quantity', ...$costs, 'Client Rate', 'Client Amount'];
+        return [
+            'Section', 'Code', 'Name', 'Description', 'HSN/SAC', 'Unit',
+            'Nos', 'Length', 'Width', 'Height', 'Quantity',
+            ...$costs, 'Client Rate', 'Client Amount',
+        ];
     }
 
     /**
@@ -54,7 +58,7 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
         $totals = array_fill(0, count($this->headings()), null);
         $totals[2] = 'Total';
         if ($this->withCosts) {
-            $totals[12] = $this->boq->total_cost_amount;
+            $totals[16] = $this->boq->total_cost_amount;
         }
         $totals[count($totals) - 1] = $this->boq->total_client_amount;
         $rows[] = $totals;
@@ -78,6 +82,10 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
             SpreadsheetText::cell($item->description),
             SpreadsheetText::cell($item->hsn_sac),
             $item->unit?->symbol,
+            $item->measurement_nos,
+            $item->measurement_length,
+            $item->measurement_width,
+            $item->measurement_height,
             $item->quantity, ...$costs, $item->client_rate, $item->client_amount,
         ];
     }

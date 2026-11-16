@@ -37,6 +37,7 @@ class ProgressEntry extends Model
         return [
             'entry_date' => 'date',
             'quantity' => 'decimal:4',
+            'boq_quantity' => 'decimal:4',
         ];
     }
 

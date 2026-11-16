@@ -691,6 +691,7 @@ function blankPlanningMap() {
         id: null,
         project_task_id: null,
         mapping_method: 'conversion_based',
+        tracking_basis: 'boq_quantity',
         allocated_boq_qty: props.item.quantity || '',
         boq_unit_symbol: props.item.unit?.symbol || '',
         planning_qty: '',
@@ -715,6 +716,26 @@ watch(() => props.planning_map, (payload) => {
 }, { deep: true });
 
 const planningMapLocked = computed(() => !!props.planning_map?.locked || !props.can.manage_planning_map);
+
+function onTrackingBasis(row) {
+    const snap = props.planning_map?.boq_item;
+    if (!snap) {
+        return;
+    }
+    row.allocated_boq_qty = snap.quantity || row.allocated_boq_qty;
+    row.boq_unit_symbol = snap.unit_symbol || row.boq_unit_symbol;
+    if (row.tracking_basis === 'nos') {
+        row.planning_qty = snap.measurement_nos || '';
+        row.planning_unit_symbol = 'Nos';
+        const nos = Number(snap.measurement_nos);
+        const boq = Number(snap.quantity);
+        row.conversion_factor = nos > 0 && Number.isFinite(boq) ? (boq / nos).toFixed(4) : '';
+    } else {
+        row.planning_qty = snap.quantity || '';
+        row.planning_unit_symbol = snap.unit_symbol || '';
+        row.conversion_factor = '';
+    }
+}
 
 function onPlanningTask(row) {
     const selected = (props.planning_task_options || []).find((o) => o.value === row.project_task_id);
@@ -1708,6 +1729,7 @@ function confirmRefreshRates(scope) {
                             <thead class="bg-slate-50 text-[11px] uppercase text-slate-500">
                                 <tr>
                                     <th class="px-2 py-2">Planning activity</th>
+                                    <th class="px-2 py-2">Track by</th>
                                     <th class="px-2 py-2">Method</th>
                                     <th class="px-2 py-2">BOQ qty</th>
                                     <th class="px-2 py-2">Planning qty</th>
@@ -1723,6 +1745,13 @@ function confirmRefreshRates(scope) {
                                             <option :value="null">— Select activity —</option>
                                             <option v-for="opt in planning_task_options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                                         </select>
+                                    </td>
+                                    <td class="px-1 py-1">
+                                        <select v-model="row.tracking_basis" class="w-40 rounded border-slate-200 py-1 text-xs" :disabled="planningMapLocked" @change="onTrackingBasis(row)">
+                                            <option value="nos">Nos{{ planning_map?.boq_item?.measurement_nos ? ` — ${planning_map.boq_item.measurement_nos}` : '' }}</option>
+                                            <option value="boq_quantity">BOQ Qty{{ planning_map?.boq_item?.quantity ? ` — ${planning_map.boq_item.quantity} ${planning_map.boq_item.unit_symbol || ''}` : '' }}</option>
+                                        </select>
+                                        <p v-if="row.tracking_basis === 'nos' && row.conversion_factor" class="mt-1 text-[10px] text-slate-500">{{ row.conversion_factor }} {{ row.boq_unit_symbol || 'BOQ' }} / No.</p>
                                     </td>
                                     <td class="px-1 py-1">
                                         <select v-model="row.mapping_method" class="w-40 rounded border-slate-200 py-1 text-xs" :disabled="planningMapLocked">

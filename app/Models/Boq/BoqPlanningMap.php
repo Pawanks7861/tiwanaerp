@@ -3,6 +3,7 @@
 namespace App\Models\Boq;
 
 use App\Enums\Boq\PlanningBoqMappingMethod;
+use App\Enums\Boq\PlanningTrackingBasis;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
@@ -34,9 +35,12 @@ class BoqPlanningMap extends Model
     {
         return [
             'mapping_method' => PlanningBoqMappingMethod::class,
+            'tracking_basis' => PlanningTrackingBasis::class,
             'allocated_boq_qty' => 'decimal:4',
             'planning_qty' => 'decimal:4',
             'conversion_factor' => 'decimal:4',
+            'snapshot_boq_nos' => 'decimal:4',
+            'snapshot_boq_qty' => 'decimal:4',
             'sequence' => 'integer',
             'is_active' => 'boolean',
             'needs_review' => 'boolean',
