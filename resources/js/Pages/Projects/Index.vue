@@ -4,6 +4,7 @@ import FilterBar from '@/Components/Data/FilterBar.vue';
 import Pagination from '@/Components/Data/Pagination.vue';
 import ImportTemplateDownload from '@/Components/Imports/ImportTemplateDownload.vue';
 import UniversalImportModal from '@/Components/Imports/UniversalImportModal.vue';
+import ProjectPurgeModal from '@/Components/Projects/ProjectPurgeModal.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import PageHeader from '@/Components/UI/PageHeader.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
@@ -11,6 +12,7 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import { formatMoneyShort } from '@/lib/format';
 import { usePermissions } from '@/lib/permissions';
 import { router } from '@inertiajs/vue3';
+import axios from 'axios';
 import { ref } from 'vue';
 
 defineProps({
@@ -22,6 +24,25 @@ defineProps({
 
 const permissions = usePermissions();
 const showImport = ref(false);
+const purgePreview = ref(null);
+const showPurge = ref(false);
+const loadingPurge = ref(false);
+
+async function openPurge(row) {
+    if (!permissions.can('projects.purge') || row.status !== 'cancelled') {
+        return;
+    }
+    loadingPurge.value = true;
+    try {
+        const { data } = await axios.get(route('projects.purge-preview', row.id), {
+            headers: { Accept: 'application/json' },
+        });
+        purgePreview.value = data;
+        showPurge.value = true;
+    } finally {
+        loadingPurge.value = false;
+    }
+}
 
 const columns = [
     { key: 'name', label: 'Project' },
@@ -66,7 +87,18 @@ const columns = [
                     </div>
                 </template>
                 <template #cell-status="{ row }">
-                    <StatusBadge :status="row.status" :label="row.status_label" />
+                    <div class="flex flex-wrap items-center gap-2">
+                        <StatusBadge :status="row.status" :label="row.status_label" />
+                        <button
+                            v-if="can.purge && row.status === 'cancelled'"
+                            type="button"
+                            class="text-xs font-medium text-red-700 hover:underline"
+                            :disabled="loadingPurge"
+                            @click.stop="openPurge(row)"
+                        >
+                            Delete Permanently
+                        </button>
+                    </div>
                 </template>
                 <template #cell-contract_value="{ value }">
                     <span class="tabular">{{ formatMoneyShort(value) }}</span>
@@ -80,6 +112,13 @@ const columns = [
             module="projects"
             @close="showImport = false"
             @imported="() => ((showImport = false), router.reload({ only: ['projects'] }))"
+        />
+
+        <ProjectPurgeModal
+            v-if="purgePreview"
+            :show="showPurge"
+            :preview="purgePreview"
+            @close="() => ((showPurge = false), (purgePreview = null))"
         />
     </AppLayout>
 </template>

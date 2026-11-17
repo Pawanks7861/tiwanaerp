@@ -186,6 +186,8 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::get('/edit', [ProjectController::class, 'edit'])->name('projects.edit');
         Route::put('/', [ProjectController::class, 'update'])->name('projects.update');
         Route::patch('/status', [ProjectController::class, 'updateStatus'])->name('projects.status');
+        Route::get('/purge-preview', [ProjectController::class, 'purgePreview'])->name('projects.purge-preview');
+        Route::delete('/purge', [ProjectController::class, 'purge'])->name('projects.purge');
 
         Route::get('/sites', [SiteController::class, 'index'])->name('projects.sites.index');
         Route::post('/sites', [SiteController::class, 'store'])->name('projects.sites.store');

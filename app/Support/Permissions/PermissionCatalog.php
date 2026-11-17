@@ -21,7 +21,7 @@ final class PermissionCatalog
             'dashboard' => ['label' => 'Dashboard', 'group' => 'General', 'actions' => ['view', 'view_financials', 'admin', 'md', 'director']],
             'approvals' => ['label' => 'Approvals Inbox', 'group' => 'General', 'actions' => ['view']],
 
-            'projects' => ['label' => 'Projects', 'group' => 'Projects', 'actions' => [...$std, 'view_all', 'manage_team', 'close', 'import']],
+            'projects' => ['label' => 'Projects', 'group' => 'Projects', 'actions' => [...$std, 'view_all', 'manage_team', 'close', 'import', 'purge']],
             'sites' => ['label' => 'Sites', 'group' => 'Projects', 'actions' => $std],
             'boq' => ['label' => 'BOQ', 'group' => 'Projects', 'actions' => [...$std, 'submit', 'approve', 'revise', 'import', 'export', 'view_costs', 'manage_cost', 'view_material_requirements', 'manage_material_norms', 'manage_recipes', 'manage_unit_conversions', 'manage_steel_profiles', 'manage_rate_library', 'view_bbs', 'manage_bbs', 'manage_bbs_adjustments', 'approve_bbs', 'view_reconciliation']],
             'rate_analysis' => ['label' => 'Rate Analysis', 'group' => 'Projects', 'actions' => [...$std, 'approve']],

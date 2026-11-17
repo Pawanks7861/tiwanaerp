@@ -46,4 +46,9 @@ class ProjectPolicy
     {
         return $this->view($user, $project) && $user->can('projects.delete');
     }
+
+    public function purge(User $user, Project $project): bool
+    {
+        return $this->view($user, $project) && $user->can('projects.purge');
+    }
 }

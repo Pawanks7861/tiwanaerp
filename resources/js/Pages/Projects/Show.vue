@@ -1,5 +1,6 @@
 <script setup>
 import StatCard from '@/Components/Data/StatCard.vue';
+import ProjectPurgeModal from '@/Components/Projects/ProjectPurgeModal.vue';
 import Chart from '@/Components/Reports/Chart.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
@@ -15,10 +16,12 @@ const props = defineProps({
     transitions: { type: Array, required: true },
     dashboard: { type: Object, default: null },
     can: { type: Object, required: true },
+    purge_preview: { type: Object, default: null },
 });
 
 const pending = ref(null);
 const processing = ref(false);
+const showPurge = ref(false);
 
 function changeStatus() {
     processing.value = true;
@@ -172,6 +175,15 @@ const details = computed(() => {
             </div>
         </div>
 
+        <AppCard
+            v-if="can.purge && purge_preview"
+            title="Danger Zone"
+            subtitle="Project is Cancelled. Permanent deletion removes all project-owned data and cannot be undone."
+            class="mt-6 border-red-200"
+        >
+            <AppButton variant="danger" @click="showPurge = true">Delete Project Permanently</AppButton>
+        </AppCard>
+
         <ConfirmDialog
             :show="!!pending"
             :title="`Mark project as ${pending?.label}?`"
@@ -181,6 +193,13 @@ const details = computed(() => {
             :processing="processing"
             @close="pending = null"
             @confirm="changeStatus"
+        />
+
+        <ProjectPurgeModal
+            v-if="purge_preview"
+            :show="showPurge"
+            :preview="purge_preview"
+            @close="showPurge = false"
         />
     </ProjectLayout>
 </template>

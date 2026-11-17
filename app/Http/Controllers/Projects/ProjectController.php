@@ -6,15 +6,18 @@ use App\Enums\IndianState;
 use App\Enums\ProjectStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\ProjectRequest;
+use App\Http\Requests\Projects\PurgeProjectRequest;
 use App\Models\Crm\Client;
 use App\Models\Projects\Project;
 use App\Services\Core\CompanyDirectory;
 use App\Services\Projects\ProjectCostHeadService;
+use App\Services\Projects\ProjectPurgeService;
 use App\Services\Projects\ProjectService;
 use App\Services\Reports\DashboardService;
 use App\Support\Crm\DefaultClientResolver;
 use App\Support\Reports\ReportPeriod;
 use App\Support\Tenancy\CurrentCompany;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -29,6 +32,7 @@ class ProjectController extends Controller
         private readonly CompanyDirectory $directory,
         private readonly DashboardService $dashboards,
         private readonly ProjectCostHeadService $costHeads,
+        private readonly ProjectPurgeService $purge,
     ) {}
 
     public function index(Request $request): Response
@@ -62,6 +66,7 @@ class ProjectController extends Controller
             'can' => [
                 'create' => $request->user()->can('create', Project::class),
                 'import' => $request->user()->can('projects.import'),
+                'purge' => $request->user()->can('projects.purge'),
             ],
         ]);
     }
@@ -119,8 +124,36 @@ class ProjectController extends Controller
                 'changeStatus' => $user->can('changeStatus', $project),
                 'viewFinancials' => $financials,
                 'reports' => $user->can('reports.view'),
+                'purge' => $user->can('purge', $project) && $project->status === ProjectStatus::Cancelled,
             ],
+            'purge_preview' => ($user->can('purge', $project) && $project->status === ProjectStatus::Cancelled)
+                ? $this->purge->preview($project)
+                : null,
         ]);
+    }
+
+    public function purgePreview(Request $request, Project $project): JsonResponse
+    {
+        Gate::authorize('purge', $project);
+
+        return response()->json($this->purge->preview($project));
+    }
+
+    public function purge(PurgeProjectRequest $request, Project $project): RedirectResponse
+    {
+        $result = $this->purge->purge(
+            $project,
+            $request->user(),
+            (string) $request->validated('confirmation_code'),
+            $request->boolean('acknowledge'),
+        );
+
+        $message = 'Project and all project-owned data were permanently deleted.';
+        if ($result['file_failures'] !== []) {
+            $message = 'Project database data was deleted, but some stored files could not be removed. See purge report.';
+        }
+
+        return redirect()->route('projects.index')->with('success', $message);
     }
 
     public function edit(Project $project): Response
