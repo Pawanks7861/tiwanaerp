@@ -9,7 +9,7 @@ import Icon from '@/Components/UI/Icon.vue';
 import PageSkeleton from '@/Components/UI/Skeleton/PageSkeleton.vue';
 import { registerStoredPush } from '@/lib/fcm';
 import { initials } from '@/lib/format';
-import { buildNavigation } from '@/lib/navigation';
+import { buildNavigation, formatNavBadge } from '@/lib/navigation';
 import { usePermissions } from '@/lib/permissions';
 import { scrollToActiveSidebarItem } from '@/lib/scrollToActiveSidebarItem';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
@@ -70,6 +70,7 @@ const appName = computed(() => page.props.app?.name || 'Tiwana Construction ERP'
 const multiCompany = computed(() => page.props.features?.multi_company === true);
 const advancedBoqCalculations = computed(() => page.props.features?.advanced_boq_calculations === true);
 const chatUnread = ref(page.props.chatUnread ?? 0);
+const pendingApprovalCount = computed(() => page.props.pendingApprovalCount ?? 0);
 const showProjectSwitcher = computed(() => can('projects.view'));
 const recommendTwoFactor = computed(() => page.props.auth?.two_factor_recommended === true);
 
@@ -100,8 +101,22 @@ const navigation = computed(() => {
         multiCompany: multiCompany.value,
         advancedBoqCalculations: advancedBoqCalculations.value,
         menuItems: menuItems.value,
+        pendingApprovalCount: pendingApprovalCount.value,
     });
 });
+
+function badgeLabel(count, noun) {
+    const formatted = formatNavBadge(count);
+    if (!formatted) {
+        return null;
+    }
+
+    return {
+        text: formatted,
+        aria: `${count} ${noun}`,
+        title: `${count} ${noun}`,
+    };
+}
 
 const removeListener = router.on('navigate', () => (sidebarOpen.value = false));
 
@@ -212,18 +227,65 @@ onBeforeUnmount(() => {
                 <CompanySwitcher />
             </div>
 
-            <nav ref="sidebarNav" class="sidebar-scroll flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-2 py-4" aria-label="Main">
+            <nav ref="sidebarNav" class="sidebar-scroll flex-1 space-y-1 overflow-x-hidden overflow-y-auto px-2 py-4" aria-label="Main">
                 <div v-for="(section, i) in navigation" :key="section.title ?? i">
-                    <p
-                        v-if="section.title"
-                        class="mb-1 px-3 text-[11px] font-semibold tracking-wider text-white/40 uppercase"
-                        :class="sidebarCollapsed ? 'lg:hidden' : ''"
-                    >
-                        {{ section.title }}
-                    </p>
                     <ul class="space-y-0.5">
-                        <li v-for="item in section.items" :key="item.href">
+                        <li v-for="item in section.items" :key="item.key">
+                            <details
+                                v-if="item.type === 'group'"
+                                class="group/nav"
+                                :open="item.active || undefined"
+                            >
+                                <summary
+                                    class="relative flex cursor-pointer list-none items-center rounded-lg py-2 text-sm font-semibold transition marker:content-none [&::-webkit-details-marker]:hidden"
+                                    :class="[
+                                        item.active ? 'bg-white/10 text-white' : 'text-white/80 hover:bg-white/5 hover:text-white',
+                                        sidebarCollapsed ? 'gap-3 px-3 lg:justify-center lg:px-2' : 'gap-3 px-3',
+                                    ]"
+                                    :title="sidebarCollapsed ? (badgeLabel(item.badge, 'pending approvals')?.title || item.label) : undefined"
+                                    :aria-label="item.key === 'approvals' && badgeLabel(item.badge, 'pending approvals')
+                                        ? `${item.label}, ${badgeLabel(item.badge, 'pending approvals').aria}`
+                                        : item.label"
+                                >
+                                    <Icon :name="item.icon" :size="18" :class="item.active ? 'text-accent-400' : ''" />
+                                    <span class="truncate" :class="sidebarCollapsed ? 'lg:hidden' : ''">{{ item.label }}</span>
+                                    <span
+                                        v-if="badgeLabel(item.badge, 'pending approvals')"
+                                        class="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent-500 px-1 text-[10px] font-bold text-white tabular"
+                                        :class="sidebarCollapsed ? 'lg:absolute lg:top-1 lg:right-1 lg:h-4 lg:min-w-4' : ''"
+                                        :aria-label="badgeLabel(item.badge, 'pending approvals').aria"
+                                    >
+                                        {{ badgeLabel(item.badge, 'pending approvals').text }}
+                                    </span>
+                                    <Icon
+                                        name="chevron-down"
+                                        :size="14"
+                                        class="ml-auto shrink-0 text-white/50 transition group-open/nav:rotate-180"
+                                        :class="sidebarCollapsed ? 'lg:hidden' : ''"
+                                    />
+                                </summary>
+                                <ul class="mt-0.5 space-y-0.5 pb-1" :class="sidebarCollapsed ? 'lg:pl-0' : 'pl-3'">
+                                    <li v-for="child in item.children" :key="child.key">
+                                        <Link
+                                            :href="child.href"
+                                            class="relative flex items-center rounded-lg py-1.5 text-sm font-medium transition"
+                                            :class="[
+                                                child.active ? 'bg-white/10 text-white' : 'text-white/65 hover:bg-white/5 hover:text-white',
+                                                sidebarCollapsed ? 'gap-3 px-3 lg:justify-center lg:px-2' : 'gap-2.5 px-3',
+                                            ]"
+                                            :title="sidebarCollapsed ? child.label : undefined"
+                                            :aria-label="child.label"
+                                            :aria-current="child.active ? 'page' : undefined"
+                                        >
+                                            <Icon :name="child.icon" :size="16" :class="child.active ? 'text-accent-400' : ''" />
+                                            <span class="truncate" :class="sidebarCollapsed ? 'lg:hidden' : ''">{{ child.label }}</span>
+                                        </Link>
+                                    </li>
+                                </ul>
+                            </details>
+
                             <Link
+                                v-else
                                 :href="item.href"
                                 class="relative flex items-center rounded-lg py-2 text-sm font-medium transition"
                                 :class="[
@@ -233,16 +295,17 @@ onBeforeUnmount(() => {
                                 :title="sidebarCollapsed ? item.label : undefined"
                                 :aria-label="item.label"
                                 :aria-current="item.active ? 'page' : undefined"
-                                :data-tour="item.label === 'Projects' ? 'nav-projects' : item.label === 'Reports' ? 'nav-reports' : item.label === 'Dashboard' ? 'nav-dashboard' : undefined"
+                                :data-tour="item.tour || undefined"
                             >
                                 <Icon :name="item.icon" :size="18" :class="item.active ? 'text-accent-400' : ''" />
                                 <span class="truncate" :class="sidebarCollapsed ? 'lg:hidden' : ''">{{ item.label }}</span>
                                 <span
-                                    v-if="item.label === 'Chat' && chatUnread > 0"
+                                    v-if="item.isChat && badgeLabel(chatUnread, 'unread messages')"
                                     class="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent-500 px-1 text-[10px] font-bold text-white tabular"
                                     :class="sidebarCollapsed ? 'ml-auto lg:absolute lg:top-1 lg:right-1 lg:ml-0 lg:h-4 lg:min-w-4' : 'ml-auto'"
+                                    :aria-label="badgeLabel(chatUnread, 'unread messages').aria"
                                 >
-                                    {{ chatUnread > 99 ? '99+' : chatUnread }}
+                                    {{ badgeLabel(chatUnread, 'unread messages').text }}
                                 </span>
                             </Link>
                         </li>

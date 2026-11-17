@@ -143,6 +143,9 @@ use App\Models\Procurement\RfqVendor;
 use App\Models\Procurement\VendorQuotation;
 use App\Models\Procurement\VendorQuotationItem;
 use App\Models\Projects\Project;
+use App\Models\Projects\ProjectCashFlowPlan;
+use App\Models\Projects\ProjectCashFlowPlanMonth;
+use App\Models\Projects\ProjectCostHead;
 use App\Models\Projects\ProjectUser;
 use App\Models\Projects\Site;
 use App\Models\Quality\Ncr;
@@ -343,6 +346,9 @@ class AppServiceProvider extends ServiceProvider
             'rate_analysis_item' => RateAnalysisItem::class,
             'project_budget' => ProjectBudget::class,
             'project_budget_line' => ProjectBudgetLine::class,
+            'project_cost_head' => ProjectCostHead::class,
+            'project_cash_flow_plan' => ProjectCashFlowPlan::class,
+            'project_cash_flow_plan_month' => ProjectCashFlowPlanMonth::class,
             'project_milestone' => ProjectMilestone::class,
             'project_task' => ProjectTask::class,
             'task_dependency' => TaskDependency::class,

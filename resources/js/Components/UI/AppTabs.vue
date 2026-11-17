@@ -51,7 +51,14 @@ watch(
 
 <template>
     <nav ref="tabNav" class="-mb-px flex gap-1 overflow-x-auto" aria-label="Tabs">
-        <template v-for="item in items" :key="item.key">
+        <template v-for="(item, index) in items" :key="item.key">
+            <span
+                v-if="item.group && item.group !== items[index - 1]?.group"
+                class="inline-flex shrink-0 items-end border-b-2 border-transparent px-2 pb-2.5 text-[10px] font-semibold tracking-wide text-slate-400 uppercase"
+                aria-hidden="true"
+            >
+                {{ item.group }}
+            </span>
             <component
                 :is="item.href ? Link : 'button'"
                 :href="item.href"

@@ -3,6 +3,7 @@
 namespace App\Models\Subcontract;
 
 use App\Enums\Subcontract\SubcontractorBillStatus;
+use App\Models\Projects\ProjectCostHead;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Validation\ValidationException;
@@ -63,5 +64,13 @@ class SubcontractorBillItem extends Model
     public function workOrderItem(): BelongsTo
     {
         return $this->belongsTo(WorkOrderItem::class);
+    }
+
+    /**
+     * @return BelongsTo<ProjectCostHead, $this>
+     */
+    public function projectCostHead(): BelongsTo
+    {
+        return $this->belongsTo(ProjectCostHead::class);
     }
 }

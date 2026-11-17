@@ -1,7 +1,10 @@
 /**
- * Sidebar definition. Items are shown only when the user holds `permission`
- * (super admins receive every permission). Optional `menu_items` allow-list
- * further trims visibility after permission checks.
+ * Company sidebar definition. Leaf items and group children are shown only when the
+ * user holds `permission` (super admins receive every permission). Optional
+ * `menu_items` allow-list further trims visibility after permission checks.
+ *
+ * Project-scoped modules (BOQ, Planning, DPR, MR/PO/GRN, Inventory, WO, etc.) live in
+ * the project workspace tabs — not duplicated here.
  */
 export const masters = [
     { slug: 'items', label: 'Items', icon: 'cube', permission: 'masters.items.view' },
@@ -49,19 +52,19 @@ export function navigationCatalog() {
             ],
         },
         {
-            group: 'Finance',
-            items: [{ key: 'finance.cash-flow', label: 'Cash Flow & Outstanding' }],
-        },
-        {
-            group: 'Operations',
+            group: 'Gate & Scrap',
             items: [
                 { key: 'gate_passes', label: 'Gate Passes' },
                 { key: 'scrap', label: 'Scrap Management' },
             ],
         },
         {
+            group: 'Finance',
+            items: [{ key: 'finance.cash-flow', label: 'Cash Flow & Outstanding' }],
+        },
+        {
             group: 'Utilities',
-            items: [{ key: 'utilities.electricity', label: 'Electricity' }],
+            items: [{ key: 'utilities.electricity', label: 'Electricity Management' }],
         },
         {
             group: 'Masters',
@@ -105,272 +108,368 @@ function menuAllowed(key, menuItems) {
     return menuItems.includes(key);
 }
 
-export function buildNavigation({ can, isSuperAdmin, multiCompany = false, advancedBoqCalculations = false, menuItems = null }) {
+function leaf(item) {
+    return item || null;
+}
+
+function group({ key, label, icon, children, badge = null, tour = null }) {
+    const items = (children || []).filter(Boolean);
+    if (items.length === 0) {
+        return null;
+    }
+
+    return {
+        key,
+        label,
+        icon,
+        type: 'group',
+        children: items,
+        active: items.some((child) => child.active),
+        badge,
+        tour,
+    };
+}
+
+/**
+ * @param {{
+ *   can: (permission: string) => boolean,
+ *   isSuperAdmin?: boolean,
+ *   multiCompany?: boolean,
+ *   advancedBoqCalculations?: boolean,
+ *   menuItems?: list<string>|null,
+ *   pendingApprovalCount?: number|null,
+ * }} options
+ */
+export function buildNavigation({
+    can,
+    isSuperAdmin,
+    multiCompany = false,
+    advancedBoqCalculations = false,
+    menuItems = null,
+    pendingApprovalCount = null,
+}) {
     const sections = [
         {
             items: [
-                menuAllowed('dashboard', menuItems) && {
-                    key: 'dashboard',
-                    label: 'Dashboard',
-                    icon: 'home',
-                    href: route('dashboard'),
-                    active: route().current('dashboard'),
-                },
-                can('projects.view') &&
-                    menuAllowed('projects', menuItems) && {
-                        key: 'projects',
-                        label: 'Projects',
-                        icon: 'building',
-                        href: route('projects.index'),
-                        active: route().current('projects.*'),
+                leaf(
+                    menuAllowed('dashboard', menuItems) && {
+                        key: 'dashboard',
+                        label: 'Dashboard',
+                        icon: 'home',
+                        href: route('dashboard'),
+                        active: route().current('dashboard'),
+                        tour: 'nav-dashboard',
                     },
-                can('approvals.view') &&
-                    menuAllowed('approvals', menuItems) && {
-                        key: 'approvals',
-                        label: 'Approvals',
-                        icon: 'check-circle',
-                        href: route('approvals.index'),
-                        active: route().current('approvals.*'),
+                ),
+                leaf(
+                    can('projects.view') &&
+                        menuAllowed('projects', menuItems) && {
+                            key: 'projects',
+                            label: 'Projects',
+                            icon: 'building',
+                            href: route('projects.index'),
+                            active: route().current('projects.*'),
+                            tour: 'nav-projects',
+                        },
+                ),
+                group({
+                    key: 'crm',
+                    label: 'CRM',
+                    icon: 'users',
+                    children: [
+                        can('crm.leads.view') &&
+                            menuAllowed('crm.leads', menuItems) && {
+                                key: 'crm.leads',
+                                label: 'Leads',
+                                icon: 'users',
+                                href: route('crm.leads.index'),
+                                active: route().current('crm.leads.*'),
+                            },
+                        can('crm.quotations.view') &&
+                            menuAllowed('crm.quotations', menuItems) && {
+                                key: 'crm.quotations',
+                                label: 'Quotations',
+                                icon: 'document',
+                                href: route('crm.quotations.index'),
+                                active: route().current('crm.quotations.*'),
+                            },
+                    ],
+                }),
+                group({
+                    key: 'gate-scrap',
+                    label: 'Gate & Scrap',
+                    icon: 'truck',
+                    children: [
+                        can('gate_pass.view') &&
+                            menuAllowed('gate_passes', menuItems) && {
+                                key: 'gate_passes',
+                                label: 'Gate Passes',
+                                icon: 'truck',
+                                href: route('gate-passes.index'),
+                                active: route().current('gate-passes.*') || route().current('projects.gate-passes.*'),
+                            },
+                        can('scrap.view') &&
+                            menuAllowed('scrap', menuItems) && {
+                                key: 'scrap',
+                                label: 'Scrap Management',
+                                icon: 'archive',
+                                href: route('scrap.dashboard'),
+                                active: route().current('scrap.*') || route().current('projects.scrap.*'),
+                            },
+                    ],
+                }),
+                group({
+                    key: 'finance',
+                    label: 'Finance',
+                    icon: 'banknotes',
+                    children: [
+                        can('payments.view') &&
+                            menuAllowed('finance.cash-flow', menuItems) && {
+                                key: 'finance.cash-flow',
+                                label: 'Cash Flow & Outstanding',
+                                icon: 'banknotes',
+                                href: route('finance.cash-flow'),
+                                active: route().current('finance.*'),
+                            },
+                    ],
+                }),
+                group({
+                    key: 'utilities',
+                    label: 'Utilities',
+                    icon: 'cog',
+                    children: [
+                        (can('utilities.view') || can('utilities.electricity.view')) &&
+                            menuAllowed('utilities.electricity', menuItems) && {
+                                key: 'utilities.electricity',
+                                label: 'Electricity Management',
+                                icon: 'cog',
+                                href: route('utilities.electricity.hub'),
+                                active: route().current('utilities.electricity.*'),
+                            },
+                    ],
+                }),
+                leaf(
+                    can('reports.view') &&
+                        menuAllowed('reports', menuItems) && {
+                            key: 'reports',
+                            label: 'Reports',
+                            icon: 'document',
+                            href: route('reports.index'),
+                            active: route().current('reports.*'),
+                            tour: 'nav-reports',
+                        },
+                ),
+                group({
+                    key: 'approvals',
+                    label: 'Approvals',
+                    icon: 'check-circle',
+                    badge: pendingApprovalCount,
+                    children: [
+                        can('approvals.view') &&
+                            menuAllowed('approvals', menuItems) && {
+                                key: 'approvals',
+                                label: 'Pending Approvals',
+                                icon: 'check-circle',
+                                href: route('approvals.index'),
+                                active: route().current('approvals.*') && !route().current('approvals.delegations.*'),
+                            },
+                        can('approvals.view') &&
+                            menuAllowed('approvals', menuItems) && {
+                                key: 'approvals.delegations',
+                                label: 'My Delegations',
+                                icon: 'users',
+                                href: route('approvals.delegations.index'),
+                                active: route().current('approvals.delegations.*'),
+                            },
+                    ],
+                }),
+                leaf(
+                    menuAllowed('chat', menuItems) && {
+                        key: 'chat',
+                        label: 'Chat',
+                        icon: 'chat',
+                        href: route('chat.index'),
+                        active: route().current('chat.*'),
+                        isChat: true,
                     },
-                can('reports.view') &&
-                    menuAllowed('reports', menuItems) && {
-                        key: 'reports',
-                        label: 'Reports',
-                        icon: 'document',
-                        href: route('reports.index'),
-                        active: route().current('reports.*'),
-                    },
-                menuAllowed('chat', menuItems) && {
-                    key: 'chat',
-                    label: 'Chat',
-                    icon: 'chat',
-                    href: route('chat.index'),
-                    active: route().current('chat.*'),
-                },
-            ],
-        },
-        {
-            title: 'CRM',
-            items: [
-                can('crm.leads.view') &&
-                    menuAllowed('crm.leads', menuItems) && {
-                        key: 'crm.leads',
-                        label: 'Leads',
-                        icon: 'users',
-                        href: route('crm.leads.index'),
-                        active: route().current('crm.leads.*'),
-                    },
-                can('crm.quotations.view') &&
-                    menuAllowed('crm.quotations', menuItems) && {
-                        key: 'crm.quotations',
-                        label: 'Quotations',
-                        icon: 'document',
-                        href: route('crm.quotations.index'),
-                        active: route().current('crm.quotations.*'),
-                    },
-            ],
-        },
-        {
-            title: 'Finance',
-            items: [
-                can('payments.view') &&
-                    menuAllowed('finance.cash-flow', menuItems) && {
-                        key: 'finance.cash-flow',
-                        label: 'Cash Flow & Outstanding',
-                        icon: 'banknotes',
-                        href: route('finance.cash-flow'),
-                        active: route().current('finance.*'),
-                    },
-            ],
-        },
-        {
-            title: 'Operations',
-            items: [
-                can('gate_pass.view') &&
-                    menuAllowed('gate_passes', menuItems) && {
-                        key: 'gate_passes',
-                        label: 'Gate Passes',
-                        icon: 'truck',
-                        href: route('gate-passes.index'),
-                        active: route().current('gate-passes.*') || route().current('projects.gate-passes.*'),
-                    },
-                can('scrap.view') &&
-                    menuAllowed('scrap', menuItems) && {
-                        key: 'scrap',
-                        label: 'Scrap Management',
-                        icon: 'archive',
-                        href: route('scrap.dashboard'),
-                        active: route().current('scrap.*') || route().current('projects.scrap.*'),
-                    },
-            ],
-        },
-        {
-            title: 'Utilities',
-            items: [
-                (can('utilities.view') || can('utilities.electricity.view')) &&
-                    menuAllowed('utilities.electricity', menuItems) && {
-                        key: 'utilities.electricity',
-                        label: 'Electricity',
-                        icon: 'cog',
-                        href: route('utilities.electricity.hub'),
-                        active: route().current('utilities.electricity.*'),
-                    },
-            ],
-        },
-        {
-            title: 'Masters',
-            items: [
-                ...masters
-                    .filter((m) => can(m.permission) || (m.slug.startsWith('scrap-') && can('scrap.manage_master')))
-                    .filter((m) => menuAllowed(`masters.${m.slug}`, menuItems))
-                    .map((m) => ({
-                        key: `masters.${m.slug}`,
-                        label: m.label,
-                        icon: m.icon,
-                        href: route('masters.index', m.slug),
-                        active: route().current('masters.*', { master: m.slug }),
-                    })),
-                can('quality.view') &&
-                    menuAllowed('quality.checklists', menuItems) && {
-                        key: 'quality.checklists',
-                        label: 'Quality Checklists',
-                        icon: 'check-circle',
-                        href: route('quality.checklists.index'),
-                        active: route().current('quality.checklists.*'),
-                    },
-                advancedBoqCalculations &&
-                    can('boq.manage_recipes') &&
-                    menuAllowed('coefficients.recipes', menuItems) && {
-                        key: 'coefficients.recipes',
-                        label: 'Material Recipes',
-                        icon: 'beaker',
-                        href: route('coefficients.recipes.index'),
-                        active: route().current('coefficients.recipes.*'),
-                    },
-                advancedBoqCalculations &&
-                    can('boq.manage_unit_conversions') &&
-                    menuAllowed('coefficients.conversions', menuItems) && {
-                        key: 'coefficients.conversions',
-                        label: 'Unit Conversions',
-                        icon: 'scale',
-                        href: route('coefficients.conversions.index'),
-                        active: route().current('coefficients.conversions.*'),
-                    },
-                advancedBoqCalculations &&
-                    can('boq.manage_steel_profiles') &&
-                    menuAllowed('coefficients.steel-profiles', menuItems) && {
-                        key: 'coefficients.steel-profiles',
-                        label: 'Steel Unit Weight Profiles',
-                        icon: 'wrench',
-                        href: route('coefficients.steel-profiles.index'),
-                        active: route().current('coefficients.steel-profiles.*'),
-                    },
-                advancedBoqCalculations &&
-                    can('boq.manage_rate_library') &&
-                    menuAllowed('coefficients.rate-library', menuItems) && {
-                        key: 'coefficients.rate-library',
-                        label: 'Rate Library',
-                        icon: 'banknotes',
-                        href: route('coefficients.rate-library.index'),
-                        active: route().current('coefficients.rate-library.*'),
-                    },
-            ],
-        },
-        {
-            title: 'Administration',
-            items: [
-                can('admin.users.view') &&
-                    menuAllowed('admin.users', menuItems) && {
-                        key: 'admin.users',
-                        label: 'Users',
-                        icon: 'users',
-                        href: route('admin.users.index'),
-                        active: route().current('admin.users.*'),
-                    },
-                can('admin.roles.view') &&
-                    menuAllowed('admin.roles', menuItems) && {
-                        key: 'admin.roles',
-                        label: 'Roles & Permissions',
-                        icon: 'shield',
-                        href: route('admin.roles.index'),
-                        active: route().current('admin.roles.*'),
-                    },
-                can('admin.workflows.view') &&
-                    menuAllowed('admin.workflows', menuItems) && {
-                        key: 'admin.workflows',
-                        label: 'Approval Workflows',
-                        icon: 'check-circle',
-                        href: route('admin.workflows.index'),
-                        active: route().current('admin.workflows.*'),
-                    },
-                can('admin.settings.view') &&
-                    menuAllowed('admin.company', menuItems) && {
-                        key: 'admin.company',
-                        label: 'Company Settings',
-                        icon: 'cog',
-                        href: route('admin.company.edit'),
-                        active: route().current('admin.company.*'),
-                    },
-                can('admin.settings.view') &&
-                    menuAllowed('admin.document-terms', menuItems) && {
-                        key: 'admin.document-terms',
-                        label: 'Document Terms',
-                        icon: 'document',
-                        href: route('admin.document-terms.index'),
-                        active: route().current('admin.document-terms.*'),
-                    },
-                can('tally.view') &&
-                    menuAllowed('integrations.tally', menuItems) && {
-                        key: 'integrations.tally',
-                        label: 'TallyPrime',
-                        icon: 'banknotes',
-                        href: route('integrations.tally.edit'),
-                        active: route().current('integrations.tally.*'),
-                    },
-                can('admin.audit_logs.view') &&
-                    menuAllowed('admin.audit-logs', menuItems) && {
-                        key: 'admin.audit-logs',
-                        label: 'Audit Logs',
-                        icon: 'clipboard',
-                        href: route('admin.audit-logs.index'),
-                        active: route().current('admin.audit-logs.*'),
-                    },
-                (can('projects.import') ||
-                    can('masters.items.import') ||
-                    can('masters.vendors.import') ||
-                    can('boq.import') ||
-                    can('material_requests.import') ||
-                    can('inventory.import') ||
-                    can('expenses.import') ||
-                    can('labour.import') ||
-                    can('planning.import') ||
-                    can('quality.import')) &&
-                    menuAllowed('imports.history', menuItems) && {
-                        key: 'imports.history',
-                        label: 'Import History',
-                        icon: 'document',
-                        href: route('imports.history'),
-                        active: route().current('imports.*'),
-                    },
-            ],
-        },
-        isSuperAdmin &&
-            multiCompany && {
-                title: 'Platform',
-                items: [
-                    menuAllowed('platform.companies', menuItems) && {
-                        key: 'platform.companies',
-                        label: 'Companies',
+                ),
+                group({
+                    key: 'masters',
+                    label: 'Masters',
+                    icon: 'archive',
+                    children: [
+                        ...masters
+                            .filter((m) => can(m.permission) || (m.slug.startsWith('scrap-') && can('scrap.manage_master')))
+                            .filter((m) => menuAllowed(`masters.${m.slug}`, menuItems))
+                            .map((m) => ({
+                                key: `masters.${m.slug}`,
+                                label: m.label,
+                                icon: m.icon,
+                                href: route('masters.index', m.slug),
+                                active: route().current('masters.*', { master: m.slug }),
+                            })),
+                        can('quality.view') &&
+                            menuAllowed('quality.checklists', menuItems) && {
+                                key: 'quality.checklists',
+                                label: 'Quality Checklists',
+                                icon: 'check-circle',
+                                href: route('quality.checklists.index'),
+                                active: route().current('quality.checklists.*'),
+                            },
+                        advancedBoqCalculations &&
+                            can('boq.manage_recipes') &&
+                            menuAllowed('coefficients.recipes', menuItems) && {
+                                key: 'coefficients.recipes',
+                                label: 'Material Recipes',
+                                icon: 'beaker',
+                                href: route('coefficients.recipes.index'),
+                                active: route().current('coefficients.recipes.*'),
+                            },
+                        advancedBoqCalculations &&
+                            can('boq.manage_unit_conversions') &&
+                            menuAllowed('coefficients.conversions', menuItems) && {
+                                key: 'coefficients.conversions',
+                                label: 'Unit Conversions',
+                                icon: 'scale',
+                                href: route('coefficients.conversions.index'),
+                                active: route().current('coefficients.conversions.*'),
+                            },
+                        advancedBoqCalculations &&
+                            can('boq.manage_steel_profiles') &&
+                            menuAllowed('coefficients.steel-profiles', menuItems) && {
+                                key: 'coefficients.steel-profiles',
+                                label: 'Steel Unit Weight Profiles',
+                                icon: 'wrench',
+                                href: route('coefficients.steel-profiles.index'),
+                                active: route().current('coefficients.steel-profiles.*'),
+                            },
+                        advancedBoqCalculations &&
+                            can('boq.manage_rate_library') &&
+                            menuAllowed('coefficients.rate-library', menuItems) && {
+                                key: 'coefficients.rate-library',
+                                label: 'Rate Library',
+                                icon: 'banknotes',
+                                href: route('coefficients.rate-library.index'),
+                                active: route().current('coefficients.rate-library.*'),
+                            },
+                    ],
+                }),
+                group({
+                    key: 'administration',
+                    label: 'Administration',
+                    icon: 'shield',
+                    children: [
+                        can('admin.users.view') &&
+                            menuAllowed('admin.users', menuItems) && {
+                                key: 'admin.users',
+                                label: 'Users',
+                                icon: 'users',
+                                href: route('admin.users.index'),
+                                active: route().current('admin.users.*'),
+                            },
+                        can('admin.roles.view') &&
+                            menuAllowed('admin.roles', menuItems) && {
+                                key: 'admin.roles',
+                                label: 'Roles & Permissions',
+                                icon: 'shield',
+                                href: route('admin.roles.index'),
+                                active: route().current('admin.roles.*'),
+                            },
+                        can('admin.workflows.view') &&
+                            menuAllowed('admin.workflows', menuItems) && {
+                                key: 'admin.workflows',
+                                label: 'Approval Workflows',
+                                icon: 'check-circle',
+                                href: route('admin.workflows.index'),
+                                active: route().current('admin.workflows.*'),
+                            },
+                        can('admin.settings.view') &&
+                            menuAllowed('admin.company', menuItems) && {
+                                key: 'admin.company',
+                                label: 'Company Settings',
+                                icon: 'cog',
+                                href: route('admin.company.edit'),
+                                active: route().current('admin.company.*'),
+                            },
+                        can('admin.settings.view') &&
+                            menuAllowed('admin.document-terms', menuItems) && {
+                                key: 'admin.document-terms',
+                                label: 'Document Terms',
+                                icon: 'document',
+                                href: route('admin.document-terms.index'),
+                                active: route().current('admin.document-terms.*'),
+                            },
+                        can('tally.view') &&
+                            menuAllowed('integrations.tally', menuItems) && {
+                                key: 'integrations.tally',
+                                label: 'TallyPrime',
+                                icon: 'banknotes',
+                                href: route('integrations.tally.edit'),
+                                active: route().current('integrations.tally.*'),
+                            },
+                        can('admin.audit_logs.view') &&
+                            menuAllowed('admin.audit-logs', menuItems) && {
+                                key: 'admin.audit-logs',
+                                label: 'Audit Logs',
+                                icon: 'clipboard',
+                                href: route('admin.audit-logs.index'),
+                                active: route().current('admin.audit-logs.*'),
+                            },
+                        (can('projects.import') ||
+                            can('masters.items.import') ||
+                            can('masters.vendors.import') ||
+                            can('boq.import') ||
+                            can('material_requests.import') ||
+                            can('inventory.import') ||
+                            can('expenses.import') ||
+                            can('labour.import') ||
+                            can('planning.import') ||
+                            can('quality.import')) &&
+                            menuAllowed('imports.history', menuItems) && {
+                                key: 'imports.history',
+                                label: 'Import History',
+                                icon: 'document',
+                                href: route('imports.history'),
+                                active: route().current('imports.*'),
+                            },
+                    ],
+                }),
+                isSuperAdmin &&
+                    multiCompany &&
+                    group({
+                        key: 'platform',
+                        label: 'Platform',
                         icon: 'globe',
-                        href: route('platform.companies.index'),
-                        active: route().current('platform.companies.*'),
-                    },
-                ],
-            },
+                        children: [
+                            menuAllowed('platform.companies', menuItems) && {
+                                key: 'platform.companies',
+                                label: 'Companies',
+                                icon: 'globe',
+                                href: route('platform.companies.index'),
+                                active: route().current('platform.companies.*'),
+                            },
+                        ],
+                    }),
+            ],
+        },
     ];
 
     return sections
         .filter(Boolean)
         .map((s) => ({ ...s, items: s.items.filter(Boolean) }))
         .filter((s) => s.items.length > 0);
+}
+
+/**
+ * Format sidebar badge counts (hide zero; cap at 99+).
+ *
+ * @param {number|null|undefined} count
+ * @returns {string|null}
+ */
+export function formatNavBadge(count) {
+    if (count == null || count <= 0) {
+        return null;
+    }
+
+    return count > 99 ? '99+' : String(count);
 }

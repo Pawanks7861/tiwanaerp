@@ -5,12 +5,14 @@ namespace App\Http\Requests\Projects;
 use App\Enums\IndianState;
 use App\Models\Crm\Client;
 use App\Models\Projects\Project;
+use App\Models\Projects\ProjectCostHead;
 use App\Rules\CompanyMember;
 use App\Rules\ExistsInCompany;
 use App\Support\Crm\DefaultClientResolver;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Validator;
 
 class ProjectRequest extends FormRequest
@@ -70,6 +72,8 @@ class ProjectRequest extends FormRequest
             'start_date' => ['nullable', 'date'],
             'expected_end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
             'contract_value' => ['nullable', 'numeric', 'min:0', 'max:9999999999999999', 'decimal:0,2'],
+            'initial_budget' => [$isUpdate ? 'prohibited' : 'nullable', 'array'],
+            'initial_budget.*' => ['nullable', 'numeric', 'min:0', 'max:9999999999999999', 'decimal:0,2'],
         ];
     }
 
@@ -89,7 +93,7 @@ class ProjectRequest extends FormRequest
 
             try {
                 app(DefaultClientResolver::class)->assertMatchesDefault($clientId);
-            } catch (\Illuminate\Validation\ValidationException $e) {
+            } catch (ValidationException $e) {
                 foreach ($e->errors() as $field => $messages) {
                     foreach ($messages as $message) {
                         $validator->errors()->add($field, $message);
@@ -105,9 +109,34 @@ class ProjectRequest extends FormRequest
     public function projectData(): array
     {
         $data = $this->validated();
+        unset($data['initial_budget']);
         $data['contract_value'] = $data['contract_value'] ?? '0';
 
         return $data;
+    }
+
+    /**
+     * @return array<int, string> project_cost_head_id => amount
+     */
+    public function initialBudgetByHeadId(): array
+    {
+        $raw = $this->validated('initial_budget') ?? [];
+        if (! is_array($raw) || $raw === []) {
+            return [];
+        }
+
+        $validIds = ProjectCostHead::query()
+            ->whereIn('id', array_map('intval', array_keys($raw)))
+            ->pluck('id')
+            ->all();
+
+        $out = [];
+        foreach ($validIds as $id) {
+            $value = $raw[$id] ?? $raw[(string) $id] ?? '0';
+            $out[(int) $id] = $value === null || $value === '' ? '0' : (string) $value;
+        }
+
+        return $out;
     }
 
     public function attributes(): array

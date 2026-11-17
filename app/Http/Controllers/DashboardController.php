@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ProjectStatus;
+use App\Exports\ProjectCostControlExport;
 use App\Models\Projects\Project;
 use App\Reports\ReportRunner;
 use App\Services\Approval\ApprovalService;
+use App\Services\Projects\ManagementDashboardService;
+use App\Services\Projects\ProjectCostControlService;
 use App\Services\Reports\DashboardService;
 use App\Support\Reports\ReportPeriod;
 use App\Support\Tenancy\CurrentCompany;
@@ -13,6 +16,8 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Executive dashboard (architecture O.5). KPIs and charts need dashboard.view; money needs
@@ -25,9 +30,50 @@ class DashboardController extends Controller
     public function __construct(
         private readonly ApprovalService $approvals,
         private readonly DashboardService $dashboards,
+        private readonly ManagementDashboardService $management,
+        private readonly ProjectCostControlService $costControl,
         private readonly ReportRunner $runner,
         private readonly CurrentCompany $current,
     ) {}
+
+    public function exportPortfolio(Request $request): BinaryFileResponse
+    {
+        $user = $request->user();
+        abort_unless($user->can('reports.export') && $user->can('dashboard.view_financials'), 403);
+
+        $company = $this->current->require();
+        $visible = $this->runner->visibleProjectIds($user);
+        $projectId = $request->integer('project_id') ?: null;
+        if ($projectId !== null) {
+            abort_unless(in_array($projectId, $visible, true), 403);
+            $visible = [$projectId];
+        }
+
+        $portfolio = $this->costControl->portfolio((int) $company->id, $visible);
+        $rows = [[
+            'Project', 'Code', 'Status', 'Original Budget', 'Revised Budget', 'Actual Invoiced',
+            'Open Commitment', 'Available Budget', '% Assigned', 'Unallocated',
+        ]];
+        foreach ($portfolio['projects'] as $project) {
+            $rows[] = [
+                $project['name'] ?? '',
+                $project['code'] ?? '',
+                $project['status'] ?? '',
+                $project['original_budget'] ?? '0.00',
+                $project['revised_budget'] ?? '0.00',
+                $project['actual_invoiced'] ?? '0.00',
+                $project['open_commitment'] ?? '0.00',
+                $project['available_budget'] ?? '0.00',
+                $project['percent_assigned'] ?? '',
+                $project['unallocated'] ?? '0.00',
+            ];
+        }
+
+        return Excel::download(
+            new ProjectCostControlExport($rows, 'Portfolio Cost'),
+            'portfolio-cost-control.xlsx',
+        );
+    }
 
     public function __invoke(Request $request): Response
     {
@@ -52,6 +98,20 @@ class DashboardController extends Controller
             'project_id' => isset($data['project_id']) ? (int) $data['project_id'] : null,
         ];
         $projectIds = $period['project_id'] ? [$period['project_id']] : $visible;
+        $profile = $this->management->resolveProfile($user);
+
+        $management = null;
+        $page = 'Dashboard';
+        if ($profile === 'md' && $user->can('dashboard.view')) {
+            $management = $this->management->md($company, $user, $projectIds, $period);
+            $page = 'Dashboards/Md';
+        } elseif ($profile === 'director' && $user->can('dashboard.view')) {
+            $management = $this->management->director($company, $user, $projectIds, $period);
+            $page = 'Dashboards/Director';
+        } elseif ($profile === 'admin' && $user->can('dashboard.view')) {
+            $management = $this->management->admin($company, $user, $projectIds, $period);
+            $page = 'Dashboards/Admin';
+        }
 
         $recent = Project::query()->visibleTo($user)->with('projectManager:id,name')
             ->whereIn('status', [ProjectStatus::Planning, ProjectStatus::Active, ProjectStatus::OnHold])
@@ -67,9 +127,15 @@ class DashboardController extends Controller
                 'expected_end_date' => $p->expected_end_date?->toDateString(),
             ]);
 
-        return Inertia::render('Dashboard', [
-            'dashboard' => $user->can('dashboard.view') ? $this->dashboards->executive($company, $user, $projectIds, $period) : null,
-            'pendingApprovals' => $user->can('approvals.view') ? $this->approvals->pendingFor($user)->count() : null,
+        $executive = $user->can('dashboard.view') ? $this->dashboards->executive($company, $user, $projectIds, $period) : null;
+        if ($management !== null && $executive !== null && empty($management['executive'])) {
+            $management['executive'] = $executive;
+        }
+
+        return Inertia::render($page, [
+            'profile' => $profile,
+            'dashboard' => $management ?? $executive,
+            'pendingApprovals' => $user->can('approvals.view') ? $this->approvals->pendingCountFor($user) : null,
             'recentProjects' => $recent->all(),
             'filters' => [
                 'project_id' => $period['project_id'],

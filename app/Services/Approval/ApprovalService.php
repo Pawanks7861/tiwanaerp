@@ -228,6 +228,15 @@ class ApprovalService
             ->values();
     }
 
+    /**
+     * Authoritative pending-approval count for sidebar / dashboard badges.
+     * Matches {@see pendingFor()} actionability (delegation, self-approval, current level).
+     */
+    public function pendingCountFor(User $user, int $scanLimit = 200): int
+    {
+        return $this->pendingFor($user, $scanLimit)->count();
+    }
+
     public function resolveWorkflow(Approvable&Model $document): ?ApprovalWorkflow
     {
         $amount = $document->approvalAmount();

@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\FileController;
 use App\Http\Controllers\Api\V1\LookupController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\ProjectController;
+use App\Http\Controllers\Api\V1\Projects\ProjectCostControlApiController;
 use App\Http\Controllers\Api\V1\Quality\QualityChecklistApiController;
 use App\Http\Controllers\Api\V1\Scrap\ScrapBalanceApiController;
 use App\Http\Controllers\Api\V1\Scrap\ScrapGenerationApiController;
@@ -181,6 +182,8 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             Route::get('/projects/{project}/setup-status', [ProjectController::class, 'setupStatus'])->name('projects.setup-status');
             Route::get('/projects/{project}/procurement/summary', [ProcurementSummaryController::class, 'show'])
                 ->name('projects.procurement.summary');
+            Route::get('/projects/{project}/cost-control', [ProjectCostControlApiController::class, 'show'])
+                ->name('projects.cost-control.show');
             Route::get('/projects/{project}/material-control', [MaterialControlApiController::class, 'index'])
                 ->name('projects.material-control.index');
             Route::get('/projects/{project}/material-control/materials/{material}', [MaterialControlApiController::class, 'show'])

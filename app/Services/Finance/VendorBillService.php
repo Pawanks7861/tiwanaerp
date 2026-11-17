@@ -318,6 +318,7 @@ class VendorBillService
                 'rate' => $poItem->rate,
                 'discount_percent' => $poItem->discount_percent,
                 'tax_rate_id' => $tax?->id,
+                'project_cost_head_id' => $poItem->project_cost_head_id,
                 'sort_order' => $sort++,
                 ...$line,
             ])->save();
@@ -365,6 +366,7 @@ class VendorBillService
                 'rate' => $rate->toRate(),
                 'discount_percent' => $discount->round(Decimal::PERCENT_SCALE)->toString(),
                 'tax_rate_id' => $tax?->id,
+                'project_cost_head_id' => filled($row['project_cost_head_id'] ?? null) ? (int) $row['project_cost_head_id'] : null,
                 'sort_order' => $sort++,
                 ...$line,
             ])->save();

@@ -391,6 +391,7 @@ class SubcontractorBillService
                 'cumulative_qty' => $certified->toQuantity(),
                 'rate' => $workItem->rate,
                 'amount' => '0.00',
+                'project_cost_head_id' => $workItem->project_cost_head_id,
             ])->save();
         }
 

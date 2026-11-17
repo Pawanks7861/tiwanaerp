@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\Core\CompanyUser;
 use App\Models\Projects\Project;
 use App\Models\User;
+use App\Services\Approval\ApprovalService;
 use App\Services\Chat\ChatPresenter;
 use App\Services\Notifications\FcmClient;
 use App\Services\Tutorial\TutorialProgressService;
@@ -60,6 +61,7 @@ class HandleInertiaRequests extends Middleware
             'projectSwitcher' => fn () => $this->projects($request->user()),
             'unreadNotifications' => fn () => $this->unreadCount($request->user()),
             'chatUnread' => fn () => $this->chatUnread($request->user()),
+            'pendingApprovalCount' => fn () => $this->pendingApprovalCount($request->user()),
             'branding' => fn () => $this->branding(),
             'fcm' => fn () => [
                 'configured' => app(FcmClient::class)->configured(),
@@ -196,6 +198,15 @@ class HandleInertiaRequests extends Middleware
         }
 
         return app(ChatPresenter::class)->unreadTotal($user);
+    }
+
+    private function pendingApprovalCount(?User $user): int
+    {
+        if ($user === null || ! app(CurrentCompany::class)->has() || ! $user->can('approvals.view')) {
+            return 0;
+        }
+
+        return app(ApprovalService::class)->pendingCountFor($user);
     }
 
     /**

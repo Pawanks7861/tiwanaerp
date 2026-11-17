@@ -7,6 +7,7 @@ use App\Models\Masters\TaxRate;
 use App\Models\Masters\Unit;
 use App\Models\Procurement\GrnItem;
 use App\Models\Procurement\PurchaseOrderItem;
+use App\Models\Projects\ProjectCostHead;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -88,5 +89,13 @@ class VendorBillItem extends Model
     public function taxRate(): BelongsTo
     {
         return $this->belongsTo(TaxRate::class)->withTrashed();
+    }
+
+    /**
+     * @return BelongsTo<ProjectCostHead, $this>
+     */
+    public function projectCostHead(): BelongsTo
+    {
+        return $this->belongsTo(ProjectCostHead::class);
     }
 }

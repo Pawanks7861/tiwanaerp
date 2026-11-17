@@ -5,12 +5,14 @@ namespace App\Models\Boq;
 use App\Enums\Boq\BudgetLineSource;
 use App\Enums\CostHead;
 use App\Models\Masters\Material;
+use App\Models\Projects\ProjectCostHead;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
     'cost_head',
+    'project_cost_head_id',
     'boq_item_id',
     'source_type',
     'source_key',
@@ -54,6 +56,14 @@ class ProjectBudgetLine extends Model
     public function budget(): BelongsTo
     {
         return $this->belongsTo(ProjectBudget::class, 'project_budget_id');
+    }
+
+    /**
+     * @return BelongsTo<ProjectCostHead, $this>
+     */
+    public function projectCostHead(): BelongsTo
+    {
+        return $this->belongsTo(ProjectCostHead::class);
     }
 
     /**

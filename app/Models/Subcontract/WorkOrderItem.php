@@ -6,6 +6,7 @@ use App\Models\Boq\BoqItem;
 use App\Models\Concerns\LockedByParent;
 use App\Models\Masters\Unit;
 use App\Models\Planning\ProjectTask;
+use App\Models\Projects\ProjectCostHead;
 use App\Support\Math\Decimal;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -72,6 +73,14 @@ class WorkOrderItem extends Model
     public function unit(): BelongsTo
     {
         return $this->belongsTo(Unit::class)->withTrashed();
+    }
+
+    /**
+     * @return BelongsTo<ProjectCostHead, $this>
+     */
+    public function projectCostHead(): BelongsTo
+    {
+        return $this->belongsTo(ProjectCostHead::class);
     }
 
     /**

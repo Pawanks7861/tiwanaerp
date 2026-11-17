@@ -86,6 +86,7 @@ use App\Http\Controllers\Procurement\RfqController;
 use App\Http\Controllers\Procurement\VendorQuotationController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\Projects\ProjectController;
+use App\Http\Controllers\Projects\ProjectCostControlController;
 use App\Http\Controllers\Projects\ProjectTeamController;
 use App\Http\Controllers\Projects\SiteController;
 use App\Http\Controllers\Quality\NcrController;
@@ -125,6 +126,7 @@ Route::get('/firebase-messaging-sw.js', FcmServiceWorkerController::class)->name
 
 Route::middleware(['auth', 'company'])->group(function () {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/dashboard/cost-control/export', [DashboardController::class, 'exportPortfolio'])->name('dashboard.cost-control.export');
 
     Route::get('/branding/{kind}', [BrandingController::class, 'show'])->whereIn('kind', ['logo', 'favicon'])->name('company.branding.show');
 
@@ -318,6 +320,12 @@ Route::middleware(['auth', 'company'])->group(function () {
         Route::put('/budget/lines/{budgetLine}', [ProjectBudgetController::class, 'updateLine'])->whereNumber('budgetLine')->name('projects.budget.lines.update');
         Route::delete('/budget/lines/{budgetLine}', [ProjectBudgetController::class, 'destroyLine'])->whereNumber('budgetLine')->name('projects.budget.lines.destroy');
         Route::post('/budget/{budget}/approve', [ProjectBudgetController::class, 'approve'])->whereNumber('budget')->name('projects.budget.approve');
+
+        Route::get('/cost-control', [ProjectCostControlController::class, 'index'])->name('projects.cost-control.index');
+        Route::get('/cost-control/export', [ProjectCostControlController::class, 'export'])->name('projects.cost-control.export');
+        Route::get('/cost-control/heads/unallocated', [ProjectCostControlController::class, 'head'])->name('projects.cost-control.unallocated');
+        Route::get('/cost-control/heads/{head}', [ProjectCostControlController::class, 'head'])->whereNumber('head')->name('projects.cost-control.head');
+        Route::post('/cost-control/cash-flow-plan', [ProjectCostControlController::class, 'saveCashFlowPlan'])->name('projects.cost-control.cash-flow-plan');
 
         // Planning
         Route::prefix('/planning')->name('projects.planning.')->group(function () {

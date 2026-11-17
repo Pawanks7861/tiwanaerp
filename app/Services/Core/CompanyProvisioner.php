@@ -16,6 +16,7 @@ use App\Models\Masters\LabourTrade;
 use App\Models\Masters\TaxRate;
 use App\Models\Masters\Unit;
 use App\Services\Numbering\DocumentNumberService;
+use App\Services\Projects\ProjectCostHeadService;
 use App\Services\Scrap\ScrapMasterBootstrapper;
 use App\Support\Math\Decimal;
 use App\Support\Permissions\DefaultRoles;
@@ -50,6 +51,7 @@ class CompanyProvisioner
                     $roles = $this->seedRoles($company);
                     $this->grantMissingSystemRoleDefaults($company);
                     $this->seedMasters();
+                    app(ProjectCostHeadService::class)->ensureDefaults($company);
                     app(ScrapMasterBootstrapper::class)->seedForCompany($company);
                     $this->seedFinancialYear($company);
                     $this->seedApprovalWorkflows($roles);

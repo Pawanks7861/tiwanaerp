@@ -3,10 +3,10 @@
 namespace App\Models\Finance;
 
 use App\Contracts\Approvable;
-use App\Models\Approval\ApprovalRequest;
 use App\Enums\CostHead;
 use App\Enums\Finance\ExpenseStatus;
 use App\Enums\Finance\PaymentMode;
+use App\Models\Approval\ApprovalRequest;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
@@ -17,6 +17,7 @@ use App\Models\Masters\ExpenseCategory;
 use App\Models\Masters\Vendor;
 use App\Models\Planning\ProjectTask;
 use App\Models\Projects\Project;
+use App\Models\Projects\ProjectCostHead;
 use App\Models\User;
 use App\Services\Finance\ExpenseService;
 use Illuminate\Database\Eloquent\Model;
@@ -86,6 +87,14 @@ class Expense extends Model implements Approvable
     public function category(): BelongsTo
     {
         return $this->belongsTo(ExpenseCategory::class, 'expense_category_id')->withTrashed();
+    }
+
+    /**
+     * @return BelongsTo<ProjectCostHead, $this>
+     */
+    public function projectCostHead(): BelongsTo
+    {
+        return $this->belongsTo(ProjectCostHead::class);
     }
 
     /**

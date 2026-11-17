@@ -8,7 +8,10 @@ import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import PageHeader from '@/Components/UI/PageHeader.vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { formatMoney } from '@/lib/format';
 import { useForm } from '@inertiajs/vue3';
+import Decimal from 'decimal.js';
+import { computed } from 'vue';
 
 const props = defineProps({
     project: { type: Object, default: null },
@@ -17,9 +20,12 @@ const props = defineProps({
     managers: { type: Array, required: true },
     states: { type: Array, required: true },
     projectTypes: { type: Array, required: true },
+    canManageBudget: { type: Boolean, default: false },
+    costHeads: { type: Array, default: () => [] },
 });
 
 const editing = !!props.project;
+const showInitialBudget = !editing && props.canManageBudget && props.costHeads?.length;
 const p = props.project ?? {};
 const lockedClient = props.defaultClient ?? (p.client_id ? props.clients.find((c) => c.value === p.client_id) : null);
 const lockedClientLabel = lockedClient
@@ -43,7 +49,30 @@ const form = useForm({
     start_date: p.start_date ?? null,
     expected_end_date: p.expected_end_date ?? null,
     contract_value: p.contract_value ?? null,
+    ...(showInitialBudget
+        ? { initial_budget: Object.fromEntries(props.costHeads.map((head) => [head.id, null])) }
+        : {}),
 });
+
+function dec(value) {
+    try {
+        return new Decimal(value || 0);
+    } catch {
+        return new Decimal(0);
+    }
+}
+
+const budgetTotal = computed(() => {
+    return (props.costHeads ?? []).reduce((sum, head) => sum.plus(dec(form.initial_budget?.[head.id])), new Decimal(0)).toFixed(2);
+});
+
+function budgetError(id) {
+    if (id === null) {
+        return typeof form.errors.initial_budget === 'string' ? form.errors.initial_budget : null;
+    }
+
+    return form.errors[`initial_budget.${id}`] ?? form.errors.initial_budget?.[id] ?? null;
+}
 
 function submit() {
     if (editing) {
@@ -92,8 +121,27 @@ function submit() {
                         placeholder="Select project manager"
                         help="The project manager is added to the project team automatically."
                     />
-                    <MoneyInput v-model="form.contract_value" label="Contract value" :error="form.errors.contract_value" />
+                    <MoneyInput v-model="form.contract_value" label="Budget" :error="form.errors.contract_value" />
                     <FormInput v-model="form.description" label="Description" multiline class="sm:col-span-2" :error="form.errors.description" />
+                </div>
+            </AppCard>
+
+            <AppCard v-if="showInitialBudget" title="Initial Project Budget" subtitle="Draft budget by project cost head. Blank amounts are saved as zero.">
+                <div class="flex flex-col gap-4">
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <MoneyInput
+                            v-for="head in costHeads"
+                            :key="head.id"
+                            v-model="form.initial_budget[head.id]"
+                            :label="head.name"
+                            :error="budgetError(head.id)"
+                        />
+                    </div>
+                    <div class="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-3">
+                        <span class="text-xs font-medium tracking-wide text-slate-500 uppercase">Total project budget</span>
+                        <span class="text-lg font-semibold text-slate-900 tabular">{{ formatMoney(budgetTotal) }}</span>
+                    </div>
+                    <p v-if="budgetError(null)" class="text-xs text-rose-600">{{ budgetError(null) }}</p>
                 </div>
             </AppCard>
 

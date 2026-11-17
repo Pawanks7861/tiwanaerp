@@ -984,7 +984,6 @@ function heightDepthLabel(row) {
                                 <th class="px-4 py-2 text-left">Technical</th>
                                 <th class="px-4 py-2 text-left">Commercial</th>
                                 <th class="px-4 py-2 text-right">BOQ value</th>
-                                <th v-if="can.view_costs" class="px-4 py-2 text-right">Internal cost</th>
                                 <th class="px-4 py-2 text-right">Δ vs prior</th>
                                 <th class="px-4 py-2 text-left">Drawings</th>
                                 <th class="px-4 py-2 text-right">Changes</th>
@@ -1011,7 +1010,6 @@ function heightDepthLabel(row) {
                                     <div v-if="v.approved_by" class="text-xs text-slate-500">{{ v.approved_by }}</div>
                                 </td>
                                 <td class="px-4 py-2 text-right tabular">{{ formatMoney(v.total_client_amount) }}</td>
-                                <td v-if="can.view_costs" class="px-4 py-2 text-right tabular">{{ v.total_cost_amount ? formatMoney(v.total_cost_amount) : '—' }}</td>
                                 <td class="px-4 py-2 text-right tabular">{{ v.commercial_change_from_prev != null ? formatMoney(v.commercial_change_from_prev) : '—' }}</td>
                                 <td class="px-4 py-2 text-xs text-slate-600">
                                     <template v-if="v.drawings?.length">
@@ -1289,11 +1287,7 @@ function heightDepthLabel(row) {
                         </tbody>
                         <tfoot class="sticky bottom-0 bg-white shadow-[0_-1px_0_0_rgb(226_232_240)]">
                             <tr class="font-semibold text-slate-900">
-                                <td :colspan="detailedCosts ? 10 : (costs ? 7 : 6)" class="px-2 py-2 text-right text-[11px] uppercase">Total</td>
-                                <template v-if="detailedCosts">
-                                    <td class="px-2 py-2 text-right tabular">{{ formatMoney(totals.cost) }}</td>
-                                    <td :colspan="3"></td>
-                                </template>
+                                <td :colspan="colCount - 2" class="px-2 py-2 text-right text-[11px] uppercase">Total</td>
                                 <td class="px-2 py-2 text-right tabular">{{ formatMoney(totals.client) }}</td>
                                 <td></td>
                             </tr>

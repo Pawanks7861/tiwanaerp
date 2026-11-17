@@ -7,6 +7,7 @@ use App\Enums\ProjectStatus;
 use App\Models\Projects\Project;
 use App\Models\Projects\ProjectUser;
 use App\Models\Projects\Site;
+use App\Services\Boq\ProjectBudgetService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Support\Crm\DefaultClientResolver;
 use App\Support\Tenancy\CurrentCompany;
@@ -18,14 +19,16 @@ class ProjectService
     public function __construct(
         private readonly DocumentNumberService $numbers,
         private readonly DefaultClientResolver $defaultClient,
+        private readonly ProjectBudgetService $budgets,
     ) {}
 
     /**
      * @param  array<string, mixed>  $data  validated input (code optional)
+     * @param  array<int|string, mixed>|null  $initialBudgetByHeadId  WBS allocations when caller may manage budget
      */
-    public function create(array $data): Project
+    public function create(array $data, ?array $initialBudgetByHeadId = null, bool $canManageBudget = false): Project
     {
-        return DB::transaction(function () use ($data) {
+        return DB::transaction(function () use ($data, $initialBudgetByHeadId, $canManageBudget) {
             $data = $this->withDefaultClient($data);
             $code = trim((string) ($data['code'] ?? ''));
 
@@ -38,6 +41,10 @@ class ProjectService
 
             if ($project->project_manager_id) {
                 $this->assignMember($project, (int) $project->project_manager_id, ProjectRole::Manager);
+            }
+
+            if ($canManageBudget) {
+                $this->budgets->createInitialBudget($project, $initialBudgetByHeadId ?? []);
             }
 
             return $project;

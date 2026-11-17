@@ -368,6 +368,9 @@ class PurchaseOrderService
                 'rate' => $rate,
                 'discount_percent' => $discount,
                 'tax_rate_id' => $tax?->id,
+                'project_cost_head_id' => array_key_exists('project_cost_head_id', $row)
+                    ? ($row['project_cost_head_id'] ?: null)
+                    : $line->project_cost_head_id,
                 'sort_order' => $index + 1,
                 ...$calc,
             ]);

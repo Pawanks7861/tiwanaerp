@@ -271,6 +271,7 @@ class ExpenseService
         return [
             'expense_category_id' => $category->id,
             'cost_head' => $category->cost_head,
+            'project_cost_head_id' => filled($data['project_cost_head_id'] ?? null) ? (int) $data['project_cost_head_id'] : null,
             'vendor_id' => $vendorId,
             'payee_name' => filled($data['payee_name'] ?? null) ? trim((string) $data['payee_name']) : null,
             'expense_date' => $data['expense_date'],

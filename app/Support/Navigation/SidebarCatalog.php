@@ -32,22 +32,22 @@ final class SidebarCatalog
                 ],
             ],
             [
-                'group' => 'Finance',
-                'items' => [
-                    ['key' => 'finance.cash-flow', 'label' => 'Cash Flow & Outstanding'],
-                ],
-            ],
-            [
-                'group' => 'Operations',
+                'group' => 'Gate & Scrap',
                 'items' => [
                     ['key' => 'gate_passes', 'label' => 'Gate Passes'],
                     ['key' => 'scrap', 'label' => 'Scrap Management'],
                 ],
             ],
             [
+                'group' => 'Finance',
+                'items' => [
+                    ['key' => 'finance.cash-flow', 'label' => 'Cash Flow & Outstanding'],
+                ],
+            ],
+            [
                 'group' => 'Utilities',
                 'items' => [
-                    ['key' => 'utilities.electricity', 'label' => 'Electricity'],
+                    ['key' => 'utilities.electricity', 'label' => 'Electricity Management'],
                 ],
             ],
             [

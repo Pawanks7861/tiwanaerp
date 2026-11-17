@@ -13,6 +13,7 @@ use App\Models\Boq\ProjectBudget;
 use App\Models\Boq\ProjectBudgetLine;
 use App\Models\Projects\Project;
 use App\Models\User;
+use App\Services\Projects\ProjectCostHeadService;
 use App\Support\Boq\BoqCompanySettings;
 use App\Support\Math\Decimal;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +31,56 @@ class ProjectBudgetService
         'equipment_rate' => CostHead::Equipment,
         'subcontract_rate' => CostHead::Subcontract,
     ];
+
+    /**
+     * Create Budget Version 1 (Draft) with WBS / Project Cost Head allocations for a new project.
+     *
+     * @param  array<int|string, mixed>  $amountByHeadId  project_cost_head_id => amount
+     */
+    public function createInitialBudget(Project $project, array $amountByHeadId = []): ProjectBudget
+    {
+        if (ProjectBudget::query()->where('project_id', $project->id)->exists()) {
+            throw ValidationException::withMessages([
+                'budget' => 'This project already has a budget. Create a new version instead.',
+            ]);
+        }
+
+        $project->loadMissing('company');
+        $heads = app(ProjectCostHeadService::class)->ensureDefaults($project->company);
+
+        $budget = new ProjectBudget;
+        $budget->forceFill([
+            'project_id' => $project->id,
+            'version' => 1,
+            'source' => BudgetSource::Manual,
+            'boq_id' => null,
+            'status' => BudgetStatus::Draft,
+            'total_amount' => '0.00',
+            'materials_sync_pending' => false,
+        ])->save();
+
+        foreach ($heads as $head) {
+            $raw = $amountByHeadId[$head->id] ?? $amountByHeadId[(string) $head->id] ?? '0';
+            $amount = Decimal::of((string) ($raw === null || $raw === '' ? '0' : $raw));
+            if ($amount->isNegative()) {
+                throw ValidationException::withMessages([
+                    "initial_budget.{$head->id}" => 'Budget amounts cannot be negative.',
+                ]);
+            }
+
+            $line = new ProjectBudgetLine([
+                'cost_head' => CostHead::Other->value,
+                'project_cost_head_id' => $head->id,
+                'description' => $head->name,
+                'amount' => $amount->toMoney(),
+                'source_type' => BudgetLineSource::Manual->value,
+            ]);
+            $line->budget()->associate($budget);
+            $line->save();
+        }
+
+        return $this->recalculate($budget);
+    }
 
     /**
      * Build budget lines from the current approved BOQ: one line per BOQ line and cost head.
@@ -128,6 +179,9 @@ class ProjectBudgetService
             }
             $line->fill([
                 'cost_head' => $data['cost_head'],
+                'project_cost_head_id' => array_key_exists('project_cost_head_id', $data)
+                    ? ($data['project_cost_head_id'] ?: null)
+                    : $line->project_cost_head_id,
                 'description' => $data['description'],
                 'amount' => Decimal::of($data['amount'])->toMoney(),
                 'source_type' => BudgetLineSource::Manual->value,

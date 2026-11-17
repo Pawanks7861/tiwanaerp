@@ -42,7 +42,18 @@ final class DefaultRoles
         $viewMasters = ['masters.*.view', 'crm.clients.view'];
 
         $directorPermissions = [
-            '*.view', 'projects.view_all', 'dashboard.view_financials', 'reports.view_financial', 'reports.export',
+            '*.view', 'projects.view_all', 'dashboard.view_financials', 'dashboard.director', 'reports.view_financial', 'reports.export',
+            'boq.approve', 'boq.view_costs', 'boq.view_material_requirements', 'boq.view_bbs', 'boq.approve_bbs', 'boq.view_reconciliation',
+            'budget.approve', 'purchase.approve', 'bid_comparison.approve',
+            'subcontract.approve_wo', 'subcontract.certify_bill', 'subcontract.export', 'billing.certify', 'vendor_bills.approve',
+            'payments.approve', 'expenses.approve', 'crm.quotations.approve', 'inventory.view_valuation',
+            'inventory.approve_adjustment', 'gate_pass.approve', 'scrap.view', 'scrap.approve',
+            'utilities.view', 'utilities.electricity.view', 'utilities.electricity.view_costs', 'utilities.electricity.review',
+            'utilities.electricity.approve', 'utilities.electricity.export', 'ai.use',
+        ];
+
+        $managementPermissions = [
+            '*.view', 'projects.view_all', 'dashboard.view_financials', 'dashboard.md', 'reports.view_financial', 'reports.export',
             'boq.approve', 'boq.view_costs', 'boq.view_material_requirements', 'boq.view_bbs', 'boq.approve_bbs', 'boq.view_reconciliation',
             'budget.approve', 'purchase.approve', 'bid_comparison.approve',
             'subcontract.approve_wo', 'subcontract.certify_bill', 'subcontract.export', 'billing.certify', 'vendor_bills.approve',
@@ -65,15 +76,15 @@ final class DefaultRoles
         return [
             self::COMPANY_ADMIN => [
                 'description' => 'Full access to all modules and company administration.',
-                'permissions' => ['*', 'scrap.manage_master', 'masters.scrap_categories.*', 'masters.scrap_types.*'],
+                'permissions' => ['*', 'dashboard.admin', 'scrap.manage_master', 'masters.scrap_categories.*', 'masters.scrap_types.*'],
             ],
             self::DIRECTOR => [
                 'description' => 'Views everything and gives final approvals.',
                 'permissions' => $directorPermissions,
             ],
             self::MANAGEMENT => [
-                'description' => 'Executive oversight with final approval authority (mirror of Director).',
-                'permissions' => $directorPermissions,
+                'description' => 'Executive oversight with final approval authority (MD portfolio dashboard).',
+                'permissions' => $managementPermissions,
             ],
             self::PROJECT_MANAGER => [
                 'description' => 'Runs assigned projects: planning, site, approvals.',

@@ -9,6 +9,7 @@ use App\Http\Requests\Projects\ProjectRequest;
 use App\Models\Crm\Client;
 use App\Models\Projects\Project;
 use App\Services\Core\CompanyDirectory;
+use App\Services\Projects\ProjectCostHeadService;
 use App\Services\Projects\ProjectService;
 use App\Services\Reports\DashboardService;
 use App\Support\Crm\DefaultClientResolver;
@@ -27,6 +28,7 @@ class ProjectController extends Controller
         private readonly ProjectService $projects,
         private readonly CompanyDirectory $directory,
         private readonly DashboardService $dashboards,
+        private readonly ProjectCostHeadService $costHeads,
     ) {}
 
     public function index(Request $request): Response
@@ -68,12 +70,25 @@ class ProjectController extends Controller
     {
         Gate::authorize('create', Project::class);
 
-        return Inertia::render('Projects/Form', ['project' => null] + $this->formOptions());
+        $canManageBudget = request()->user()->can('budget.update');
+
+        return Inertia::render('Projects/Form', [
+            'project' => null,
+            'canManageBudget' => $canManageBudget,
+            'costHeads' => $canManageBudget
+                ? $this->costHeads->options(app(CurrentCompany::class)->require())
+                : [],
+        ] + $this->formOptions());
     }
 
     public function store(ProjectRequest $request): RedirectResponse
     {
-        $project = $this->projects->create($request->projectData());
+        $canManageBudget = $request->user()->can('budget.update');
+        $project = $this->projects->create(
+            $request->projectData(),
+            $canManageBudget ? $request->initialBudgetByHeadId() : null,
+            $canManageBudget,
+        );
 
         return redirect()->route('projects.show', $project)->with('success', "Project {$project->code} created.");
     }

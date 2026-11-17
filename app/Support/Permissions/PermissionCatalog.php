@@ -18,7 +18,7 @@ final class PermissionCatalog
         $std = self::STANDARD;
 
         return [
-            'dashboard' => ['label' => 'Dashboard', 'group' => 'General', 'actions' => ['view', 'view_financials']],
+            'dashboard' => ['label' => 'Dashboard', 'group' => 'General', 'actions' => ['view', 'view_financials', 'admin', 'md', 'director']],
             'approvals' => ['label' => 'Approvals Inbox', 'group' => 'General', 'actions' => ['view']],
 
             'projects' => ['label' => 'Projects', 'group' => 'Projects', 'actions' => [...$std, 'view_all', 'manage_team', 'close', 'import']],

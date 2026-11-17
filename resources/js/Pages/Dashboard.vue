@@ -8,6 +8,7 @@ import SkeletonChart from '@/Components/UI/Skeleton/SkeletonChart.vue';
 import SkeletonList from '@/Components/UI/Skeleton/SkeletonList.vue';
 import SkeletonStatCard from '@/Components/UI/Skeleton/SkeletonStatCard.vue';
 import { useContentSkeleton } from '@/composables/useContentSkeleton';
+import CostControlStrip from '@/Components/Dashboards/CostControlStrip.vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { formatDate, formatMoneyShort, formatPercent } from '@/lib/format';
 import { Link, router, usePage } from '@inertiajs/vue3';
@@ -21,6 +22,7 @@ const props = defineProps({
     period: { type: Object, required: true },
     options: { type: Object, required: true },
     can: { type: Object, required: true },
+    profile: { type: String, default: null },
 });
 
 const page = usePage();
@@ -112,6 +114,8 @@ const selectClass = 'rounded-lg border-slate-300 py-2 text-sm shadow-sm focus:bo
                     <StatCard label="Subcontractor cost" :value="formatMoneyShort(kpis.subcontract_cost)" icon="briefcase" />
                 </template>
             </div>
+
+            <CostControlStrip v-if="dashboard.cost_control" :cost-control="dashboard.cost_control" class="mt-4" />
 
             <div class="mt-4 grid gap-4 lg:grid-cols-2">
                 <AppCard v-if="charts.progress"><Chart type="bar" title="Progress by project" :categories="charts.progress.categories" :series="charts.progress.series" /></AppCard>

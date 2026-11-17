@@ -5,6 +5,7 @@ namespace App\Models\Procurement;
 use App\Models\Masters\Material;
 use App\Models\Masters\TaxRate;
 use App\Models\Masters\Unit;
+use App\Models\Projects\ProjectCostHead;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -106,6 +107,14 @@ class PurchaseOrderItem extends Model
     public function taxRate(): BelongsTo
     {
         return $this->belongsTo(TaxRate::class);
+    }
+
+    /**
+     * @return BelongsTo<ProjectCostHead, $this>
+     */
+    public function projectCostHead(): BelongsTo
+    {
+        return $this->belongsTo(ProjectCostHead::class);
     }
 
     /**
