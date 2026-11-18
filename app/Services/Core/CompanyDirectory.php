@@ -33,11 +33,11 @@ class CompanyDirectory
      */
     public function memberOptions(): array
     {
-        $companyId = $this->tenancy->require()->id;
-        $teamKey = config('permission.column_names.team_foreign_key');
+        $this->tenancy->require();
 
         return $this->membersQuery()
-            ->with(['roles' => fn ($q) => $q->where($teamKey, $companyId)->orderBy('name')])
+            // Spatie scopes roles by company team_id; avoid bare where(team_id) (ambiguous with pivot).
+            ->with(['roles' => fn ($q) => $q->orderBy('roles.name')])
             ->get(['id', 'name'])
             ->map(function (User $u) {
                 $roleNames = $u->roles->pluck('name')->filter()->values();

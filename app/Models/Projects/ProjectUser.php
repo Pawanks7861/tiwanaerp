@@ -5,6 +5,7 @@ namespace App\Models\Projects;
 use App\Enums\ProjectRole;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\Blameable;
+use App\Models\Core\Role;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\Pivot;
@@ -17,7 +18,7 @@ class ProjectUser extends Pivot
 
     public $incrementing = true;
 
-    protected $fillable = ['project_id', 'user_id', 'project_role', 'is_active'];
+    protected $fillable = ['project_id', 'user_id', 'project_role', 'company_role_id', 'is_active'];
 
     protected function casts(): array
     {
@@ -41,5 +42,15 @@ class ProjectUser extends Pivot
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Company Roles & Permissions role shown on the project team (approval engine still uses project_role).
+     *
+     * @return BelongsTo<Role, $this>
+     */
+    public function companyRole(): BelongsTo
+    {
+        return $this->belongsTo(Role::class, 'company_role_id');
     }
 }

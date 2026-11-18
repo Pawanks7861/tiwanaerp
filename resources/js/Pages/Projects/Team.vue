@@ -22,15 +22,16 @@ const props = defineProps({
 
 const columns = [
     { key: 'name', label: 'Member' },
-    { key: 'company_roles', label: 'Company roles' },
-    { key: 'project_role', label: 'Project role' },
+    { key: 'company_roles', label: 'User roles' },
+    { key: 'company_role_name', label: 'Project role' },
     { key: 'mobile', label: 'Mobile', mobile: false },
 ];
 
-const roleLabel = (value) => props.roles.find((r) => r.value === value)?.label ?? value;
-
 const showAdd = ref(false);
-const addForm = useForm({ user_id: null, project_role: 'engineer' });
+const addForm = useForm({
+    user_id: null,
+    company_role_id: props.roles[0]?.value ?? null,
+});
 const removing = ref(null);
 const removeProcessing = ref(false);
 
@@ -40,12 +41,17 @@ function add() {
         onSuccess: () => {
             showAdd.value = false;
             addForm.reset();
+            addForm.company_role_id = props.roles[0]?.value ?? null;
         },
     });
 }
 
-function changeRole(member, role) {
-    router.put(route('projects.team.update', [props.project.id, member.id]), { project_role: role }, { preserveScroll: true });
+function changeRole(member, companyRoleId) {
+    router.put(
+        route('projects.team.update', [props.project.id, member.id]),
+        { company_role_id: Number(companyRoleId) },
+        { preserveScroll: true },
+    );
 }
 
 function remove() {
@@ -87,17 +93,18 @@ function remove() {
                     </div>
                     <span v-else class="text-slate-400">—</span>
                 </template>
-                <template #cell-project_role="{ row }">
+                <template #cell-company_role_name="{ row }">
                     <select
                         v-if="can.manage && !row.is_manager"
-                        :value="row.project_role"
+                        :value="row.company_role_id ?? ''"
                         class="rounded-md border-slate-300 py-1 text-sm focus:border-brand-500 focus:ring-brand-200"
                         @click.stop
                         @change="changeRole(row, $event.target.value)"
                     >
+                        <option v-if="!row.company_role_id" value="" disabled>{{ row.company_role_name }}</option>
                         <option v-for="r in roles" :key="r.value" :value="r.value">{{ r.label }}</option>
                     </select>
-                    <span v-else>{{ roleLabel(row.project_role) }}</span>
+                    <span v-else>{{ row.company_role_name }}</span>
                 </template>
                 <template v-if="can.manage" #actions="{ row }">
                     <AppButton v-if="!row.is_manager" variant="ghost" size="sm" icon="trash" @click="removing = row">Remove</AppButton>
@@ -114,15 +121,15 @@ function remove() {
                     :options="candidates"
                     :error="addForm.errors.user_id"
                     placeholder="Select a company user"
-                    help="Company roles (from Users & Roles) appear under each name. Project role below is this project's assignment."
+                    help="User roles from Users & Roles appear under each name."
                 />
                 <FormSelect
-                    v-model="addForm.project_role"
+                    v-model="addForm.company_role_id"
                     label="Project role"
                     required
                     :options="roles"
-                    :error="addForm.errors.project_role"
-                    help="Project role controls project access and PM/approver routing for this project only."
+                    :error="addForm.errors.company_role_id"
+                    help="Same list as Roles & Permissions. Chooses this member’s role on this project."
                 />
             </form>
             <template #footer>

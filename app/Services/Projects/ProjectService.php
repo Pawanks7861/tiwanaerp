@@ -4,12 +4,14 @@ namespace App\Services\Projects;
 
 use App\Enums\ProjectRole;
 use App\Enums\ProjectStatus;
+use App\Models\Core\Role;
 use App\Models\Projects\Project;
 use App\Models\Projects\ProjectUser;
 use App\Models\Projects\Site;
 use App\Services\Boq\ProjectBudgetService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Support\Crm\DefaultClientResolver;
+use App\Support\Projects\ProjectCompanyRoleMapper;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -112,11 +114,22 @@ class ProjectService
 
     /**
      * Add or update a team member; re-activates a previously removed member.
+     * Accepts a company Roles & Permissions role (preferred) or a legacy ProjectRole.
      */
-    public function assignMember(Project $project, int $userId, ProjectRole $role): ProjectUser
+    public function assignMember(Project $project, int $userId, ProjectRole|Role $role): ProjectUser
     {
         $member = ProjectUser::query()->firstOrNew(['project_id' => $project->id, 'user_id' => $userId]);
-        $member->project_role = $role;
+
+        if ($role instanceof Role) {
+            $member->company_role_id = $role->id;
+            $member->project_role = ProjectCompanyRoleMapper::toProjectRole($role);
+        } else {
+            $member->project_role = $role;
+            $preferred = ProjectCompanyRoleMapper::preferredCompanyRoleName($role);
+            $companyRole = Role::query()->forCurrentCompany()->where('name', $preferred)->first();
+            $member->company_role_id = $companyRole?->id;
+        }
+
         $member->is_active = true;
         $member->save();
 

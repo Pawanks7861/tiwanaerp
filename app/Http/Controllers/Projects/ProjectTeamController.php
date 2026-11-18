@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers\Projects;
 
-use App\Enums\ProjectRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\ProjectMemberRequest;
+use App\Models\Core\Role;
 use App\Models\Projects\Project;
 use App\Models\Projects\ProjectUser;
 use App\Services\Core\CompanyDirectory;
@@ -23,13 +23,11 @@ class ProjectTeamController extends Controller
 
     public function index(Request $request, Project $project): Response
     {
-        $companyId = $project->company_id;
-        $teamKey = config('permission.column_names.team_foreign_key');
-
         $members = $project->members()
             ->with([
                 'user:id,name,email,mobile',
-                'user.roles' => fn ($q) => $q->where($teamKey, $companyId)->orderBy('name'),
+                'user.roles' => fn ($q) => $q->orderBy('roles.name'),
+                'companyRole:id,name,description',
             ])
             ->where('is_active', true)
             ->get()
@@ -42,6 +40,8 @@ class ProjectTeamController extends Controller
                 'email' => $m->user?->email,
                 'mobile' => $m->user?->mobile,
                 'project_role' => $m->project_role->value,
+                'company_role_id' => $m->company_role_id,
+                'company_role_name' => $m->companyRole?->name ?? $m->project_role->label(),
                 'company_roles' => $m->user?->roles->pluck('name')->filter()->values()->all() ?? [],
                 'is_manager' => (int) $project->project_manager_id === (int) $m->user_id,
             ]);
@@ -51,7 +51,12 @@ class ProjectTeamController extends Controller
         return Inertia::render('Projects/Team', [
             'project' => ProjectHeader::for($project),
             'members' => $members->all(),
-            'roles' => ProjectRole::options(),
+            'roles' => Role::query()->forCurrentCompany()->orderBy('name')->get(['id', 'name', 'description'])
+                ->map(fn (Role $r) => [
+                    'value' => $r->id,
+                    'label' => $r->name,
+                    'description' => $r->description,
+                ])->all(),
             'candidates' => $canManage
                 ? array_values(array_filter(
                     $this->directory->memberOptions(),
@@ -65,14 +70,16 @@ class ProjectTeamController extends Controller
     public function store(ProjectMemberRequest $request, Project $project): RedirectResponse
     {
         $validated = $request->validated();
-        $this->projects->assignMember($project, (int) $validated['user_id'], ProjectRole::from($validated['project_role']));
+        $role = Role::query()->forCurrentCompany()->findOrFail((int) $validated['company_role_id']);
+        $this->projects->assignMember($project, (int) $validated['user_id'], $role);
 
         return back()->with('success', 'Team member added.');
     }
 
     public function update(ProjectMemberRequest $request, Project $project, ProjectUser $member): RedirectResponse
     {
-        $this->projects->assignMember($project, (int) $member->user_id, ProjectRole::from($request->validated('project_role')));
+        $role = Role::query()->forCurrentCompany()->findOrFail((int) $request->validated('company_role_id'));
+        $this->projects->assignMember($project, (int) $member->user_id, $role);
 
         return back()->with('success', 'Role updated.');
     }
