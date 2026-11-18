@@ -19,10 +19,13 @@ const props = defineProps({
     sites: { type: Array, required: true },
     tasks: { type: Array, required: true },
     priorities: { type: Array, required: true },
+    sourceTypes: { type: Array, default: () => [] },
+    boqs: { type: Array, default: () => [] },
+    drawingRevisions: { type: Array, default: () => [] },
     today: { type: String, required: true },
 });
 
-const editing = computed(() => !!props.materialRequest);
+const editing = computed(() => !!props.materialRequest?.id);
 let tempId = 0;
 const blankLine = () => ({ _key: `n${++tempId}`, id: null, material_id: null, unit_id: null, quantity: null, task_id: null, remarks: '' });
 
@@ -31,9 +34,14 @@ const form = useForm({
     request_date: props.materialRequest?.request_date ?? props.today,
     required_date: props.materialRequest?.required_date ?? null,
     priority: props.materialRequest?.priority ?? 'medium',
+    source_type: props.materialRequest?.source_type ?? 'general',
+    boq_id: props.materialRequest?.boq_id ?? null,
+    boq_item_id: props.materialRequest?.boq_item_id ?? null,
+    drawing_revision_id: props.materialRequest?.drawing_revision_id ?? null,
+    source_reason: props.materialRequest?.source_reason ?? '',
     remarks: props.materialRequest?.remarks ?? '',
     items: props.materialRequest?.items?.length
-        ? props.materialRequest.items.map((i) => ({ _key: `i${i.id}`, ...i, remarks: i.remarks ?? '' }))
+        ? props.materialRequest.items.map((i) => ({ _key: `i${i.id ?? ++tempId}`, ...i, remarks: i.remarks ?? '' }))
         : [blankLine()],
 });
 
@@ -72,6 +80,34 @@ function submit() {
                     <FormInput v-model="form.request_date" type="date" label="Request date" required :error="form.errors.request_date" />
                     <FormInput v-model="form.required_date" type="date" label="Required by" :min="form.request_date" :error="form.errors.required_date" />
                     <FormSelect v-model="form.priority" label="Priority" required :options="priorities" :error="form.errors.priority" />
+                    <FormSelect v-model="form.source_type" label="Source" required :options="sourceTypes" :error="form.errors.source_type" />
+                    <FormSelect
+                        v-if="form.source_type === 'boq'"
+                        v-model="form.boq_id"
+                        label="BOQ"
+                        required
+                        :options="boqs"
+                        :error="form.errors.boq_id"
+                        class="sm:col-span-2"
+                    />
+                    <FormSelect
+                        v-if="form.source_type === 'drawing'"
+                        v-model="form.drawing_revision_id"
+                        label="Drawing revision"
+                        required
+                        :options="drawingRevisions"
+                        :error="form.errors.drawing_revision_id"
+                        class="sm:col-span-2"
+                    />
+                    <FormInput
+                        v-if="form.source_type === 'general'"
+                        v-model="form.source_reason"
+                        label="Reason / justification"
+                        required
+                        maxlength="500"
+                        class="sm:col-span-2 lg:col-span-4"
+                        :error="form.errors.source_reason"
+                    />
                     <FormInput v-model="form.remarks" label="Remarks" multiline :rows="2" class="sm:col-span-2 lg:col-span-4" :error="form.errors.remarks" />
                 </div>
             </AppCard>

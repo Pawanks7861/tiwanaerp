@@ -3,6 +3,7 @@
 namespace App\Support\Pdf;
 
 use App\Models\Core\Company;
+use App\Support\Cache\CompanySettingsBag;
 
 /**
  * Company-level PDF presentation settings (CompanySetting keys). Presentation only.
@@ -30,7 +31,7 @@ final class DocumentPdfSettings
             'former_name' => self::string($company, self::FORMER_NAME),
             'cin' => self::string($company, self::CIN),
             'computer_generated' => filter_var(
-                $company->setting(self::COMPUTER_GENERATED) ?? true,
+                self::value($company, self::COMPUTER_GENERATED) ?? true,
                 FILTER_VALIDATE_BOOLEAN
             ),
         ];
@@ -38,11 +39,16 @@ final class DocumentPdfSettings
 
     private static function string(Company $company, string $key): ?string
     {
-        $value = $company->setting($key);
+        $value = self::value($company, $key);
         if ($value === null || $value === '') {
             return null;
         }
 
         return is_string($value) ? trim($value) : (string) $value;
+    }
+
+    private static function value(Company $company, string $key): mixed
+    {
+        return app(CompanySettingsBag::class)->get($company, $key);
     }
 }

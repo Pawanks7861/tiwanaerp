@@ -21,6 +21,7 @@ defineProps({
 const columns = [
     { key: 'request_number', label: 'Request' },
     { key: 'status', label: 'Status' },
+    { key: 'source_label', label: 'Source', mobile: false },
     { key: 'site', label: 'Site', mobile: false },
     { key: 'required_date', label: 'Required by' },
     { key: 'priority', label: 'Priority' },
@@ -60,6 +61,7 @@ const priorityTone = { low: 'text-slate-500', medium: 'text-slate-700', high: 't
                     <div class="text-xs text-slate-500">{{ formatDate(row.request_date) }}<template v-if="row.requested_by"> · {{ row.requested_by }}</template></div>
                 </template>
                 <template #cell-status="{ row }"><StatusBadge :status="row.status" :label="row.status_label" /></template>
+                <template #cell-source_label="{ value }"><span class="text-xs text-slate-600">{{ value || 'General' }}</span></template>
                 <template #cell-site="{ value }">{{ value ?? '—' }}</template>
                 <template #cell-required_date="{ value }">{{ formatDate(value) }}</template>
                 <template #cell-priority="{ row }"><span class="text-xs" :class="priorityTone[row.priority]">{{ row.priority_label }}</span></template>

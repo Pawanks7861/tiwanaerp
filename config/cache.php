@@ -1,7 +1,5 @@
 <?php
 
-use Illuminate\Support\Str;
-
 return [
 
     /*
@@ -99,9 +97,10 @@ return [
 
         'failover' => [
             'driver' => 'failover',
+            // Prefer Redis; fall back to database cache when Redis is unreachable.
             'stores' => [
+                'redis',
                 'database',
-                'array',
             ],
         ],
 
@@ -118,7 +117,7 @@ return [
     |
     */
 
-    'prefix' => env('CACHE_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-cache-'),
+    'prefix' => env('CACHE_PREFIX', 'tiwanaerp:'),
 
     /*
     |--------------------------------------------------------------------------

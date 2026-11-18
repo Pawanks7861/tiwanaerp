@@ -47,6 +47,8 @@ const props = defineProps({
     source_imports: { type: Array, default: () => [] },
     import_history: { type: Array, default: () => [] },
     budget_sync: { type: Object, default: null },
+    concrete_mix_profiles: { type: Array, default: () => [] },
+    cost_heads: { type: Array, default: () => [] },
 });
 
 const COST_FIELDS = ['material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent'];
@@ -247,6 +249,9 @@ function toRow(item) {
         client_rate: item.client_rate ?? null,
         labour_rate: item.labour_rate ?? null,
         rate_analysis_id: item.rate_analysis_id ?? null,
+        concrete_mix_profile_id: item.concrete_mix_profile_id ?? null,
+        concrete_mix_profile_name: item.concrete_mix_profile_name ?? null,
+        project_cost_head_id: item.project_cost_head_id ?? null,
         simple_materials_initialized: !!item.simple_materials_initialized,
         simple_materials_dirty: false,
         simple_materials: costs.value ? mapSimpleMaterials(item) : [],
@@ -321,7 +326,11 @@ watch(() => JSON.stringify(props.items), () => {
 }, { immediate: true });
 
 const dirty = computed(() => deletedIds.value.length > 0 || serialise() !== baseline.value);
-const calc = computed(() => Object.fromEntries(rows.value.map((r) => [r._key, boqLine(r)])));
+const calc = computed(() => Object.fromEntries(rows.value.map((r) => [
+    r._key,
+    // Simplified/Normal: Material Rate never inherits Labour Rate via cost+margin selling fallback.
+    boqLine(r, { simplifiedCommercial: !advanced.value && !detailedCosts.value }),
+])));
 const totals = computed(() => ({
     cost: sum(rows.value.map((r) => calc.value[r._key].cost_amount)),
     client: sum(rows.value.map((r) => calc.value[r._key].client_amount)),
@@ -423,6 +432,8 @@ function save() {
             if (advanced.value) {
                 // Advanced: commercial columns only — never overwrite workbook cost snapshots from this grid.
                 delete data.rate_analysis_id;
+                delete data.concrete_mix_profile_id;
+                delete data.concrete_mix_profile_name;
                 COST_FIELDS.forEach((f) => {
                     delete data[f];
                 });
@@ -681,19 +692,20 @@ const lockedReason = computed(() => {
     }[props.boq.status] ?? null;
 });
 const showSimpleMeasurements = computed(() => !advanced.value);
-/** Base columns + Nos/L/W/H when simplified + GST + legacy Labour Rate when simplified costs visible. */
+/** Base columns + Nos/L/W/H when simplified + Labour Rate when costs visible. GST removed from BOQ. */
 const colCount = computed(() => {
-    let n = 8; // # Code Item Unit Qty Rate Amount Actions
+    let n = 9; // # Code Item Unit WBS Qty Rate Amount Actions
     if (showSimpleMeasurements.value) {
         n += 4; // Nos Length Width Height
-        n += 1; // GST
     }
     if (showLegacyLabourRateColumn.value) {
-        n += 1;
+        n += 1; // Labour Rate (Simplified / Normal only)
     }
 
     return n;
 });
+const wbsLabel = (id) => props.cost_heads.find((h) => h.value === id)?.label ?? '—';
+const wbsTitle = (id) => props.cost_heads.find((h) => h.value === id)?.description ?? 'Unallocated';
 
 function unitSymbol(unitId) {
     return props.units.find((u) => u.value === unitId)?.label?.split('—')[0]?.trim()
@@ -1153,6 +1165,7 @@ function heightDepthLabel(row) {
                                 <th class="px-2 py-2 text-left">Code</th>
                                 <th class="min-w-[16rem] px-2 py-2 text-left">Item</th>
                                 <th class="px-2 py-2 text-left">Unit</th>
+                                <th class="px-2 py-2 text-left" title="Project Cost Head / WBS">WBS</th>
                                 <template v-if="showSimpleMeasurements">
                                     <th class="px-2 py-2 text-right">Nos</th>
                                     <th class="px-2 py-2 text-right">Length</th>
@@ -1169,9 +1182,12 @@ function heightDepthLabel(row) {
                                     <th class="px-2 py-2 text-right">Cost amt</th>
                                     <th class="px-2 py-2 text-right">Margin %</th>
                                 </template>
-                                <th class="px-2 py-2 text-right">Rate</th>
-                                <th v-if="showLegacyLabourRateColumn" class="px-2 py-2 text-right whitespace-nowrap">Labour Rate</th>
-                                <th v-if="showSimpleMeasurements" class="px-2 py-2 text-right">GST</th>
+                                <th class="px-2 py-2 text-right whitespace-nowrap">Material Rate</th>
+                                <th
+                                    v-if="showLegacyLabourRateColumn"
+                                    class="px-2 py-2 text-right whitespace-nowrap"
+                                    title="Internal labour rate per BOQ unit. It does not change the Material Rate."
+                                >Labour Rate</th>
                                 <th class="px-2 py-2 text-right">Amount</th>
                                 <th class="px-2 py-2"><span class="sr-only">Actions</span></th>
                             </tr>
@@ -1208,6 +1224,12 @@ function heightDepthLabel(row) {
                                                     <option v-for="u in units" :key="u.value" :value="u.value">{{ u.label }}</option>
                                                 </select>
                                             </td>
+                                            <td class="px-1 py-1">
+                                                <select v-model="row.project_cost_head_id" class="w-24 rounded py-1 pr-6 pl-1.5 text-xs border-slate-200" :title="wbsTitle(row.project_cost_head_id)">
+                                                    <option :value="null">—</option>
+                                                    <option v-for="h in cost_heads" :key="h.value" :value="h.value" :title="h.description">{{ h.label }}</option>
+                                                </select>
+                                            </td>
                                             <template v-if="showSimpleMeasurements">
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.measurement_nos" :error="!!cellError(row, 'measurement_nos')" @update:model-value="applyMeasurementPreview(row)" /></td>
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.measurement_length" :error="!!cellError(row, 'measurement_length')" @update:model-value="applyMeasurementPreview(row)" /></td>
@@ -1231,8 +1253,16 @@ function heightDepthLabel(row) {
                                                 <span v-if="materialAutoActive(row)" class="block px-1.5 py-1 text-right text-xs tabular text-slate-800" title="Auto-calculated from materials">{{ formatMoney(calc[row._key].client_rate) }}</span>
                                                 <CellDecimal v-else v-model="row.client_rate" :placeholder="detailedCosts ? calc[row._key].selling_rate : null" :error="!!cellError(row, 'client_rate')" />
                                             </td>
-                                            <td v-if="showLegacyLabourRateColumn" class="px-2 py-1.5 text-right tabular text-slate-700" title="Labour rate / BOQ unit (edit in item details)">{{ formatMoney(row.labour_rate || 0) }}</td>
-                                            <td v-if="showSimpleMeasurements" class="px-1 py-1"><CellDecimal v-model="row.gst_rate" :error="!!cellError(row, 'gst_rate')" /></td>
+                                            <td
+                                                v-if="showLegacyLabourRateColumn"
+                                                class="px-1 py-1"
+                                                title="Internal labour rate per BOQ unit. It does not change the Material Rate."
+                                            >
+                                                <CellDecimal
+                                                    v-model="row.labour_rate"
+                                                    :error="!!cellError(row, 'labour_rate')"
+                                                />
+                                            </td>
                                         </template>
                                         <template v-else>
                                             <td class="px-2 py-1.5 font-mono text-slate-600">{{ row.item_code || '—' }}</td>
@@ -1241,6 +1271,7 @@ function heightDepthLabel(row) {
                                                 <div v-if="row.description" class="text-[11px] text-slate-500">{{ row.description }}</div>
                                             </td>
                                             <td class="px-2 py-1.5">{{ unitLabel(row.unit_id) }}</td>
+                                            <td class="px-2 py-1.5 font-mono text-slate-600" :title="wbsTitle(row.project_cost_head_id)">{{ wbsLabel(row.project_cost_head_id) }}</td>
                                             <template v-if="showSimpleMeasurements">
                                                 <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_nos != null ? formatQty(row.measurement_nos) : '—' }}</td>
                                                 <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_length != null ? formatQty(row.measurement_length) : '—' }}</td>
@@ -1258,8 +1289,11 @@ function heightDepthLabel(row) {
                                                 <td class="px-2 py-1.5 text-right tabular">{{ formatPercent(row.margin_percent) }}</td>
                                             </template>
                                             <td class="px-2 py-1.5 text-right tabular">{{ formatRate(calc[row._key].client_rate) }}</td>
-                                            <td v-if="showLegacyLabourRateColumn" class="px-2 py-1.5 text-right tabular text-slate-700">{{ formatMoney(row.labour_rate || 0) }}</td>
-                                            <td v-if="showSimpleMeasurements" class="px-2 py-1.5 text-right tabular">{{ row.gst_rate != null ? formatPercent(row.gst_rate) : '—' }}</td>
+                                            <td
+                                                v-if="showLegacyLabourRateColumn"
+                                                class="px-2 py-1.5 text-right tabular text-slate-700"
+                                                title="Internal labour rate per BOQ unit. It does not change the Material Rate."
+                                            >{{ formatMoney(row.labour_rate || 0) }}</td>
                                         </template>
                                         <td class="px-2 py-1.5 text-right font-medium text-slate-900 tabular">{{ formatMoney(calc[row._key].client_amount) }}</td>
                                         <td class="px-1 py-1 text-right whitespace-nowrap">
@@ -1409,12 +1443,19 @@ function heightDepthLabel(row) {
                         <DecimalInput v-model="editingRow.measurement_length" label="Length" :decimals="4" :error="cellError(editingRow, 'measurement_length')" @update:model-value="applyMeasurementPreview(editingRow)" />
                         <DecimalInput v-model="editingRow.measurement_width" label="Width" :decimals="4" :error="cellError(editingRow, 'measurement_width')" @update:model-value="applyMeasurementPreview(editingRow)" />
                         <DecimalInput v-model="editingRow.measurement_height" :label="heightDepthLabel(editingRow)" :decimals="4" :error="cellError(editingRow, 'measurement_height')" @update:model-value="applyMeasurementPreview(editingRow)" />
-                        <DecimalInput v-model="editingRow.gst_rate" label="GST %" :decimals="4" :error="cellError(editingRow, 'gst_rate')" />
                     </div>
                     <div v-else-if="showSimpleMeasurements" class="grid grid-cols-2 gap-3">
                         <DecimalInput v-model="editingRow.measurement_nos" label="Nos (optional)" :decimals="4" :error="cellError(editingRow, 'measurement_nos')" />
-                        <DecimalInput v-model="editingRow.gst_rate" label="GST %" :decimals="4" :error="cellError(editingRow, 'gst_rate')" />
                     </div>
+                    <FormSelect
+                        v-if="!advanced && concrete_mix_profiles.length"
+                        v-model="editingRow.concrete_mix_profile_id"
+                        label="Material factor profile"
+                        placeholder="— None —"
+                        :options="concrete_mix_profiles"
+                        :error="cellError(editingRow, 'concrete_mix_profile_id')"
+                        help="Optional PCC/RCC mix factors (e.g. PCC — M-10). Snapshot is stored on the BOQ line."
+                    />
                     <template v-if="detailedCosts">
                         <SearchSelect
                             v-if="analyses.length"
@@ -1432,7 +1473,7 @@ function heightDepthLabel(row) {
                             <FormInput v-model="editingRow.margin_percent" label="Margin %" inputmode="decimal" :error="cellError(editingRow, 'margin_percent')" />
                             <DecimalInput
                                 v-model="editingRow.client_rate"
-                                label="Rate"
+                                label="Material Rate"
                                 :decimals="4"
                                 prefix="₹"
                                 :help="`Leave empty to use cost + margin (${formatRate(calc[editingRow._key].selling_rate)})`"
@@ -1441,11 +1482,11 @@ function heightDepthLabel(row) {
                         </div>
                     </template>
                     <div v-else-if="materialAutoActive(editingRow)" class="rounded-lg border border-line bg-slate-50 px-3 py-2">
-                        <p class="text-xs font-medium text-slate-500">Rate</p>
+                        <p class="text-xs font-medium text-slate-500">Material Rate</p>
                         <p class="mt-0.5 text-base font-semibold tabular text-slate-900">{{ formatMoney(materialTotals(editingRow).perUnit) }}</p>
-                        <p class="mt-0.5 text-xs text-slate-500">Rate is calculated automatically from material cost.</p>
+                        <p class="mt-0.5 text-xs text-slate-500">Material Rate is calculated automatically from material cost.</p>
                     </div>
-                    <DecimalInput v-else v-model="editingRow.client_rate" label="Rate" :decimals="4" prefix="₹" :error="cellError(editingRow, 'client_rate')" />
+                    <DecimalInput v-else v-model="editingRow.client_rate" label="Material Rate" :decimals="4" prefix="₹" :error="cellError(editingRow, 'client_rate')" />
                 </template>
 
                 <dl class="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-slate-50 p-3 text-sm">
@@ -1459,7 +1500,7 @@ function heightDepthLabel(row) {
                         <dt class="text-slate-500">Cost amount</dt><dd class="text-right tabular">{{ formatMoney(calc[editingRow._key].cost_amount) }}</dd>
                         <dt class="text-slate-500">Selling rate</dt><dd class="text-right tabular">{{ formatRate(calc[editingRow._key].selling_rate) }}</dd>
                     </template>
-                    <dt class="text-slate-500">Rate</dt>
+                    <dt class="text-slate-500">Material Rate</dt>
                     <dd class="text-right tabular">
                         {{ formatMoney(calc[editingRow._key].client_rate) }}
                         <span v-if="materialAutoActive(editingRow)" class="mt-0.5 block text-[11px] font-normal text-slate-500">Auto-calculated from materials</span>
@@ -1509,7 +1550,7 @@ function heightDepthLabel(row) {
                                     v-model="mat.rate"
                                     class="rounded border-slate-200 px-2 py-1.5 text-sm tabular"
                                     :disabled="!editable"
-                                    placeholder="Rate"
+                                    placeholder="Material Rate"
                                     inputmode="decimal"
                                     @input="markMaterialsDirty(editingRow)"
                                 />
@@ -1587,6 +1628,7 @@ function heightDepthLabel(row) {
                             :label="`Labour Rate / ${unitLabel(editingRow.unit_id) || 'unit'}`"
                             :decimals="4"
                             prefix="₹"
+                            help="Internal labour rate per BOQ unit. It does not change the Material Rate."
                             :error="cellError(editingRow, 'labour_rate')"
                         />
                         <div v-else>

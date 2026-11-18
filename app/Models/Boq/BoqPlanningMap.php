@@ -18,19 +18,6 @@ class BoqPlanningMap extends Model
 
     protected $guarded = ['*'];
 
-    protected static function booted(): void
-    {
-        $guard = function (self $map) {
-            $boq = $map->relationLoaded('boq') && $map->boq?->id === $map->boq_id
-                ? $map->boq
-                : Boq::query()->withoutGlobalScopes()->find($map->boq_id);
-            $boq?->assertEditable();
-        };
-
-        static::saving($guard);
-        static::deleting($guard);
-    }
-
     protected function casts(): array
     {
         return [
@@ -43,6 +30,7 @@ class BoqPlanningMap extends Model
             'snapshot_boq_qty' => 'decimal:4',
             'sequence' => 'integer',
             'is_active' => 'boolean',
+            'is_primary' => 'boolean',
             'needs_review' => 'boolean',
         ];
     }

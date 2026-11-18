@@ -2,24 +2,28 @@
 
 namespace App\Http\Controllers\Procurement;
 
+use App\Enums\Boq\BoqStatus;
+use App\Enums\Documents\DrawingRevisionStatus;
+use App\Enums\Procurement\MaterialRequestSourceType;
 use App\Enums\Procurement\MaterialRequestStatus;
 use App\Enums\Procurement\RequestPriority;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Http\Requests\Procurement\MaterialRequestRequest;
-use App\Models\Boq\BoqItem;
+use App\Models\Boq\Boq;
+use App\Models\Documents\DrawingRevision;
 use App\Models\Procurement\MaterialRequest;
 use App\Models\Procurement\MaterialRequestItem;
-use App\Models\Procurement\PurchaseOrderItem;
 use App\Models\Procurement\PurchaseOrder;
+use App\Models\Procurement\PurchaseOrderItem;
 use App\Models\Procurement\Rfq;
-use App\Support\Procurement\ProcurementSettings;
 use App\Models\Procurement\RfqItem;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Procurement\MaterialRequestService;
 use App\Services\Procurement\ProcurementQuantityService;
 use App\Support\Math\Decimal;
+use App\Support\Procurement\ProcurementSettings;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -213,6 +217,10 @@ class MaterialRequestController extends Controller
      */
     private function header(MaterialRequest $mr): array
     {
+        $source = $mr->source_type instanceof MaterialRequestSourceType
+            ? $mr->source_type
+            : MaterialRequestSourceType::tryFrom((string) $mr->source_type) ?? MaterialRequestSourceType::General;
+
         return [
             'id' => $mr->id,
             'request_number' => $mr->request_number,
@@ -222,6 +230,13 @@ class MaterialRequestController extends Controller
             'priority_label' => $mr->priority->label(),
             'status' => $mr->status->value,
             'status_label' => $mr->status->label(),
+            'source_type' => $source->value,
+            'source_type_label' => $source->label(),
+            'boq_id' => $mr->boq_id,
+            'boq_item_id' => $mr->boq_item_id,
+            'drawing_revision_id' => $mr->drawing_revision_id,
+            'source_reason' => $mr->source_reason,
+            'source_label' => $mr->source_label_snapshot ?: $source->label(),
             'site' => $mr->relationLoaded('site') ? $mr->site?->name : null,
             'requested_by' => $mr->relationLoaded('requester') ? $mr->requester?->name : null,
         ];
@@ -293,12 +308,35 @@ class MaterialRequestController extends Controller
      */
     private function formOptions(Project $project): array
     {
+        $boqs = Boq::query()
+            ->where('project_id', $project->id)
+            ->where('status', BoqStatus::Approved)
+            ->where('is_current', true)
+            ->orderByDesc('id')
+            ->get(['id', 'boq_number', 'version', 'title']);
+
+        $drawings = DrawingRevision::query()
+            ->where('status', DrawingRevisionStatus::Approved)
+            ->whereHas('drawing', fn ($q) => $q->where('project_id', $project->id))
+            ->with('drawing:id,drawing_number,title')
+            ->orderByDesc('id')
+            ->get();
+
         return [
             'materials' => ProcurementPresenter::materialOptions(),
             'units' => ProcurementPresenter::unitOptions(),
             'sites' => ProcurementPresenter::siteOptions($project),
             'tasks' => ProcurementPresenter::taskOptions($project),
             'priorities' => RequestPriority::options(),
+            'sourceTypes' => MaterialRequestSourceType::options(),
+            'boqs' => $boqs->map(fn (Boq $b) => [
+                'value' => $b->id,
+                'label' => $b->boq_number.' / R'.$b->version.($b->title ? ' — '.$b->title : ''),
+            ])->all(),
+            'drawingRevisions' => $drawings->map(fn (DrawingRevision $r) => [
+                'value' => $r->id,
+                'label' => ($r->drawing?->drawing_number ?? 'Drawing').' / '.($r->revision_code ?? $r->id),
+            ])->all(),
             'today' => now()->toDateString(),
         ];
     }

@@ -12,6 +12,8 @@ use App\Queries\Reports\QualityCrmQuery;
 use App\Services\Approval\ApprovalService;
 use App\Services\Boq\ProjectMaterialControlService;
 use App\Services\Reports\DashboardService;
+use App\Support\Cache\ErpCache;
+use App\Support\Cache\ErpCacheKey;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -25,6 +27,7 @@ class ManagementDashboardService
         private readonly ProcurementQuery $procurement,
         private readonly QualityCrmQuery $quality,
         private readonly ApprovalService $approvals,
+        private readonly ErpCache $cache,
     ) {}
 
     /**
@@ -73,46 +76,57 @@ class ManagementDashboardService
      */
     public function admin(Company $company, User $user, array $projectIds, array $period): array
     {
-        $portfolio = $this->costPayload($user, $company, $projectIds, $period['as_of']);
-        $executive = $this->dashboard->executive($company, $user, $projectIds, $period);
         $cid = (int) $company->id;
+        sort($projectIds);
 
-        $pendingBudget = DB::table('project_budgets')
-            ->where('company_id', $cid)
-            ->whereIn('project_id', $projectIds ?: [0])
-            ->where('status', BudgetStatus::Draft->value)
-            ->whereNull('deleted_at')
-            ->count();
+        return $this->cache->remember('dashboard', $cid, ErpCacheKey::dashboardAdmin($cid, $period['fy'], $period['project_id'] ?? null), [
+            'user' => (int) $user->id,
+            'projects' => $projectIds,
+            'period' => $period,
+            'financial' => $user->can('dashboard.view_financials'),
+            'boq_costs' => $user->can('boq.view_costs'),
+            'approvals' => $user->can('approvals.view'),
+        ], function () use ($company, $user, $projectIds, $period, $cid) {
+            $portfolio = $this->costPayload($user, $company, $projectIds, $period['as_of']);
+            $executive = $this->dashboard->executive($company, $user, $projectIds, $period);
 
-        $pendingGrn = DB::table('grns')
-            ->where('company_id', $cid)
-            ->whereIn('project_id', $projectIds ?: [0])
-            ->whereIn('status', ['draft', 'submitted'])
-            ->whereNull('deleted_at')
-            ->count();
+            $pendingBudget = DB::table('project_budgets')
+                ->where('company_id', $cid)
+                ->whereIn('project_id', $projectIds ?: [0])
+                ->where('status', BudgetStatus::Draft->value)
+                ->whereNull('deleted_at')
+                ->count();
 
-        $pendingBills = DB::table('vendor_bills')
-            ->where('company_id', $cid)
-            ->whereIn('project_id', $projectIds ?: [0])
-            ->whereIn('status', ['draft', 'submitted'])
-            ->whereNull('deleted_at')
-            ->count();
+            $pendingGrn = DB::table('grns')
+                ->where('company_id', $cid)
+                ->whereIn('project_id', $projectIds ?: [0])
+                ->whereIn('status', ['draft', 'submitted'])
+                ->whereNull('deleted_at')
+                ->count();
 
-        $ncr = $this->quality->ncrStatusCounts($cid, $projectIds);
+            $pendingBills = DB::table('vendor_bills')
+                ->where('company_id', $cid)
+                ->whereIn('project_id', $projectIds ?: [0])
+                ->whereIn('status', ['draft', 'submitted'])
+                ->whereNull('deleted_at')
+                ->count();
 
-        return [
-            'profile' => 'admin',
-            'cost_control' => $portfolio,
-            'executive' => $executive,
-            'operations' => [
-                'pending_approvals' => $user->can('approvals.view') ? $this->approvals->pendingCountFor($user) : 0,
-                'pending_budget_revisions' => $pendingBudget,
-                'pending_grn' => $pendingGrn,
-                'vendor_bills_pending' => $pendingBills,
-                'open_ncr' => array_sum(array_diff_key($ncr, ['closed' => true])),
-                'pending_mr' => collect($portfolio['projects'] ?? [])->sum('pending_mr'),
-            ],
-        ];
+            $ncr = $this->quality->ncrStatusCounts($cid, $projectIds);
+
+            return [
+                'profile' => 'admin',
+                'cost_control' => $portfolio,
+                'executive' => $executive,
+                'operations' => [
+                    'pending_approvals' => $user->can('approvals.view') ? $this->approvals->pendingCountFor($user) : 0,
+                    'pending_budget_revisions' => $pendingBudget,
+                    'pending_grn' => $pendingGrn,
+                    'vendor_bills_pending' => $pendingBills,
+                    'open_ncr' => array_sum(array_diff_key($ncr, ['closed' => true])),
+                    'pending_mr' => collect($portfolio['projects'] ?? [])->sum('pending_mr'),
+                ],
+            ];
+        }, lock: true, flexible: true);
     }
 
     /**
@@ -122,36 +136,46 @@ class ManagementDashboardService
      */
     public function md(Company $company, User $user, array $projectIds, array $period): array
     {
-        $portfolio = $this->costPayload($user, $company, $projectIds, $period['as_of']);
         $cid = (int) $company->id;
+        sort($projectIds);
 
-        $budgetChanges = [
-            'pending_revisions' => DB::table('project_budgets')
-                ->where('company_id', $cid)->whereIn('project_id', $projectIds ?: [0])
-                ->where('status', BudgetStatus::Draft->value)->whereNull('deleted_at')->count(),
-            'approved_boq_variations' => DB::table('boq_revision_change_orders')
-                ->where('company_id', $cid)->whereIn('project_id', $projectIds ?: [0])
-                ->where('status', RevisionChangeOrderStatus::Approved->value)->whereNull('deleted_at')->count(),
-            'pending_boq_variations' => DB::table('boq_revision_change_orders')
-                ->where('company_id', $cid)->whereIn('project_id', $projectIds ?: [0])
-                ->whereIn('status', [RevisionChangeOrderStatus::Draft->value, RevisionChangeOrderStatus::UnderReview->value])
-                ->whereNull('deleted_at')->count(),
-        ];
+        return $this->cache->remember('dashboard', $cid, ErpCacheKey::dashboardMd($cid, $period['fy'], $period['project_id'] ?? null), [
+            'user' => (int) $user->id,
+            'projects' => $projectIds,
+            'period' => $period,
+            'financial' => $user->can('dashboard.view_financials'),
+            'boq_costs' => $user->can('boq.view_costs'),
+        ], function () use ($company, $user, $projectIds, $period, $cid) {
+            $portfolio = $this->costPayload($user, $company, $projectIds, $period['as_of']);
 
-        $cashFlow = null;
-        if (count($projectIds) === 1) {
-            $project = Project::query()->find($projectIds[0]);
-            $cashFlow = $project ? $this->costControl->cashFlow($project) : null;
-        }
+            $budgetChanges = [
+                'pending_revisions' => DB::table('project_budgets')
+                    ->where('company_id', $cid)->whereIn('project_id', $projectIds ?: [0])
+                    ->where('status', BudgetStatus::Draft->value)->whereNull('deleted_at')->count(),
+                'approved_boq_variations' => DB::table('boq_revision_change_orders')
+                    ->where('company_id', $cid)->whereIn('project_id', $projectIds ?: [0])
+                    ->where('status', RevisionChangeOrderStatus::Approved->value)->whereNull('deleted_at')->count(),
+                'pending_boq_variations' => DB::table('boq_revision_change_orders')
+                    ->where('company_id', $cid)->whereIn('project_id', $projectIds ?: [0])
+                    ->whereIn('status', [RevisionChangeOrderStatus::Draft->value, RevisionChangeOrderStatus::UnderReview->value])
+                    ->whereNull('deleted_at')->count(),
+            ];
 
-        return [
-            'profile' => 'md',
-            'cost_control' => $portfolio,
-            'change_control' => $budgetChanges,
-            'vendors' => array_slice($portfolio['vendors'] ?? [], 0, 10),
-            'cash_flow' => $cashFlow,
-            'forecast' => ['fac' => 'DEFERRED', 'etc' => 'DEFERRED', 'eac' => 'DEFERRED', 'vac' => 'DEFERRED'],
-        ];
+            $cashFlow = null;
+            if (count($projectIds) === 1) {
+                $project = Project::query()->find($projectIds[0]);
+                $cashFlow = $project ? $this->costControl->cashFlow($project) : null;
+            }
+
+            return [
+                'profile' => 'md',
+                'cost_control' => $portfolio,
+                'change_control' => $budgetChanges,
+                'vendors' => array_slice($portfolio['vendors'] ?? [], 0, 10),
+                'cash_flow' => $cashFlow,
+                'forecast' => ['fac' => 'DEFERRED', 'etc' => 'DEFERRED', 'eac' => 'DEFERRED', 'vac' => 'DEFERRED'],
+            ];
+        }, lock: true, flexible: true);
     }
 
     /**
@@ -161,45 +185,58 @@ class ManagementDashboardService
      */
     public function director(Company $company, User $user, array $projectIds, array $period): array
     {
+        $cid = (int) $company->id;
+        sort($projectIds);
         $selectedId = $period['project_id'] ?? (count($projectIds) === 1 ? $projectIds[0] : null);
-        $scopeIds = $selectedId ? [$selectedId] : $projectIds;
-        $portfolio = $this->costPayload($user, $company, $scopeIds, $period['as_of']);
 
-        $projectDetail = null;
-        if ($selectedId) {
-            $project = Project::query()->find($selectedId);
-            if ($project) {
-                $summary = $user->can('dashboard.view_financials') || $user->can('boq.view_costs')
-                    ? $this->costControl->projectSummary($project, $period['as_of'])
-                    : null;
-                $material = null;
-                if ($user->can('boq.view_reconciliation') || $user->can('reports.view')) {
-                    try {
-                        $material = app(ProjectMaterialControlService::class)->report($project, ['per_page' => 5]);
-                    } catch (\Throwable) {
-                        $material = null;
+        return $this->cache->remember('dashboard', $cid, ErpCacheKey::dashboardDirector($cid, $selectedId, $period['fy']), [
+            'user' => (int) $user->id,
+            'projects' => $projectIds,
+            'selected' => $selectedId,
+            'period' => $period,
+            'financial' => $user->can('dashboard.view_financials'),
+            'boq_costs' => $user->can('boq.view_costs'),
+            'material' => $user->can('boq.view_reconciliation') || $user->can('reports.view'),
+        ], function () use ($company, $user, $projectIds, $period, $selectedId) {
+            $scopeIds = $selectedId ? [$selectedId] : $projectIds;
+            $portfolio = $this->costPayload($user, $company, $scopeIds, $period['as_of']);
+
+            $projectDetail = null;
+            if ($selectedId) {
+                $project = Project::query()->find($selectedId);
+                if ($project) {
+                    $summary = $user->can('dashboard.view_financials') || $user->can('boq.view_costs')
+                        ? $this->costControl->projectSummary($project, $period['as_of'])
+                        : null;
+                    $material = null;
+                    if ($user->can('boq.view_reconciliation') || $user->can('reports.view')) {
+                        try {
+                            $material = app(ProjectMaterialControlService::class)->report($project, ['per_page' => 5]);
+                        } catch (\Throwable) {
+                            $material = null;
+                        }
                     }
+                    $projectDetail = [
+                        'project' => ['id' => $project->id, 'code' => $project->code, 'name' => $project->name],
+                        'cost_control' => $summary,
+                        'cash_flow' => $summary ? $this->costControl->cashFlow($project) : null,
+                        'material_control' => $material,
+                        'procurement' => [
+                            'open_po_value' => $this->procurement->purchaseValue($company->id, [$project->id], $period['from'], $period['to']),
+                        ],
+                        'ncr' => $this->quality->ncrStatusCounts((int) $company->id, [$project->id]),
+                    ];
                 }
-                $projectDetail = [
-                    'project' => ['id' => $project->id, 'code' => $project->code, 'name' => $project->name],
-                    'cost_control' => $summary,
-                    'cash_flow' => $summary ? $this->costControl->cashFlow($project) : null,
-                    'material_control' => $material,
-                    'procurement' => [
-                        'open_po_value' => $this->procurement->purchaseValue($company->id, [$project->id], $period['from'], $period['to']),
-                    ],
-                    'ncr' => $this->quality->ncrStatusCounts((int) $company->id, [$project->id]),
-                ];
             }
-        }
 
-        return [
-            'profile' => 'director',
-            'cost_control' => $portfolio,
-            'selected_project_id' => $selectedId,
-            'project_detail' => $projectDetail,
-            'forecast' => ['fac' => 'DEFERRED', 'etc' => 'DEFERRED', 'eac' => 'DEFERRED', 'vac' => 'DEFERRED'],
-        ];
+            return [
+                'profile' => 'director',
+                'cost_control' => $portfolio,
+                'selected_project_id' => $selectedId,
+                'project_detail' => $projectDetail,
+                'forecast' => ['fac' => 'DEFERRED', 'etc' => 'DEFERRED', 'eac' => 'DEFERRED', 'vac' => 'DEFERRED'],
+            ];
+        }, lock: true, flexible: true);
     }
 
     /**

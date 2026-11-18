@@ -11,6 +11,7 @@ use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqRevisionChangeOrder;
 use App\Models\Boq\BoqSection;
+use App\Models\Boq\ConcreteMixProfile;
 use App\Models\Boq\RateAnalysis;
 use App\Models\Documents\Drawing;
 use App\Models\Documents\DrawingRevision;
@@ -24,6 +25,7 @@ use App\Services\Boq\AdvancedBoqTechnicalApprovalValidator;
 use App\Services\Boq\BoqBudgetMaterialSyncService;
 use App\Services\Boq\BoqRevisionService;
 use App\Services\Boq\BoqService;
+use App\Services\Projects\ProjectCostHeadService;
 use App\Support\Boq\AdvancedBoqApprovalStage;
 use App\Support\Boq\BoqCompanySettings;
 use App\Support\Boq\BoqRevisionPairResolver;
@@ -124,6 +126,7 @@ class BoqController extends Controller
         $items = $boq->items()
             ->with(array_values(array_filter([
                 'attachments.uploader:id,name',
+                'projectCostHead:id,code,name',
                 $withCosts ? 'simpleMaterialCosts' : null,
             ])))
             ->orderBy('sort_order')
@@ -157,6 +160,25 @@ class BoqController extends Controller
             'items' => $items->map(fn (BoqItem $i) => BoqPresenter::item($i, $withCosts))->all(),
             'units' => Unit::query()->active()->orderBy('symbol')->get(['id', 'name', 'symbol'])
                 ->map(fn (Unit $u) => ['value' => $u->id, 'label' => $u->symbol, 'name' => $u->name])->all(),
+            'cost_heads' => collect(app(ProjectCostHeadService::class)->options($project->company))
+                ->map(fn (array $h) => [
+                    'value' => $h['id'],
+                    'label' => $h['code'],
+                    'description' => $h['name'],
+                ])->values()->all(),
+            'concrete_mix_profiles' => (! $advanced)
+                ? ConcreteMixProfile::query()
+                    ->where('is_active', true)
+                    ->orderBy('sort_order')
+                    ->orderBy('id')
+                    ->get(['id', 'name', 'concrete_type', 'grade'])
+                    ->map(fn ($p) => [
+                        'value' => $p->id,
+                        'label' => $p->name,
+                        'concrete_type' => $p->concrete_type,
+                        'grade' => $p->grade,
+                    ])->all()
+                : [],
             'analyses' => $analyses,
             'versions' => $this->versionHistory($project, $boq, $withCosts),
             'approval' => $pending ? [

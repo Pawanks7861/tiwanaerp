@@ -12,6 +12,8 @@ use App\Models\Projects\Project;
 use App\Models\Projects\ProjectCashFlowPlan;
 use App\Queries\Reports\CommittedCostQuery;
 use App\Queries\Reports\PayablesQuery;
+use App\Support\Cache\ErpCache;
+use App\Support\Cache\ErpCacheKey;
 use App\Support\Math\Decimal;
 use App\Support\Reports\Num;
 use Illuminate\Support\Collection;
@@ -21,6 +23,8 @@ use Illuminate\Support\Facades\DB;
  * Authoritative Project Cost Control aggregations (WBS / cost heads).
  * Dashboards, API and exports must reuse this service — no parallel Vue formulas.
  * FAC / ETC / EAC / VAC are intentionally deferred.
+ *
+ * Aggregate payloads may be cache-aside cached; MySQL remains the source of truth.
  */
 class ProjectCostControlService
 {
@@ -28,12 +32,32 @@ class ProjectCostControlService
         private readonly ProjectCostHeadService $heads,
         private readonly CommittedCostQuery $committed,
         private readonly PayablesQuery $payables,
+        private readonly ErpCache $cache,
     ) {}
 
     /**
      * @return array<string, mixed>
      */
     public function projectSummary(Project $project, ?string $asOf = null): array
+    {
+        $companyId = (int) $project->company_id;
+        $projectId = (int) $project->id;
+
+        return $this->cache->remember(
+            'project_cost_control',
+            $companyId,
+            ErpCacheKey::projectCostControl($companyId, $projectId, $asOf),
+            ['project' => $projectId, 'as_of' => $asOf],
+            fn () => $this->buildProjectSummary($project, $asOf),
+            lock: true,
+            flexible: true,
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildProjectSummary(Project $project, ?string $asOf = null): array
     {
         $companyId = (int) $project->company_id;
         $projectId = (int) $project->id;
@@ -110,6 +134,27 @@ class ProjectCostControlService
     public function portfolio(int $companyId, array $projectIds, ?string $asOf = null): array
     {
         $projectIds = array_values(array_unique(array_map('intval', $projectIds)));
+        sort($projectIds);
+        $asOfKey = $asOf ?? 'live';
+        $projectHash = hash('sha256', implode(',', $projectIds));
+
+        return $this->cache->remember(
+            'project_cost_control',
+            $companyId,
+            ErpCacheKey::portfolioCostControl($companyId, $asOfKey, $projectHash),
+            ['projects' => $projectIds, 'as_of' => $asOf],
+            fn () => $this->buildPortfolio($companyId, $projectIds, $asOf),
+            lock: true,
+            flexible: true,
+        );
+    }
+
+    /**
+     * @param  list<int>  $projectIds
+     * @return array<string, mixed>
+     */
+    private function buildPortfolio(int $companyId, array $projectIds, ?string $asOf = null): array
+    {
         $projects = DB::table('projects')
             ->where('company_id', $companyId)
             ->whereIn('id', $projectIds ?: [0])

@@ -134,6 +134,9 @@ class PlanningService
                 'duration_days' => $start && $finish ? (int) $start->diffInDays($finish) + 1 : null,
                 'unit_id' => array_key_exists('unit_id', $data) ? ($data['unit_id'] ?? null) : $task->unit_id,
                 'planned_qty' => $plannedQty->toQuantity(),
+                'daily_target_qty' => array_key_exists('daily_target_qty', $data)
+                    ? (filled($data['daily_target_qty'] ?? null) ? Decimal::of((string) $data['daily_target_qty'])->toQuantity() : null)
+                    : $task->daily_target_qty,
                 'hold_quantity' => $holdQty->toQuantity(),
                 'sort_order' => $data['sort_order'] ?? ($task->exists ? $task->sort_order : $this->nextSort($project, $parent)),
             ]);
@@ -212,8 +215,12 @@ class PlanningService
             $milestone ??= new ProjectMilestone;
             $milestone->fill([
                 'name' => $data['name'],
+                'planned_start' => $data['planned_start'] ?? null,
+                'planned_end' => $data['planned_end'] ?? null,
                 'due_date' => $data['due_date'] ?? null,
                 'billing_percent' => $percent->round(Decimal::PERCENT_SCALE)->toString(),
+                'responsible_user_id' => $data['responsible_user_id'] ?? null,
+                'remarks' => $data['remarks'] ?? null,
                 'sort_order' => $data['sort_order'] ?? ($milestone->exists ? $milestone->sort_order : $others->count() + 1),
             ]);
             if (! $milestone->exists) {

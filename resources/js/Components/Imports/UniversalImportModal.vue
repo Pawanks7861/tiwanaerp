@@ -51,7 +51,7 @@ const primaryFields = computed(() => {
     }
     const preferred = [
         'section_name', 'subsection_name', 'item_code', 'name', 'description',
-        'hsn_sac', 'unit', 'quantity', 'client_rate', 'gst_rate', 'amount', 'remarks',
+        'hsn_sac', 'unit', 'quantity', 'client_rate', 'labour_rate', 'amount', 'remarks',
     ];
     const byKey = Object.fromEntries(fields.map((f) => [f.key, f]));
     return preferred.map((key) => byKey[key]).filter(Boolean);
@@ -405,7 +405,6 @@ const sheetOptions = computed(() =>
                                 <th class="px-3 py-2">Unit</th>
                                 <th class="px-3 py-2 text-right">Qty</th>
                                 <th class="px-3 py-2 text-right">Rate</th>
-                                <th class="px-3 py-2 text-right">GST</th>
                                 <th class="px-3 py-2 text-right">Amount</th>
                                 <th class="px-3 py-2">Status</th>
                             </tr>
@@ -419,7 +418,6 @@ const sheetOptions = computed(() =>
                                 <td class="px-3 py-2">{{ row.preview?.unit ?? '—' }}</td>
                                 <td class="px-3 py-2 text-right tabular">{{ row.preview?.quantity ?? '—' }}</td>
                                 <td class="px-3 py-2 text-right tabular">{{ row.preview?.rate ?? '—' }}</td>
-                                <td class="px-3 py-2 text-right tabular">{{ row.preview?.gst ?? '—' }}</td>
                                 <td class="px-3 py-2 text-right tabular">{{ row.preview?.amount ?? '—' }}</td>
                                 <td class="px-3 py-2">
                                     <span class="inline-flex rounded px-1.5 py-0.5 font-medium" :class="statusClass(row.status)">

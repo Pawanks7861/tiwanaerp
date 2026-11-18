@@ -9,8 +9,8 @@ return [
 
     'per_page_options' => [25, 50, 100],
 
-    /* Dashboard KPI cache lifetime (seconds); events also invalidate it. */
-    'dashboard_cache_ttl' => (int) env('DASHBOARD_CACHE_TTL', 300),
+    /* Legacy alias — prefer config/erp_cache.php ttls.dashboard (default 60s). */
+    'dashboard_cache_ttl' => (int) env('DASHBOARD_CACHE_TTL', env('ERP_CACHE_TTL_DASHBOARD', 60)),
 
     /* Private disk / directory for queued export files. */
     'export_disk' => 'local',

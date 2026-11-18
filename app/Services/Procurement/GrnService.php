@@ -211,6 +211,7 @@ class GrnService
             $line = (new GrnItem)->forceFill([
                 'grn_id' => $grn->id,
                 'purchase_order_item_id' => $poItem->id,
+                'project_cost_head_id' => $poItem->project_cost_head_id,
                 'material_id' => $poItem->material_id,
                 'unit_id' => $poItem->unit_id,
                 'ordered_qty' => $poItem->quantity,

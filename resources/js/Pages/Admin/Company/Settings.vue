@@ -20,6 +20,7 @@ const props = defineProps({
     can: { type: Object, required: true },
     branding: { type: Object, default: () => ({ logo_url: null, favicon_url: null, max_kb: 2048 }) },
     cadPreview: { type: Object, default: () => ({ available: false, driver: 'none', configured: 'auto', version: null, last_success_at: null, error: null }) },
+    cacheHealth: { type: Object, default: () => ({ driver: 'database', redis: 'Unavailable', redis_client: null, latency_ms: null, message: null }) },
 });
 
 const c = props.company;
@@ -287,6 +288,28 @@ function removeBrand(kind) {
                 </div>
             </dl>
             <p v-if="cadPreview.error" class="mt-3 text-sm text-slate-600">{{ cadPreview.error }}</p>
+        </AppCard>
+
+        <AppCard class="mt-4" title="Cache / Redis" subtitle="Performance cache only. MySQL remains the source of truth. Credentials are never shown.">
+            <dl class="grid gap-2 text-sm sm:grid-cols-2">
+                <div>
+                    <dt class="text-xs text-slate-500">Cache driver</dt>
+                    <dd>{{ cacheHealth.driver }}</dd>
+                </div>
+                <div>
+                    <dt class="text-xs text-slate-500">Redis</dt>
+                    <dd>{{ cacheHealth.redis }}</dd>
+                </div>
+                <div>
+                    <dt class="text-xs text-slate-500">Redis client</dt>
+                    <dd>{{ cacheHealth.redis_client || '—' }}</dd>
+                </div>
+                <div>
+                    <dt class="text-xs text-slate-500">Latency</dt>
+                    <dd>{{ cacheHealth.latency_ms != null ? `${cacheHealth.latency_ms} ms` : '—' }}</dd>
+                </div>
+            </dl>
+            <p v-if="cacheHealth.message" class="mt-3 text-sm text-slate-600">{{ cacheHealth.message }}</p>
         </AppCard>
     </AppLayout>
 </template>

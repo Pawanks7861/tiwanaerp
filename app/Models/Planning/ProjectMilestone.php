@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * Project milestone. billing_percent is informational until client billing (Phase 4).
  */
-#[Fillable(['name', 'due_date', 'billing_percent', 'sort_order'])]
+#[Fillable(['name', 'planned_start', 'planned_end', 'due_date', 'billing_percent', 'responsible_user_id', 'remarks', 'sort_order'])]
 class ProjectMilestone extends Model
 {
     use Auditable, BelongsToCompany, Blameable;
@@ -24,6 +24,8 @@ class ProjectMilestone extends Model
     {
         return [
             'status' => MilestoneStatus::class,
+            'planned_start' => 'date',
+            'planned_end' => 'date',
             'due_date' => 'date',
             'completed_at' => 'date',
             'billing_percent' => 'decimal:4',

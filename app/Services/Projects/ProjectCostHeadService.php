@@ -4,6 +4,7 @@ namespace App\Services\Projects;
 
 use App\Models\Core\Company;
 use App\Models\Projects\ProjectCostHead;
+use App\Support\Cache\ErpCache;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -20,7 +21,7 @@ class ProjectCostHeadService
         ['code' => 'WBS-04', 'name' => 'Electrical', 'sort_order' => 40],
         ['code' => 'WBS-05', 'name' => 'IT', 'sort_order' => 50],
         ['code' => 'WBS-06', 'name' => 'Others', 'sort_order' => 60],
-        ['code' => 'WBS-99', 'name' => 'Contingency', 'sort_order' => 99],
+        ['code' => 'WBS-99', 'name' => 'Contingency Reserve', 'sort_order' => 99],
     ];
 
     /**
@@ -37,6 +38,12 @@ class ProjectCostHeadService
                     ->first();
 
                 if ($existing !== null) {
+                    // Keep system display names current (e.g. Contingency → Contingency Reserve).
+                    if ($existing->is_system && $existing->name !== $row['name']) {
+                        $existing->forceFill(['name' => $row['name']])->save();
+                        app(ErpCache::class)->bump('masters', (int) $company->id);
+                    }
+
                     continue;
                 }
 
@@ -80,15 +87,25 @@ class ProjectCostHeadService
      */
     public function options(Company $company): array
     {
-        return $this->activeForCompany($company)
-            ->map(fn (ProjectCostHead $h) => [
-                'id' => $h->id,
-                'code' => $h->code,
-                'name' => $h->name,
-                'sort_order' => $h->sort_order,
-                'label' => $h->name,
-            ])
-            ->values()
-            ->all();
+        $companyId = (int) $company->id;
+
+        return app(ErpCache::class)->remember(
+            'masters',
+            $companyId,
+            'cost-heads:options',
+            [],
+            fn () => $this->activeForCompany($company)
+                ->map(fn (ProjectCostHead $h) => [
+                    'id' => $h->id,
+                    'code' => $h->code,
+                    'name' => $h->name,
+                    'sort_order' => $h->sort_order,
+                    'label' => $h->code.' — '.$h->name,
+                ])
+                ->values()
+                ->all(),
+            lock: false,
+            flexible: false,
+        );
     }
 }

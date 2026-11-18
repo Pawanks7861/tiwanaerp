@@ -46,12 +46,13 @@ class PlanningBoqMappingCalculator
 
         $factor = null;
         if ($method === PlanningBoqMappingMethod::ConversionBased) {
-            if (array_key_exists('conversion_factor', $input)
-                && $input['conversion_factor'] !== null
-                && $input['conversion_factor'] !== '') {
-                $factor = Decimal::of($input['conversion_factor'])->round(Decimal::QTY_SCALE);
-                if ($factor->isNegative()) {
-                    throw ValidationException::withMessages(['conversion_factor' => 'Conversion factor cannot be negative.']);
+            if (array_key_exists('conversion_factor', $input)) {
+                // Explicit null/empty = no Nos-derived conversion (BOQ Quantity-only items).
+                if ($input['conversion_factor'] !== null && $input['conversion_factor'] !== '') {
+                    $factor = Decimal::of($input['conversion_factor'])->round(Decimal::QTY_SCALE);
+                    if ($factor->isNegative()) {
+                        throw ValidationException::withMessages(['conversion_factor' => 'Conversion factor cannot be negative.']);
+                    }
                 }
             } elseif ($planQty->isPositive()) {
                 $factor = $boqQty->dividedBy($planQty, Decimal::QTY_SCALE)->round(Decimal::QTY_SCALE);

@@ -178,7 +178,9 @@ class DprPrefillService
                 'planned_end_date' => $task->planned_finish?->toDateString(),
                 'planned_qty' => $total->isPositive() ? $total->toQuantity() : null,
                 'previous_executed_qty' => $previous->toQuantity(),
-                'today_target_qty' => null,
+                'today_target_qty' => $task->daily_target_qty !== null
+                    ? Decimal::of($task->daily_target_qty)->toQuantity()
+                    : null,
                 'executed_qty' => '0',
                 'hold_quantity' => $hold->toQuantity(),
                 'on_hold' => $hold->isPositive(),

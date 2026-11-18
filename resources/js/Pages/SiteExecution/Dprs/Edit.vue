@@ -143,8 +143,9 @@ function save() {
                                     <FormInput v-model="line.shortfall_reason" class="mt-1" maxlength="500" placeholder="Shortfall reason" :error="err('items', i, 'shortfall_reason')" />
                                 </td>
                                 <td class="px-2 py-2 text-right align-top tabular text-slate-600">{{ formatQty(line.previous_executed_qty ?? 0) }}</td>
-                                <td class="px-2 py-2 align-top">
-                                    <DecimalInput v-model="line.today_target_qty" :decimals="4" :suffix="unitSymbol(line.unit_id)" :error="err('items', i, 'today_target_qty')" />
+                                <td class="px-2 py-2 text-right align-top tabular text-slate-700">
+                                    <template v-if="line.today_target_qty != null && line.today_target_qty !== ''">{{ formatQty(line.today_target_qty) }} {{ unitSymbol(line.unit_id) }}</template>
+                                    <span v-else class="text-slate-400">Not planned</span>
                                 </td>
                                 <td class="px-2 py-2 align-top">
                                     <DecimalInput v-model="line.executed_qty" required :decimals="4" :suffix="unitSymbol(line.unit_id)" :error="err('items', i, 'executed_qty')" />

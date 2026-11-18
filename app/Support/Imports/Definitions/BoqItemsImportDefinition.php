@@ -136,9 +136,10 @@ class BoqItemsImportDefinition extends ImportDefinition
             new ImportField('client_rate', 'Rate', false, [
                 'rate', 'unit rate', 'boq rate', 'price', 'basic_rate', 'client_rate',
             ], 'number'),
-            new ImportField('gst_rate', 'GST %', false, [
+            // Historical files may still map GST % — accepted with a warning; BOQ Amount is Qty × Rate only.
+            new ImportField('gst_rate', 'GST % (ignored)', false, [
                 'gst', 'gst %', 'tax', 'tax %', 'gst rate', 'gst_rate',
-            ], 'number'),
+            ], 'number', help: 'Ignored for BOQ. Commercial Amount = Quantity × Rate. PO/invoice GST is unchanged.'),
             new ImportField('amount', 'Amount (reference)', false, [
                 'amount', 'total', 'line amount', 'value',
             ], 'number', help: 'Mapped for validation only. ERP calculates Amount = Quantity × Rate.'),
@@ -146,7 +147,9 @@ class BoqItemsImportDefinition extends ImportDefinition
                 'remarks', 'remark', 'comments',
             ]),
             new ImportField('material_rate', 'Material Rate', false, ['mat_rate'], 'number'),
-            new ImportField('labour_rate', 'Labour Rate', false, [], 'number'),
+            new ImportField('labour_rate', 'Labour Rate', false, [
+                'labour rate', 'labour_rate', 'lab rate', 'labour',
+            ], 'number', help: 'Internal labour rate per BOQ unit. Does not change commercial Amount (Qty × Rate).'),
             new ImportField('equipment_rate', 'Equipment Rate', false, [], 'number'),
             new ImportField('subcontract_rate', 'Subcontract Rate', false, [], 'number'),
             new ImportField('margin_percent', 'Margin Percent', false, ['margin'], 'number'),
@@ -164,7 +167,7 @@ class BoqItemsImportDefinition extends ImportDefinition
             'unit' => 'Cum',
             'quantity' => '10',
             'client_rate' => '4500',
-            'gst_rate' => '18',
+            'labour_rate' => '1200',
         ]];
     }
 
@@ -284,8 +287,8 @@ class BoqItemsImportDefinition extends ImportDefinition
             $warnings[] = 'Missing item code';
         }
 
-        if (($parsed['gst_rate'] ?? null) === null) {
-            $warnings[] = 'GST blank';
+        if (array_key_exists('gst_rate', $mapped) && $mapped['gst_rate'] !== null && $mapped['gst_rate'] !== '') {
+            $warnings[] = 'GST column ignored — BOQ Amount is Qty × Rate (no GST).';
         }
 
         $qty = (float) ($parsed['quantity'] ?? 0);

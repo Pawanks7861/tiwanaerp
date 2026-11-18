@@ -314,6 +314,7 @@ class PurchaseOrderService
         $kept = [];
         $amounts = [];
         foreach (array_values($rows) as $index => $row) {
+            $mrItem = null;
             if (! empty($row['id'])) {
                 $line = $existing->get((int) $row['id'])
                     ?? throw ValidationException::withMessages(["items.{$index}.id" => 'This line does not belong to the purchase order.']);
@@ -370,7 +371,11 @@ class PurchaseOrderService
                 'tax_rate_id' => $tax?->id,
                 'project_cost_head_id' => array_key_exists('project_cost_head_id', $row)
                     ? ($row['project_cost_head_id'] ?: null)
-                    : $line->project_cost_head_id,
+                    : ($line->project_cost_head_id
+                        ?? $mrItem?->project_cost_head_id
+                        ?? ($line->material_request_item_id
+                            ? MaterialRequestItem::query()->whereKey($line->material_request_item_id)->value('project_cost_head_id')
+                            : null)),
                 'sort_order' => $index + 1,
                 ...$calc,
             ]);

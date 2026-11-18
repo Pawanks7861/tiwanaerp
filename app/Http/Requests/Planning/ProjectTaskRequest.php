@@ -45,6 +45,7 @@ class ProjectTaskRequest extends FormRequest
             'milestone_id' => ['nullable', 'integer'],
             // Optional historical reference only — never required for Planning.
             'boq_item_id' => ['nullable', 'integer'],
+            'project_cost_head_id' => ['nullable', 'integer'],
             'wbs_code' => ['nullable', 'string', 'max:20', 'regex:'.PlanningService::WBS_PATTERN],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
@@ -55,6 +56,7 @@ class ProjectTaskRequest extends FormRequest
             'planned_finish' => ['nullable', 'date', 'after_or_equal:planned_start'],
             'unit_id' => ['nullable', ExistsInCompany::active(Unit::class)],
             'planned_qty' => ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
+            'daily_target_qty' => ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
             'hold_quantity' => ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
             'budget_amount' => ['nullable', 'numeric', 'min:0', 'max:9999999999999999', 'decimal:0,2'],
             'sort_order' => ['nullable', 'integer', 'min:0'],

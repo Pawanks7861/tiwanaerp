@@ -3,6 +3,7 @@
 namespace App\Support\Boq;
 
 use App\Models\Boq\BoqItem;
+use App\Services\Boq\SimpleBoqMaterialCostService;
 
 /**
  * Centralized default cost build-up for simplified BOQ items (e.g. PCC Work).
@@ -62,11 +63,23 @@ final class BoqItemDefaultCostResolver
      */
     public function materialDefaultsFor(BoqItem|array|null $item): array
     {
+        if ($item instanceof BoqItem && $item->concrete_mix_profile_snapshot) {
+            $lines = $item->concrete_mix_profile_snapshot['lines'] ?? [];
+            if (is_array($lines) && $lines !== []) {
+                return collect($lines)->map(fn (array $line) => [
+                    'material_name' => (string) ($line['material_name'] ?? ''),
+                    'quantity' => (string) ($line['factor'] ?? '0'),
+                    'unit' => (string) ($line['factor_unit'] ?? 'Cum'),
+                    'rate' => '0.0000',
+                ])->values()->all();
+            }
+        }
+
         if ($this->isPccWork($item)) {
             return $this->pccMaterialDefaults();
         }
 
-        return \App\Services\Boq\SimpleBoqMaterialCostService::genericDefaultRows();
+        return SimpleBoqMaterialCostService::genericDefaultRows();
     }
 
     /**

@@ -7,7 +7,7 @@ use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Audit\AuditLogger;
 use App\Services\Inventory\InventoryReconciler;
-use App\Support\Reports\DashboardCache;
+use App\Support\Cache\ErpCacheInvalidationService;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -37,7 +37,7 @@ class ProjectPurgeService
         private readonly CurrentCompany $tenancy,
         private readonly InventoryReconciler $inventory,
         private readonly AuditLogger $audit,
-        private readonly DashboardCache $dashboards,
+        private readonly ErpCacheInvalidationService $cacheInvalidation,
     ) {}
 
     /**
@@ -145,7 +145,7 @@ class ProjectPurgeService
             ]);
         }
 
-        $this->dashboards->bump((int) $meta['company_id']);
+        $this->cacheInvalidation->companyWide((int) $meta['company_id']);
 
         $fileFailures = $this->deleteFiles($files);
         $reportPath = $this->writeReport($purgeId, $meta, $actor, $snapshot, $files, $fileFailures);

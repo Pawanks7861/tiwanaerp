@@ -81,6 +81,13 @@ class TaskProgressService
             'actual_finish' => $actualFinish,
         ])->save();
 
+        if ($task->parent_id) {
+            $head = ProjectTask::query()->find($task->parent_id);
+            if ($head?->isPlanningHead()) {
+                app(PlanningHeadProgressService::class)->recompute($head);
+            }
+        }
+
         return $task;
     }
 

@@ -24,8 +24,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * hold_quantity is planning-authoritative; balance/completion are derived.
  */
 #[Fillable([
-    'parent_id', 'milestone_id', 'boq_item_id', 'wbs_code', 'name', 'description', 'assigned_to', 'priority',
-    'planned_start', 'planned_finish', 'duration_days', 'unit_id', 'planned_qty', 'hold_quantity', 'budget_amount', 'sort_order',
+    'parent_id', 'milestone_id', 'boq_item_id', 'project_cost_head_id', 'wbs_code', 'name', 'description', 'assigned_to', 'priority',
+    'planned_start', 'planned_finish', 'duration_days', 'unit_id', 'planned_qty', 'daily_target_qty', 'hold_quantity', 'budget_amount', 'sort_order',
 ])]
 class ProjectTask extends Model
 {
@@ -42,6 +42,7 @@ class ProjectTask extends Model
             'actual_finish' => 'date',
             'duration_days' => 'integer',
             'planned_qty' => 'decimal:4',
+            'daily_target_qty' => 'decimal:4',
             'completed_qty' => 'decimal:4',
             'hold_quantity' => 'decimal:4',
             'progress_percent' => 'decimal:4',

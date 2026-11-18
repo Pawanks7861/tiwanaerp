@@ -118,6 +118,7 @@ class ProjectBudgetService
                             }
                             $line = new ProjectBudgetLine([
                                 'cost_head' => $head,
+                                'project_cost_head_id' => $item->project_cost_head_id,
                                 'boq_item_id' => $item->id,
                                 'source_type' => BudgetLineSource::BoqCostHead->value,
                                 'description' => mb_substr(trim(($item->item_code ? $item->item_code.' ' : '').$item->name), 0, 255),

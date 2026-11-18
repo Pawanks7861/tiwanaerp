@@ -13,7 +13,10 @@ use App\Exceptions\ApprovalException;
 use App\Models\Approval\ApprovalRequest;
 use App\Models\Approval\ApprovalWorkflow;
 use App\Models\User;
+use App\Support\Cache\ErpCache;
+use App\Support\Cache\ErpCacheKey;
 use App\Support\Math\Decimal;
+use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +31,7 @@ class ApprovalService
     public function __construct(
         private readonly ApproverResolver $resolver,
         private readonly ApprovalDelegationService $delegations,
+        private readonly ErpCache $cache,
     ) {}
 
     public function submit(Approvable&Model $document, User $submitter): ApprovalRequest
@@ -231,10 +235,24 @@ class ApprovalService
     /**
      * Authoritative pending-approval count for sidebar / dashboard badges.
      * Matches {@see pendingFor()} actionability (delegation, self-approval, current level).
+     * Short-TTL cache-aside by company + user; invalidated on approval/delegation writes.
      */
     public function pendingCountFor(User $user, int $scanLimit = 200): int
     {
-        return $this->pendingFor($user, $scanLimit)->count();
+        $companyId = (int) (app(CurrentCompany::class)->id() ?? $user->current_company_id ?? 0);
+        if ($companyId <= 0) {
+            return $this->pendingFor($user, $scanLimit)->count();
+        }
+
+        return (int) $this->cache->remember(
+            'approval_count',
+            $companyId,
+            ErpCacheKey::approvalCount($companyId, (int) $user->id),
+            ['user' => (int) $user->id, 'scan' => $scanLimit],
+            fn () => $this->pendingFor($user, $scanLimit)->count(),
+            lock: false,
+            flexible: false,
+        );
     }
 
     public function resolveWorkflow(Approvable&Model $document): ?ApprovalWorkflow

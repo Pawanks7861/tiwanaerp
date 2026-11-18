@@ -9,6 +9,7 @@ use App\Enums\Documents\DrawingRevisionStatus;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqSection;
+use App\Models\Boq\ConcreteMixProfile;
 use App\Models\Boq\RateAnalysis;
 use App\Models\Documents\DrawingRevision;
 use App\Models\Masters\Unit;
@@ -34,6 +35,7 @@ class BoqService
     /** Descriptive line columns any BOQ editor may change. */
     private const LINE_FIELDS = [
         'item_code', 'name', 'description', 'hsn_sac', 'unit_id', 'gst_rate',
+        'project_cost_head_id',
         'source_type', 'source_import_id', 'source_sheet', 'source_row',
     ];
 
@@ -380,13 +382,58 @@ class BoqService
             }
         }
 
+        // Simple/Normal BOQ: optional concrete mix profile snapshot (never applied to Advanced workbook costing).
+        if (! BoqCompanySettings::enabled() && array_key_exists('concrete_mix_profile_id', $row)) {
+            $profileId = $row['concrete_mix_profile_id'] !== null && $row['concrete_mix_profile_id'] !== ''
+                ? (int) $row['concrete_mix_profile_id']
+                : null;
+            if ($profileId === null) {
+                $item->forceFill([
+                    'concrete_mix_profile_id' => null,
+                    'concrete_mix_profile_snapshot' => null,
+                ]);
+            } elseif ((int) $item->concrete_mix_profile_id !== $profileId || blank($item->concrete_mix_profile_snapshot)) {
+                $profile = ConcreteMixProfile::query()
+                    ->whereKey($profileId)
+                    ->where('is_active', true)
+                    ->first();
+                if ($profile === null) {
+                    throw ValidationException::withMessages([
+                        "{$errorKey}.concrete_mix_profile_id" => 'Choose an active concrete mix profile.',
+                    ]);
+                }
+                $item->forceFill([
+                    'concrete_mix_profile_id' => $profile->id,
+                    'concrete_mix_profile_snapshot' => app(ConcreteMixProfileService::class)->snapshot($profile),
+                ]);
+            }
+        }
+
+        $clientRateInput = $row['client_rate'] ?? null;
+        // Simplified/Normal BOQ: empty Material Rate must not fall back to cost+labour selling rate
+        // (Labour Rate is separate; Auto measurement often leaves Material Rate blank).
+        if (! BoqCompanySettings::enabled() && ($clientRateInput === null || $clientRateInput === '')) {
+            $clientRateInput = '0';
+        }
+
         $calc = BoqCalculator::line([
             ...$costs,
             'quantity' => $quantity,
-            'client_rate' => $row['client_rate'] ?? null,
+            'client_rate' => $clientRateInput,
         ]);
 
         $item->fill([...$calc, 'rate_analysis_id' => $analysisId]);
+
+        // WBS: explicit → section default → leave null (Unallocated). Never invent WBS-06.
+        if (array_key_exists('project_cost_head_id', $row)) {
+            $rawHead = $row['project_cost_head_id'];
+            $item->project_cost_head_id = ($rawHead === null || $rawHead === '') ? null : (int) $rawHead;
+        } elseif (! $item->project_cost_head_id && $item->boq_section_id) {
+            $sectionDefault = BoqSection::query()->whereKey($item->boq_section_id)->value('default_project_cost_head_id');
+            if ($sectionDefault) {
+                $item->project_cost_head_id = (int) $sectionDefault;
+            }
+        }
     }
 
     /**

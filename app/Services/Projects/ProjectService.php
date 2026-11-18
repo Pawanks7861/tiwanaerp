@@ -44,7 +44,9 @@ class ProjectService
             }
 
             if ($canManageBudget) {
-                $this->budgets->createInitialBudget($project, $initialBudgetByHeadId ?? []);
+                $budget = $this->budgets->createInitialBudget($project, $initialBudgetByHeadId ?? []);
+                // Project Budget display derives from WBS allocation — keep contract_value in sync.
+                $project->forceFill(['contract_value' => $budget->total_amount])->save();
             }
 
             return $project;

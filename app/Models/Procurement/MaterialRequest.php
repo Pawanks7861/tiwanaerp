@@ -3,15 +3,20 @@
 namespace App\Models\Procurement;
 
 use App\Contracts\Approvable;
-use App\Models\Approval\ApprovalRequest;
+use App\Enums\Procurement\MaterialRequestSourceType;
 use App\Enums\Procurement\MaterialRequestStatus;
+use App\Enums\Procurement\ProcurementCategory;
 use App\Enums\Procurement\RequestPriority;
+use App\Models\Approval\ApprovalRequest;
+use App\Models\Boq\Boq;
+use App\Models\Boq\BoqItem;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\HasApprovals;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\LocksWhenNotEditable;
+use App\Models\Documents\DrawingRevision;
 use App\Models\Projects\Project;
 use App\Models\Projects\Site;
 use App\Models\User;
@@ -26,7 +31,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * Site requirement for materials. Status changes only through MaterialRequestService, the approval
  * hooks and ProcurementQuantityService (ordered / received states).
  */
-#[Fillable(['site_id', 'request_date', 'required_date', 'priority', 'procurement_category', 'equipment_meta', 'remarks'])]
+#[Fillable([
+    'site_id', 'request_date', 'required_date', 'priority', 'procurement_category', 'equipment_meta', 'remarks',
+    'source_type', 'boq_id', 'boq_item_id', 'drawing_revision_id', 'source_reason', 'source_label_snapshot',
+])]
 class MaterialRequest extends Model implements Approvable
 {
     use Auditable, BelongsToCompany, Blameable, HasApprovals, HasAttachments, LocksWhenNotEditable, SoftDeletes;
@@ -38,7 +46,8 @@ class MaterialRequest extends Model implements Approvable
         return [
             'status' => MaterialRequestStatus::class,
             'priority' => RequestPriority::class,
-            'procurement_category' => \App\Enums\Procurement\ProcurementCategory::class,
+            'source_type' => MaterialRequestSourceType::class,
+            'procurement_category' => ProcurementCategory::class,
             'equipment_meta' => 'array',
             'request_date' => 'date',
             'required_date' => 'date',
@@ -94,6 +103,21 @@ class MaterialRequest extends Model implements Approvable
     public function items(): HasMany
     {
         return $this->hasMany(MaterialRequestItem::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    public function sourceBoq(): BelongsTo
+    {
+        return $this->belongsTo(Boq::class, 'boq_id');
+    }
+
+    public function sourceBoqItem(): BelongsTo
+    {
+        return $this->belongsTo(BoqItem::class, 'boq_item_id');
+    }
+
+    public function sourceDrawingRevision(): BelongsTo
+    {
+        return $this->belongsTo(DrawingRevision::class, 'drawing_revision_id');
     }
 
     public function approvalDocumentType(): string

@@ -7,6 +7,7 @@ use App\Enums\Boq\SimpleBoqMeasurementFormula;
 use App\Enums\Boq\SimpleBoqMeasurementMode;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Masters\Unit;
+use App\Models\Projects\ProjectCostHead;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
@@ -19,13 +20,14 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * computed by BoqCalculator on the server; line_uid is stable across revisions.
  */
 #[Fillable([
-    'boq_section_id', 'line_uid', 'item_code', 'name', 'description', 'hsn_sac', 'unit_id', 'quantity',
+    'boq_section_id', 'project_cost_head_id', 'line_uid', 'item_code', 'name', 'description', 'hsn_sac', 'unit_id', 'quantity',
     'quantity_source', 'measurement_mode', 'measurement_formula',
     'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
     'takeoff_reference', 'bbs_applicable',
     'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'cost_rate', 'cost_amount',
     'margin_percent', 'selling_rate', 'client_rate', 'client_amount', 'gst_rate', 'rate_analysis_id',
     'origin_variation_item_id', 'is_variation_originated', 'sort_order', 'simple_materials_initialized',
+    'concrete_mix_profile_id', 'concrete_mix_profile_snapshot',
     'source_type', 'source_import_id', 'source_sheet', 'source_row',
 ])]
 class BoqItem extends Model
@@ -85,6 +87,7 @@ class BoqItem extends Model
             'bbs_applicable' => 'boolean',
             'is_variation_originated' => 'boolean',
             'simple_materials_initialized' => 'boolean',
+            'concrete_mix_profile_snapshot' => 'array',
             'material_rate' => 'decimal:4',
             'labour_rate' => 'decimal:4',
             'equipment_rate' => 'decimal:4',
@@ -118,12 +121,22 @@ class BoqItem extends Model
         return $this->belongsTo(BoqSection::class, 'boq_section_id');
     }
 
+    public function projectCostHead(): BelongsTo
+    {
+        return $this->belongsTo(ProjectCostHead::class, 'project_cost_head_id');
+    }
+
     /**
      * @return BelongsTo<Unit, $this>
      */
     public function unit(): BelongsTo
     {
         return $this->belongsTo(Unit::class);
+    }
+
+    public function concreteMixProfile(): BelongsTo
+    {
+        return $this->belongsTo(ConcreteMixProfile::class);
     }
 
     /**

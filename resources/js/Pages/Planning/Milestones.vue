@@ -2,6 +2,7 @@
 import DataTable from '@/Components/Data/DataTable.vue';
 import DecimalInput from '@/Components/Form/DecimalInput.vue';
 import FormInput from '@/Components/Form/FormInput.vue';
+import FormSelect from '@/Components/Form/FormSelect.vue';
 import PlanningNav from '@/Components/Planning/PlanningNav.vue';
 import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
@@ -17,24 +18,40 @@ const props = defineProps({
     project: { type: Object, required: true },
     milestones: { type: Array, required: true },
     billing_total: { type: String, required: true },
+    members: { type: Array, default: () => [] },
     can: { type: Object, required: true },
 });
 
 const columns = [
     { key: 'name', label: 'Milestone' },
-    { key: 'due_date', label: 'Due', type: 'date' },
+    { key: 'planned_start', label: 'Planned start', type: 'date' },
+    { key: 'planned_end', label: 'Planned end', type: 'date' },
+    { key: 'due_date', label: 'Target', type: 'date' },
     { key: 'billing_percent', label: 'Billing', align: 'right' },
     { key: 'tasks_count', label: 'Tasks', align: 'right' },
     { key: 'status', label: 'Status' },
 ];
 
 const modal = ref(null);
-const form = useForm({ name: '', due_date: null, billing_percent: null, sort_order: 0 });
+const form = useForm({
+    name: '',
+    planned_start: null,
+    planned_end: null,
+    due_date: null,
+    billing_percent: null,
+    responsible_user_id: null,
+    remarks: '',
+    sort_order: 0,
+});
 function open(milestone = null) {
     form.clearErrors();
     form.name = milestone?.name ?? '';
+    form.planned_start = milestone?.planned_start ?? null;
+    form.planned_end = milestone?.planned_end ?? null;
     form.due_date = milestone?.due_date ?? null;
     form.billing_percent = milestone?.billing_percent ?? null;
+    form.responsible_user_id = milestone?.responsible_user_id ?? null;
+    form.remarks = milestone?.remarks ?? '';
     form.sort_order = milestone?.sort_order ?? props.milestones.length;
     modal.value = { milestone };
 }
@@ -68,7 +85,7 @@ function destroy() {
                 <div>
                     <h2 class="text-sm font-semibold text-slate-900">Milestones</h2>
                     <p class="mt-0.5 text-xs text-slate-500">
-                        Billing allocated: <span class="font-medium tabular" :class="Number(billing_total) > 100 ? 'text-red-600' : 'text-slate-700'">{{ formatPercent(billing_total) }}</span> of 100%. Billing itself happens in a later phase.
+                        Billing allocated: <span class="font-medium tabular" :class="Number(billing_total) > 100 ? 'text-red-600' : 'text-slate-700'">{{ formatPercent(billing_total) }}</span> of 100%. Actual completion is set via Complete — not by editing planned dates.
                     </p>
                 </div>
             </template>
@@ -79,6 +96,7 @@ function destroy() {
             <DataTable :columns="columns" :rows="milestones" empty-icon="calendar" empty-title="No milestones yet" empty-description="Add key dates such as foundation complete or handover.">
                 <template #cell-name="{ row }">
                     <div class="font-medium text-slate-900">{{ row.name }}</div>
+                    <div v-if="row.remarks" class="text-xs text-slate-500">{{ row.remarks }}</div>
                     <div v-if="row.completed_at" class="text-xs text-slate-500">Completed {{ formatDate(row.completed_at) }}</div>
                 </template>
                 <template #cell-billing_percent="{ value }">{{ Number(value) ? formatPercent(value) : '—' }}</template>
@@ -94,8 +112,18 @@ function destroy() {
         <AppModal :show="!!modal" :title="modal?.milestone ? 'Edit milestone' : 'Add milestone'" @close="modal = null">
             <form id="milestone-form" class="grid gap-4 sm:grid-cols-2" @submit.prevent="save">
                 <FormInput v-model="form.name" label="Name" required maxlength="200" class="sm:col-span-2" :error="form.errors.name" />
-                <FormInput v-model="form.due_date" type="date" label="Due date" :error="form.errors.due_date" />
+                <FormInput v-model="form.planned_start" type="date" label="Planned start" :error="form.errors.planned_start" />
+                <FormInput v-model="form.planned_end" type="date" label="Planned end" :error="form.errors.planned_end" />
+                <FormInput v-model="form.due_date" type="date" label="Target date" :error="form.errors.due_date" />
+                <FormSelect
+                    v-model="form.responsible_user_id"
+                    label="Responsible"
+                    :options="members.map((m) => ({ value: m.id, label: m.name }))"
+                    placeholder="Optional"
+                    :error="form.errors.responsible_user_id"
+                />
                 <DecimalInput v-model="form.billing_percent" label="Billing %" suffix="%" :decimals="4" :error="form.errors.billing_percent" help="Share of contract value billed at this milestone" />
+                <FormInput v-model="form.remarks" label="Remarks" maxlength="1000" class="sm:col-span-2" :error="form.errors.remarks" />
             </form>
             <template #footer>
                 <AppButton variant="secondary" @click="modal = null">Cancel</AppButton>

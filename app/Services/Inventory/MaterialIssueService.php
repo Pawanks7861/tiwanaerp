@@ -276,12 +276,21 @@ class MaterialIssueService
             $material = $this->material($row['material_id'] ?? null, "items.{$index}.material_id");
             $quantity = $this->quantity($row['quantity'] ?? null, "items.{$index}.quantity");
 
+            $boqItem = $this->boqItem($project, $row['boq_item_id'] ?? null, "items.{$index}.boq_item_id");
+            $task = $this->task($project, $row['task_id'] ?? null, "items.{$index}.task_id");
+            $headId = filled($row['project_cost_head_id'] ?? null)
+                ? (int) $row['project_cost_head_id']
+                : ($boqItem?->project_cost_head_id
+                    ?? $task?->project_cost_head_id
+                    ?? null);
+
             (new MaterialIssueItem)->forceFill([
                 'material_issue_id' => $issue->id,
                 'material_id' => $material->id,
                 'unit_id' => $material->unit_id,
-                'boq_item_id' => $this->boqItem($project, $row['boq_item_id'] ?? null, "items.{$index}.boq_item_id")?->id,
-                'task_id' => $this->task($project, $row['task_id'] ?? null, "items.{$index}.task_id")?->id,
+                'boq_item_id' => $boqItem?->id,
+                'task_id' => $task?->id,
+                'project_cost_head_id' => $headId,
                 'quantity' => $quantity->toQuantity(),
                 'remarks' => $row['remarks'] ?? null,
             ])->save();

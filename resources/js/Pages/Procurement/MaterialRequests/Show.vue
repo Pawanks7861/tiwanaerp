@@ -84,6 +84,8 @@ const lockedReason = computed(() => {
                             <div><dt class="text-slate-500">Required by</dt><dd class="text-slate-800">{{ formatDate(mr.required_date) }}</dd></div>
                             <div><dt class="text-slate-500">Site</dt><dd class="text-slate-800">{{ mr.site ?? 'Whole project' }}</dd></div>
                             <div><dt class="text-slate-500">Requested by</dt><dd class="text-slate-800">{{ mr.requested_by ?? '—' }}</dd></div>
+                            <div class="col-span-2"><dt class="text-slate-500">Source</dt><dd class="text-slate-800">{{ mr.source_label || mr.source_type_label || 'General' }}</dd></div>
+                            <div v-if="mr.source_reason" class="col-span-2"><dt class="text-slate-500">Source reason</dt><dd class="text-slate-800">{{ mr.source_reason }}</dd></div>
                         </dl>
                         <p v-if="mr.approved_at" class="mt-2 text-xs text-slate-500">Approved {{ formatDateTime(mr.approved_at) }}<template v-if="mr.approved_by"> by {{ mr.approved_by }}</template></p>
                     </div>

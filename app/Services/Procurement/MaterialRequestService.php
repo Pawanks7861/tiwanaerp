@@ -10,7 +10,9 @@ use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
 use App\Services\Numbering\DocumentNumberService;
+use App\Services\Projects\ProjectWbsService;
 use App\Support\Math\Decimal;
+use App\Support\Procurement\MaterialRequestSource;
 use App\Support\Procurement\ProcurementSettings;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -21,6 +23,8 @@ class MaterialRequestService
         private readonly DocumentNumberService $numbers,
         private readonly ApprovalService $approvals,
         private readonly ProcurementQuantityService $quantities,
+        private readonly MaterialRequestSource $sources,
+        private readonly ProjectWbsService $wbs,
     ) {}
 
     /**
@@ -29,7 +33,7 @@ class MaterialRequestService
     public function create(Project $project, array $data, User $user): MaterialRequest
     {
         return DB::transaction(function () use ($project, $data, $user) {
-            $mr = new MaterialRequest($this->header($data));
+            $mr = new MaterialRequest($this->header($project, $data));
             $mr->forceFill([
                 'project_id' => $project->id,
                 'request_number' => $this->numbers->next('material_request', $project),
@@ -37,6 +41,7 @@ class MaterialRequestService
                 'status' => MaterialRequestStatus::Draft,
             ])->save();
 
+            $mr->loadMissing('project');
             $this->syncItems($mr, $data['items']);
 
             return $mr;
@@ -51,7 +56,8 @@ class MaterialRequestService
         return DB::transaction(function () use ($mr, $data) {
             $mr = MaterialRequest::query()->whereKey($mr->id)->lockForUpdate()->firstOrFail();
             $mr->assertEditable();
-            $mr->fill($this->header($data))->save();
+            $mr->fill($this->header($mr->project, $data))->save();
+            $mr->loadMissing('project');
             $this->syncItems($mr, $data['items']);
 
             return $mr;
@@ -130,8 +136,14 @@ class MaterialRequestService
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
-    private function header(array $data): array
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function header(Project $project, array $data): array
     {
+        $source = $this->sources->resolve($project, $data);
+
         return [
             'site_id' => $data['site_id'] ?? null,
             'request_date' => $data['request_date'],
@@ -140,6 +152,7 @@ class MaterialRequestService
             'procurement_category' => $data['procurement_category'] ?? 'material',
             'equipment_meta' => $data['equipment_meta'] ?? null,
             'remarks' => $data['remarks'] ?? null,
+            ...$source,
         ];
     }
 
@@ -191,10 +204,20 @@ class MaterialRequestService
 
             $item = $id !== null ? $existing->get($id) : new MaterialRequestItem;
             $item->setRelation('materialRequest', $mr);
+            $boqItemId = array_key_exists('boq_item_id', $row)
+                ? ($row['boq_item_id'] ?: null)
+                : ($id !== null ? $existing->get($id)?->boq_item_id : ($mr->boq_item_id ?? null));
+            $headId = $this->wbs->resolveForMaterialRequestLine(
+                $mr->project,
+                [...$row, 'boq_item_id' => $boqItemId],
+                $id !== null ? $existing->get($id) : null,
+                $mr->boq_item_id ? (int) $mr->boq_item_id : null,
+            );
             $item->fill([
                 'material_id' => (int) $row['material_id'],
-                'boq_item_id' => $id !== null ? $existing->get($id)?->boq_item_id : null,
+                'boq_item_id' => $boqItemId,
                 'task_id' => $row['task_id'] ?? null,
+                'project_cost_head_id' => $headId,
                 'unit_id' => (int) $row['unit_id'],
                 'quantity' => Decimal::of((string) $row['quantity'])->toQuantity(),
                 'remarks' => $row['remarks'] ?? null,

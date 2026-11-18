@@ -687,16 +687,17 @@ function saveRateComparison() {
 }
 
 function blankPlanningMap() {
+    const snap = props.planning_map?.boq_item;
     return {
         id: null,
         project_task_id: null,
         mapping_method: 'conversion_based',
-        tracking_basis: 'boq_quantity',
-        allocated_boq_qty: props.item.quantity || '',
-        boq_unit_symbol: props.item.unit?.symbol || '',
+        tracking_basis: snap?.nos_mapping_available ? 'nos' : 'boq_quantity',
+        allocated_boq_qty: '',
+        boq_unit_symbol: snap?.unit_symbol || props.item.unit?.symbol || '',
         planning_qty: '',
-        planning_unit_symbol: '',
-        conversion_factor: '',
+        planning_unit_symbol: snap?.nos_mapping_available ? 'Nos' : (snap?.unit_symbol || ''),
+        conversion_factor: snap?.conversion_factor || '',
         remarks: '',
     };
 }
@@ -722,26 +723,19 @@ function onTrackingBasis(row) {
     if (!snap) {
         return;
     }
-    row.allocated_boq_qty = snap.quantity || row.allocated_boq_qty;
-    row.boq_unit_symbol = snap.unit_symbol || row.boq_unit_symbol;
-    if (row.tracking_basis === 'nos') {
-        row.planning_qty = snap.measurement_nos || '';
-        row.planning_unit_symbol = 'Nos';
-        const nos = Number(snap.measurement_nos);
-        const boq = Number(snap.quantity);
-        row.conversion_factor = nos > 0 && Number.isFinite(boq) ? (boq / nos).toFixed(4) : '';
-    } else {
-        row.planning_qty = snap.quantity || '';
-        row.planning_unit_symbol = snap.unit_symbol || '';
-        row.conversion_factor = '';
+    if (row.tracking_basis === 'nos' && !snap.nos_mapping_available) {
+        row.tracking_basis = 'boq_quantity';
     }
+    row.boq_unit_symbol = snap.unit_symbol || row.boq_unit_symbol;
+    row.conversion_factor = snap.conversion_factor || '';
+    // Manual allocation — do not auto-fill full BOQ Nos/Qty.
+    row.planning_qty = '';
+    row.allocated_boq_qty = '';
+    row.planning_unit_symbol = row.tracking_basis === 'nos' ? 'Nos' : (snap.unit_symbol || '');
 }
 
 function onPlanningTask(row) {
-    const selected = (props.planning_task_options || []).find((o) => o.value === row.project_task_id);
-    if (!selected) return;
-    row.planning_qty = selected.planned_qty || row.planning_qty;
-    row.planning_unit_symbol = selected.unit || row.planning_unit_symbol;
+    // Keep allocated qty as user-entered; do not overwrite with full task plan.
 }
 
 function addPlanningMap() {
@@ -753,7 +747,13 @@ function removePlanningMap(index) {
 }
 
 function savePlanningMap() {
-    planningMapForm.put(route('projects.boqs.items.planning-map.save', [props.project.id, props.boq.id, props.item.id]), {
+    planningMapForm.transform((data) => ({
+        maps: (data.maps || []).map((m) => ({
+            ...m,
+            allocated_boq_qty: m.tracking_basis === 'boq_quantity' ? (m.allocated_boq_qty || m.planning_qty) : m.allocated_boq_qty,
+            conversion_factor: undefined, // server-derived only
+        })),
+    })).put(route('projects.boqs.items.planning-map.save', [props.project.id, props.boq.id, props.item.id]), {
         preserveScroll: true,
     });
 }
@@ -1720,19 +1720,25 @@ function confirmRefreshRates(scope) {
         <div v-else-if="tab === 'planning_map'" class="space-y-4">
             <AppCard title="Planning Mapping">
                 <p class="mb-3 text-sm text-slate-600">
-                    Optional link from this BOQ item to Planning activities. Units may differ — use conversion, actual measurement, or manual certification.
+                    Manually allocate part of this BOQ item to Planning activities (Nos or BOQ Quantity). Conversion is derived from BOQ measurements. Partial and split allocations are supported.
                 </p>
                 <div v-if="!planning_map" class="py-8 text-center text-sm text-slate-500">Loading planning mapping…</div>
                 <form v-else class="space-y-4" @submit.prevent="savePlanningMap">
+                    <dl v-if="planning_map.allocation" class="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border border-line bg-slate-50 p-3 text-xs sm:grid-cols-4">
+                        <dt class="text-slate-500">BOQ Nos</dt><dd class="text-right tabular">{{ planning_map.allocation.boq_total_nos ?? '—' }}</dd>
+                        <dt class="text-slate-500">BOQ Qty</dt><dd class="text-right tabular">{{ planning_map.allocation.boq_total_qty }} {{ planning_map.allocation.boq_unit }}</dd>
+                        <dt class="text-slate-500">Mapped</dt><dd class="text-right tabular">{{ planning_map.allocation.mapped_nos }} Nos / {{ planning_map.allocation.mapped_boq_qty }} {{ planning_map.allocation.boq_unit }}</dd>
+                        <dt class="text-slate-500">Available</dt><dd class="text-right tabular">{{ planning_map.allocation.available_nos ?? '—' }} Nos / {{ planning_map.allocation.available_boq_qty }} {{ planning_map.allocation.boq_unit }}</dd>
+                    </dl>
                     <div class="overflow-x-auto rounded-xl border border-line">
                         <table class="min-w-[980px] w-full text-left text-xs">
                             <thead class="bg-slate-50 text-[11px] uppercase text-slate-500">
                                 <tr>
                                     <th class="px-2 py-2">Planning activity</th>
-                                    <th class="px-2 py-2">Track by</th>
+                                    <th class="px-2 py-2">Map by</th>
                                     <th class="px-2 py-2">Method</th>
-                                    <th class="px-2 py-2">BOQ qty</th>
-                                    <th class="px-2 py-2">Planning qty</th>
+                                    <th class="px-2 py-2">Allocated</th>
+                                    <th class="px-2 py-2">Equiv. BOQ</th>
                                     <th class="px-2 py-2">Conversion</th>
                                     <th class="px-2 py-2">Remarks</th>
                                     <th v-if="!planningMapLocked" class="px-2 py-2" />
@@ -1748,10 +1754,9 @@ function confirmRefreshRates(scope) {
                                     </td>
                                     <td class="px-1 py-1">
                                         <select v-model="row.tracking_basis" class="w-40 rounded border-slate-200 py-1 text-xs" :disabled="planningMapLocked" @change="onTrackingBasis(row)">
-                                            <option value="nos">Nos{{ planning_map?.boq_item?.measurement_nos ? ` — ${planning_map.boq_item.measurement_nos}` : '' }}</option>
-                                            <option value="boq_quantity">BOQ Qty{{ planning_map?.boq_item?.quantity ? ` — ${planning_map.boq_item.quantity} ${planning_map.boq_item.unit_symbol || ''}` : '' }}</option>
+                                            <option v-if="planning_map?.boq_item?.nos_mapping_available" value="nos">Nos</option>
+                                            <option value="boq_quantity">BOQ Quantity</option>
                                         </select>
-                                        <p v-if="row.tracking_basis === 'nos' && row.conversion_factor" class="mt-1 text-[10px] text-slate-500">{{ row.conversion_factor }} {{ row.boq_unit_symbol || 'BOQ' }} / No.</p>
                                     </td>
                                     <td class="px-1 py-1">
                                         <select v-model="row.mapping_method" class="w-40 rounded border-slate-200 py-1 text-xs" :disabled="planningMapLocked">
@@ -1759,16 +1764,16 @@ function confirmRefreshRates(scope) {
                                         </select>
                                     </td>
                                     <td class="px-1 py-1">
-                                        <input v-model="row.allocated_boq_qty" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="planningMapLocked" />
-                                        <input v-model="row.boq_unit_symbol" class="mt-1 w-16 rounded border-slate-200 px-1 py-0.5" :disabled="planningMapLocked" placeholder="Unit" />
-                                    </td>
-                                    <td class="px-1 py-1">
-                                        <input v-model="row.planning_qty" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="planningMapLocked" />
+                                        <input v-model="row.planning_qty" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="planningMapLocked" :placeholder="row.tracking_basis === 'nos' ? 'Nos' : 'Qty'" />
                                         <input v-model="row.planning_unit_symbol" class="mt-1 w-16 rounded border-slate-200 px-1 py-0.5" :disabled="planningMapLocked" placeholder="Unit" />
                                     </td>
                                     <td class="px-1 py-1">
-                                        <input v-model="row.conversion_factor" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="planningMapLocked || row.mapping_method !== 'conversion_based'" placeholder="Auto" />
-                                        <p v-if="row.boq_unit_symbol && row.planning_unit_symbol && row.boq_unit_symbol !== row.planning_unit_symbol" class="mt-1 text-[10px] text-amber-700">Unit mismatch — conversion required</p>
+                                        <input v-model="row.allocated_boq_qty" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" :disabled="planningMapLocked || row.tracking_basis === 'nos'" placeholder="Auto" />
+                                        <input v-model="row.boq_unit_symbol" class="mt-1 w-16 rounded border-slate-200 px-1 py-0.5" :disabled="planningMapLocked" placeholder="Unit" />
+                                    </td>
+                                    <td class="px-1 py-1">
+                                        <input v-model="row.conversion_factor" class="w-24 rounded border-slate-200 px-1.5 py-1 tabular" disabled placeholder="Derived" />
+                                        <p class="mt-1 text-[10px] text-slate-500">BOQ Qty ÷ Nos</p>
                                     </td>
                                     <td class="px-1 py-1"><input v-model="row.remarks" class="w-36 rounded border-slate-200 px-1.5 py-1" :disabled="planningMapLocked" /></td>
                                     <td v-if="!planningMapLocked" class="px-1 py-1">

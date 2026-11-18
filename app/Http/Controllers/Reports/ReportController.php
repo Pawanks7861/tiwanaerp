@@ -12,6 +12,8 @@ use App\Reports\ReportDefinition;
 use App\Reports\ReportExporter;
 use App\Reports\ReportRegistry;
 use App\Reports\ReportRunner;
+use App\Support\Cache\ErpCache;
+use App\Support\Cache\ErpCacheKey;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -31,6 +33,7 @@ class ReportController extends Controller
         private readonly ReportRunner $runner,
         private readonly ReportExporter $exporter,
         private readonly CurrentCompany $company,
+        private readonly ErpCache $cache,
     ) {}
 
     public function index(Request $request): Response
@@ -75,13 +78,36 @@ class ReportController extends Controller
 
     private function render(Request $request, ReportDefinition $report, ?Project $project): Response
     {
-        $ctx = $this->runner->context($report, $request->user(), $this->company->require(), $project, $request->query());
-        $result = $report->build($ctx)->restrict($ctx->financial, $ctx->valuation);
+        $company = $this->company->require();
+        $ctx = $this->runner->context($report, $request->user(), $company, $project, $request->query());
+        $dimensions = [
+            'user' => (int) $request->user()->id,
+            'report' => $report->key(),
+            'project' => $project?->id,
+            'project_ids' => $ctx->projectIds,
+            'filters' => $ctx->filters,
+            'fy' => $ctx->fy['value'] ?? $ctx->fy,
+            'from' => $ctx->from,
+            'to' => $ctx->to,
+            'page' => $ctx->page,
+            'per_page' => $ctx->perPage,
+            'financial' => $ctx->financial,
+            'valuation' => $ctx->valuation,
+        ];
+        $result = $this->cache->remember(
+            'reports',
+            (int) $company->id,
+            ErpCacheKey::report($report->key(), (int) $company->id, ErpCacheKey::filterHash($dimensions)),
+            $dimensions,
+            fn () => $report->build($ctx)->restrict($ctx->financial, $ctx->valuation)->toArray(),
+            lock: true,
+            flexible: true,
+        );
 
         return Inertia::render('Reports/Show', [
             'project' => $project ? ProjectHeader::for($project) : null,
             'report' => $report->summary() + ['filters' => $report->filters()],
-            'result' => $result->toArray(),
+            'result' => $result,
             'filters' => $this->filterState($report, $ctx),
             'options' => $this->runner->options($report, $ctx),
             'period' => [

@@ -2,6 +2,7 @@
 
 namespace App\Models\Boq;
 
+use App\Models\Projects\ProjectCostHead;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -10,9 +11,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * BOQ section or subsection (two levels). Tenant isolation comes through the parent BOQ.
  */
-#[Fillable(['parent_id', 'code', 'name', 'discipline', 'sort_order'])]
+#[Fillable(['parent_id', 'code', 'name', 'discipline', 'sort_order', 'default_project_cost_head_id'])]
 class BoqSection extends Model
 {
+    public function defaultProjectCostHead(): BelongsTo
+    {
+        return $this->belongsTo(ProjectCostHead::class, 'default_project_cost_head_id');
+    }
+
     protected static function booted(): void
     {
         $guard = function (self $section) {

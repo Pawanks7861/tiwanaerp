@@ -85,6 +85,7 @@ const form = useForm({
     planned_finish: null,
     unit_id: null,
     planned_qty: null,
+    daily_target_qty: null,
     hold_quantity: null,
     milestone_id: null,
 });
@@ -107,6 +108,7 @@ function openHead(t = null) {
     form.planned_finish = null;
     form.unit_id = null;
     form.planned_qty = null;
+    form.daily_target_qty = null;
     form.hold_quantity = null;
     form.milestone_id = null;
     drawer.value = { task: t, mode: 'head' };
@@ -129,9 +131,11 @@ function openActivity(t = null, headId = null) {
     form.planned_finish = source.planned_finish ?? null;
     form.unit_id = source.unit_id ?? null;
     form.planned_qty = source.planned_qty ?? null;
+    form.daily_target_qty = source.daily_target_qty ?? null;
     form.hold_quantity = source.hold_quantity ?? '0';
     form.milestone_id = source.milestone_id ?? null;
     drawer.value = { task: t, mode: 'activity' };
+    loadMapsFromTask(t);
     if (!t) {
         suggestWbs();
     }
@@ -162,6 +166,7 @@ function save() {
             payload.parent_id = null;
             payload.unit_id = null;
             payload.planned_qty = null;
+            payload.daily_target_qty = null;
             payload.hold_quantity = null;
             payload.planned_start = null;
             payload.planned_finish = null;
@@ -184,6 +189,72 @@ function changeStatus(status) {
     });
 }
 const statusLabel = (value) => props.options.statuses.find((s) => s.value === value)?.label ?? value;
+
+const mapForm = useForm({ maps: [] });
+const selectedBoqItem = computed(() => {
+    const id = mapForm.maps[0]?.boq_item_id;
+    return (props.options.boq_items || []).find((i) => i.value === id) || null;
+});
+function blankMap() {
+    return {
+        id: null,
+        boq_item_id: null,
+        tracking_basis: 'nos',
+        mapping_method: 'conversion_based',
+        planning_qty: '',
+        allocated_boq_qty: '',
+        is_primary: true,
+        remarks: '',
+    };
+}
+function loadMapsFromTask(t) {
+    mapForm.clearErrors();
+    mapForm.maps = (t?.boq_maps?.length
+        ? t.boq_maps.map((m) => ({
+            id: m.id,
+            boq_item_id: m.boq_item_id,
+            tracking_basis: m.tracking_basis || 'boq_quantity',
+            mapping_method: m.mapping_method || 'conversion_based',
+            planning_qty: m.planning_qty || '',
+            allocated_boq_qty: m.allocated_boq_qty || '',
+            is_primary: !!m.is_primary,
+            remarks: m.remarks || '',
+        }))
+        : []);
+}
+function onMapBasisChange(row) {
+    const item = (props.options.boq_items || []).find((i) => i.value === row.boq_item_id);
+    if (!item) return;
+    if (row.tracking_basis === 'nos' && !item.measurement_nos) {
+        row.tracking_basis = 'boq_quantity';
+    }
+    row.planning_qty = '';
+    row.allocated_boq_qty = '';
+}
+function previewEquivalent(row) {
+    const item = (props.options.boq_items || []).find((i) => i.value === row.boq_item_id);
+    if (!item?.allocation?.conversion_factor || !row.planning_qty) return null;
+    const factor = Number(item.allocation.conversion_factor);
+    const qty = Number(row.planning_qty);
+    if (!Number.isFinite(factor) || !Number.isFinite(qty) || factor <= 0) return null;
+    if (row.tracking_basis === 'nos') {
+        return `${(qty * factor).toFixed(4)} ${item.unit || 'Cum'}`;
+    }
+    return `${(qty / factor).toFixed(4)} Nos`;
+}
+function saveMaps() {
+    if (!task.value) return;
+    mapForm.transform((d) => ({
+        maps: d.maps.map((m, i) => ({
+            ...m,
+            is_primary: i === 0 || !!m.is_primary,
+            allocated_boq_qty: m.tracking_basis === 'boq_quantity' ? m.planning_qty : m.allocated_boq_qty,
+            mapping_method: m.mapping_method || 'conversion_based',
+        })),
+    })).put(route('projects.planning.tasks.boq-maps', [props.project.id, task.value.id]), {
+        preserveScroll: true,
+    });
+}
 
 const deleting = ref(null);
 const deleteProcessing = ref(false);
@@ -283,6 +354,16 @@ const summaryCards = computed(() => [
                                             <button type="button" class="text-left font-semibold text-slate-900 hover:underline" @click="openHead(section.head.id ? section.head : null)">
                                                 <span class="font-mono text-xs text-slate-500">{{ section.head.wbs_code }}</span>
                                                 — {{ section.head.name }}
+                                                <template v-if="section.head.head_progress">
+                                                    <span class="ml-2 font-normal text-slate-600">
+                                                        Progress: {{ formatPercent(section.head.head_progress.progress_percent) }}
+                                                    </span>
+                                                    <StatusBadge
+                                                        class="ml-2 align-middle"
+                                                        :status="section.head.head_progress.status"
+                                                        :label="section.head.head_progress.status_label"
+                                                    />
+                                                </template>
                                             </button>
                                             <AppButton
                                                 v-if="can.create && section.head.id"
@@ -304,6 +385,7 @@ const summaryCards = computed(() => [
                                     <td class="px-3 py-2 font-medium text-slate-900">
                                         {{ a.name }}
                                         <StatusBadge class="ml-1.5 align-middle" :status="a.status" :label="a.status_label" />
+                                        <div v-if="a.boq_map_summary" class="mt-0.5 text-[11px] font-normal text-slate-500">{{ a.boq_map_summary }}</div>
                                     </td>
                                     <td class="px-3 py-2 text-slate-600">{{ a.unit ?? '—' }}</td>
                                     <td class="px-3 py-2 whitespace-nowrap text-xs text-slate-600">{{ a.planned_start ? formatDate(a.planned_start) : '—' }}</td>
@@ -324,6 +406,9 @@ const summaryCards = computed(() => [
                     <template v-for="section in scheduleSections" :key="`m-${section.head.id}`">
                         <li class="bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900">
                             {{ section.head.wbs_code }} — {{ section.head.name }}
+                            <span v-if="section.head.head_progress" class="mt-0.5 block text-xs font-normal text-slate-600">
+                                {{ formatPercent(section.head.head_progress.progress_percent) }} · {{ section.head.head_progress.status_label }}
+                            </span>
                         </li>
                         <li
                             v-for="a in section.activities"
@@ -374,13 +459,14 @@ const summaryCards = computed(() => [
                         <div class="grid grid-cols-2 gap-3">
                             <FormSelect v-model="form.unit_id" label="Unit" required :options="options.units" :error="form.errors.unit_id" />
                             <DecimalInput v-model="form.planned_qty" label="Total qty" :decimals="4" :error="form.errors.planned_qty" />
+                            <DecimalInput v-model="form.daily_target_qty" label="Daily target qty" :decimals="4" :error="form.errors.daily_target_qty" help="Used as read-only Planned Target on DPR" />
                             <FormInput v-model="form.planned_start" type="date" label="Start date" required :error="form.errors.planned_start" />
                             <FormInput v-model="form.planned_finish" type="date" label="End date" required :error="form.errors.planned_finish" />
                             <DecimalInput v-model="form.hold_quantity" label="Hold qty" :decimals="4" :error="form.errors.hold_quantity" />
                             <FormSelect v-model="form.milestone_id" label="Milestone" placeholder="None" :options="options.milestones" :error="form.errors.milestone_id" />
                         </div>
                         <FormInput v-model="form.description" label="Remarks" multiline :rows="2" :error="form.errors.description" />
-                        <p class="text-[11px] text-slate-400">Executed, balance and % complete are calculated from approved DPR progress. BOQ is not required.</p>
+                        <p class="text-[11px] text-slate-400">Executed, balance and % complete are calculated from approved DPR progress. DPR Planned Target comes from Daily target qty. BOQ is not required.</p>
                     </template>
                 </fieldset>
             </form>
@@ -406,6 +492,58 @@ const summaryCards = computed(() => [
                             @click="changeStatus(next)"
                         >→ {{ statusLabel(next) }}</AppButton>
                     </div>
+                </section>
+
+                <section v-if="can.update" class="mt-5 space-y-3 rounded-lg border border-line p-3">
+                    <div class="flex items-center justify-between gap-2">
+                        <h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">BOQ Mapping</h3>
+                        <AppButton size="sm" variant="secondary" @click="mapForm.maps.push(blankMap())">Add BOQ link</AppButton>
+                    </div>
+                    <p class="text-[11px] text-slate-500">Optional. Manually allocate Nos or BOQ Quantity to this activity. Partial allocation and split across activities are supported.</p>
+                    <p v-if="mapForm.errors.maps" class="text-xs text-red-600">{{ mapForm.errors.maps }}</p>
+                    <div v-for="(row, index) in mapForm.maps" :key="index" class="space-y-2 rounded-md border border-slate-100 bg-slate-50/70 p-3">
+                        <div class="flex items-start justify-between gap-2">
+                            <SearchSelect
+                                v-model="row.boq_item_id"
+                                label="BOQ item"
+                                placeholder="Select BOQ item…"
+                                :options="options.boq_items || []"
+                                class="flex-1"
+                                :error="mapForm.errors[`maps.${index}.boq_item_id`]"
+                                @update:model-value="onMapBasisChange(row)"
+                            />
+                            <button type="button" class="mt-6 text-xs text-rose-600" @click="mapForm.maps.splice(index, 1)">Remove</button>
+                        </div>
+                        <template v-if="(options.boq_items || []).find((i) => i.value === row.boq_item_id)">
+                            <dl class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                                <dt>BOQ</dt><dd class="text-right">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.boq_label || '—' }}</dd>
+                                <dt>Total Nos</dt><dd class="text-right tabular">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.measurement_nos ?? '—' }}</dd>
+                                <dt>Total Qty</dt><dd class="text-right tabular">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.quantity }} {{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.unit }}</dd>
+                                <dt>Available Nos</dt><dd class="text-right tabular">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.allocation?.available_nos ?? '—' }}</dd>
+                                <dt>Available Qty</dt><dd class="text-right tabular">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.allocation?.available_boq_qty }} {{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.unit }}</dd>
+                                <dt>Conversion</dt><dd class="text-right tabular">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.allocation?.conversion_factor || '—' }}</dd>
+                            </dl>
+                            <div class="grid grid-cols-2 gap-2">
+                                <FormSelect
+                                    v-model="row.tracking_basis"
+                                    label="Map by"
+                                    :options="(options.tracking_bases || []).filter((b) => b.value !== 'nos' || (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.measurement_nos)"
+                                    :error="mapForm.errors[`maps.${index}.tracking_basis`]"
+                                    @update:model-value="onMapBasisChange(row)"
+                                />
+                                <DecimalInput
+                                    v-model="row.planning_qty"
+                                    :label="row.tracking_basis === 'nos' ? 'Allocated Nos' : 'Allocated BOQ Qty'"
+                                    :decimals="4"
+                                    :error="mapForm.errors[`maps.${index}.planning_qty`] || mapForm.errors[`maps.${index}.allocated_boq_qty`]"
+                                />
+                            </div>
+                            <p v-if="previewEquivalent(row)" class="text-[11px] text-slate-500">Equivalent: {{ previewEquivalent(row) }}</p>
+                            <FormInput v-model="row.remarks" label="Remarks" maxlength="500" :error="mapForm.errors[`maps.${index}.remarks`]" />
+                        </template>
+                    </div>
+                    <div v-if="!mapForm.maps.length" class="text-xs text-slate-500">No BOQ linked. Save the activity first, then add a mapping.</div>
+                    <AppButton v-if="mapForm.maps.length" size="sm" :loading="mapForm.processing" @click="saveMaps">Save BOQ mapping</AppButton>
                 </section>
             </template>
 

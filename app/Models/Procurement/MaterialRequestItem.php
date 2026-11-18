@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * Material request line. ordered_qty / received_qty are caches recomputed by
  * ProcurementQuantityService from approved purchase orders and GRNs.
  */
-#[Fillable(['material_id', 'boq_item_id', 'task_id', 'unit_id', 'quantity', 'remarks', 'sort_order'])]
+#[Fillable(['material_id', 'boq_item_id', 'task_id', 'project_cost_head_id', 'unit_id', 'quantity', 'remarks', 'sort_order'])]
 class MaterialRequestItem extends Model
 {
     public const CACHE_COLUMNS = ['ordered_qty', 'received_qty', 'updated_at'];

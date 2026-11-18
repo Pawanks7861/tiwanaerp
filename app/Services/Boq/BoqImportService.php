@@ -28,7 +28,7 @@ class BoqImportService
         'HSN SAC', 'Unit', 'Measurement Nos', 'Measurement Length', 'Measurement Width', 'Measurement Height',
         'Measurement Mode', 'Quantity',
         'Material Rate', 'Labour Rate', 'Equipment Rate', 'Subcontract Rate',
-        'Margin Percent', 'Client Rate', 'GST Rate', 'Amount', 'Remarks',
+        'Margin Percent', 'Client Rate', 'Amount', 'Remarks',
     ];
 
     private const REQUIRED_COLUMNS = ['name', 'unit', 'quantity'];

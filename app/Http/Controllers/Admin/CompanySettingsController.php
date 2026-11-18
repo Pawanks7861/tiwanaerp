@@ -6,9 +6,10 @@ use App\Enums\IndianState;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\CompanyRequest;
 use App\Services\Files\Cad\CadPreviewManager;
-use App\Support\Math\Decimal;
 use App\Support\Boq\BoqCompanySettings;
+use App\Support\Cache\ErpCacheHealth;
 use App\Support\Crm\DefaultClientResolver;
+use App\Support\Math\Decimal;
 use App\Support\Pdf\DocumentPdfSettings;
 use App\Support\Procurement\ProcurementSettings;
 use App\Support\Tenancy\CurrentCompany;
@@ -51,6 +52,7 @@ class CompanySettingsController extends Controller
             ],
             'can' => ['update' => $request->user()->can('manageSettings', $company)],
             'cadPreview' => $this->cad->health(),
+            'cacheHealth' => app(ErpCacheHealth::class)->status(),
             'branding' => [
                 'logo_url' => $company->logo_path ? route('company.branding.show', ['kind' => 'logo', 'v' => $company->updated_at?->getTimestamp()]) : null,
                 'favicon_url' => $company->favicon_path ? route('company.branding.show', ['kind' => 'favicon', 'v' => $company->updated_at?->getTimestamp()]) : null,

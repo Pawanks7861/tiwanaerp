@@ -59,6 +59,8 @@ class BoqItemsRequest extends FormRequest
             'rows.*.client_rate' => $rate,
             'rows.*.gst_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,4'],
             'rows.*.rate_analysis_id' => ['nullable', 'integer'],
+            'rows.*.concrete_mix_profile_id' => ['nullable', 'integer'],
+            'rows.*.project_cost_head_id' => ['nullable', 'integer'],
             'rows.*.sort_order' => ['nullable', 'integer', 'min:0'],
             'rows.*.simple_materials' => ['sometimes', 'array', 'max:200'],
             'rows.*.simple_materials.*.material_id' => ['nullable', 'integer'],

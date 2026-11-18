@@ -125,7 +125,7 @@ class PurchaseOrderController extends Controller
 
         $user = $request->user();
         $po = $purchaseOrder->load(['vendor', 'approver:id,name', 'canceller:id,name', 'rfq:id,rfq_number', 'quotation:id,quotation_number']);
-        $items = $po->items()->with(['unit:id,symbol', 'materialRequestItem.materialRequest:id,request_number', 'taxRate:id,name'])->get();
+        $items = $po->items()->with(['unit:id,symbol', 'materialRequestItem.materialRequest:id,request_number,source_label_snapshot,source_type', 'taxRate:id,name'])->get();
 
         return Inertia::render('Procurement/PurchaseOrders/Show', [
             'project' => ProjectHeader::for($project),
@@ -165,6 +165,7 @@ class PurchaseOrderController extends Controller
                     'over_received_qty' => ($over->isPositive() ? $over : Decimal::zero())->toQuantity(),
                     'tax_rate' => $i->taxRate?->name,
                     'material_request' => $i->materialRequestItem?->materialRequest?->request_number,
+                    'material_request_source' => $i->materialRequestItem?->materialRequest?->source_label_snapshot,
                 ];
             })->all(),
             'revisions' => $po->revisions()->with('creator:id,name')->get()->map(fn (PurchaseOrderRevision $r) => [

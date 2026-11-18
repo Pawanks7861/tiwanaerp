@@ -3,6 +3,7 @@
 namespace App\Support\Boq;
 
 use App\Models\Core\Company;
+use App\Support\Cache\CompanySettingsBag;
 use App\Support\Tenancy\CurrentCompany;
 
 final class BoqCompanySettings
@@ -16,11 +17,7 @@ final class BoqCompanySettings
             return false;
         }
 
-        // Explicit company: bypass tenant scope so reads work outside CurrentCompany context.
-        $value = $company->settings()
-            ->withoutGlobalScopes()
-            ->where('key', self::KEY)
-            ->value('value');
+        $value = app(CompanySettingsBag::class)->get($company, self::KEY);
 
         if ($value === null) {
             return false;

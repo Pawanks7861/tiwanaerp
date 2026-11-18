@@ -28,13 +28,21 @@ class MilestoneController extends Controller
         return Inertia::render('Planning/Milestones', [
             'project' => ProjectHeader::for($project),
             'milestones' => $milestones->map(fn (ProjectMilestone $m) => [
-                ...$m->only(['id', 'name', 'billing_percent', 'sort_order', 'tasks_count']),
+                ...$m->only(['id', 'name', 'billing_percent', 'sort_order', 'tasks_count', 'remarks', 'responsible_user_id']),
+                'planned_start' => $m->planned_start?->toDateString(),
+                'planned_end' => $m->planned_end?->toDateString(),
                 'due_date' => $m->due_date?->toDateString(),
                 'completed_at' => $m->completed_at?->toDateString(),
                 'status' => $m->status->value,
                 'status_label' => $m->status->label(),
             ])->all(),
             'billing_total' => Decimal::sum($milestones->pluck('billing_percent'))->round(Decimal::PERCENT_SCALE)->toString(),
+            'members' => $project->company->users()
+                ->orderBy('name')
+                ->get(['users.id', 'users.name'])
+                ->map(fn ($u) => ['id' => $u->id, 'name' => $u->name])
+                ->values()
+                ->all(),
             'can' => [
                 'create' => $user->can('create', [ProjectMilestone::class, $project]),
                 'update' => $user->can('planning.update'),
@@ -92,8 +100,12 @@ class MilestoneController extends Controller
 
         return $request->validate([
             'name' => ['required', 'string', 'max:200'],
+            'planned_start' => ['nullable', 'date'],
+            'planned_end' => ['nullable', 'date', 'after_or_equal:planned_start'],
             'due_date' => ['nullable', 'date'],
             'billing_percent' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,4'],
+            'responsible_user_id' => ['nullable', 'integer', 'exists:users,id'],
+            'remarks' => ['nullable', 'string', 'max:1000'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
         ]);
     }

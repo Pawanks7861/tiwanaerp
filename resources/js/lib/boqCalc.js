@@ -69,7 +69,13 @@ export function inferSimpleFormula(unitSymbol) {
     return null;
 }
 
-export function boqLine(row) {
+/**
+ * @param {Record<string, unknown>} row
+ * @param {{ simplifiedCommercial?: boolean }} [options]
+ *   simplifiedCommercial: Material Rate (client_rate) never falls back to cost+labour selling rate.
+ *   Labour Rate stays separate from commercial Amount (Qty × Material Rate).
+ */
+export function boqLine(row, options = {}) {
     const qty = round(d(row.quantity), 4);
     const costRate = round(
         ['material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate'].reduce((sum, key) => sum.plus(round(d(row[key]), 4)), new Decimal(0)),
@@ -78,7 +84,11 @@ export function boqLine(row) {
     const margin = round(d(row.margin_percent), 4);
     const sellingRate = round(costRate.plus(costRate.times(margin).div(100)), 4);
     const override = row.client_rate;
-    const clientRate = override === null || override === undefined || override === '' ? sellingRate : round(d(override), 4);
+    const hasOverride = !(override === null || override === undefined || override === '');
+    // Simplified/Normal BOQ: empty Material Rate is 0 — do not show Labour Rate as Material Rate.
+    const clientRate = hasOverride
+        ? round(d(override), 4)
+        : (options.simplifiedCommercial ? round(d(0), 4) : sellingRate);
 
     return {
         cost_rate: costRate.toFixed(4),

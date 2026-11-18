@@ -121,28 +121,50 @@ function submit() {
                         placeholder="Select project manager"
                         help="The project manager is added to the project team automatically."
                     />
-                    <MoneyInput v-model="form.contract_value" label="Budget" :error="form.errors.contract_value" />
+                    <MoneyInput
+                        v-if="!showInitialBudget"
+                        v-model="form.contract_value"
+                        label="Budget"
+                        :error="form.errors.contract_value"
+                    />
+                    <div v-else class="sm:col-span-2 rounded-md border border-line bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                        Project Budget is the total of WBS allocations below
+                        <span class="ml-2 font-semibold text-slate-900 tabular">{{ formatMoney(budgetTotal) }}</span>
+                    </div>
                     <FormInput v-model="form.description" label="Description" multiline class="sm:col-span-2" :error="form.errors.description" />
                 </div>
             </AppCard>
 
-            <AppCard v-if="showInitialBudget" title="Initial Project Budget" subtitle="Draft budget by project cost head. Blank amounts are saved as zero.">
-                <div class="flex flex-col gap-4">
-                    <div class="grid gap-4 sm:grid-cols-2">
-                        <MoneyInput
-                            v-for="head in costHeads"
-                            :key="head.id"
-                            v-model="form.initial_budget[head.id]"
-                            :label="head.name"
-                            :error="budgetError(head.id)"
-                        />
-                    </div>
-                    <div class="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-3">
-                        <span class="text-xs font-medium tracking-wide text-slate-500 uppercase">Total project budget</span>
-                        <span class="text-lg font-semibold text-slate-900 tabular">{{ formatMoney(budgetTotal) }}</span>
-                    </div>
-                    <p v-if="budgetError(null)" class="text-xs text-rose-600">{{ budgetError(null) }}</p>
+            <AppCard v-if="showInitialBudget" title="Initial Project Budget" subtitle="Allocate budget by WBS Code. Blank amounts are saved as zero. Contingency Reserve is a budget reserve — do not use it for ordinary transactions.">
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-slate-50 text-xs tracking-wide text-slate-500 uppercase">
+                            <tr>
+                                <th class="px-3 py-2 text-left">WBS Code</th>
+                                <th class="px-3 py-2 text-left">WBS Category</th>
+                                <th class="px-3 py-2 text-right">Budget</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="head in costHeads" :key="head.id" class="border-t border-line">
+                                <td class="px-3 py-2 font-mono text-xs font-semibold text-slate-800">{{ head.code }}</td>
+                                <td class="px-3 py-2 text-slate-700">{{ head.name }}</td>
+                                <td class="px-3 py-2">
+                                    <MoneyInput
+                                        v-model="form.initial_budget[head.id]"
+                                        :error="budgetError(head.id)"
+                                        class="ml-auto max-w-[11rem]"
+                                    />
+                                </td>
+                            </tr>
+                            <tr class="border-t border-slate-200 bg-slate-50">
+                                <td class="px-3 py-3 text-xs font-medium tracking-wide text-slate-500 uppercase" colspan="2">TOTAL</td>
+                                <td class="px-3 py-3 text-right text-lg font-semibold text-slate-900 tabular">{{ formatMoney(budgetTotal) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
+                <p v-if="budgetError(null)" class="mt-2 text-xs text-rose-600">{{ budgetError(null) }}</p>
             </AppCard>
 
             <AppCard title="Schedule">

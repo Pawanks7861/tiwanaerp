@@ -165,7 +165,7 @@ class BoqItemWorkspaceController extends Controller
                     && (config('approvals.allow_self_approval') || (int) $bbsModel->submitted_by !== (int) $user->id),
                 'map_bbs_steel' => $manageBbs && $boq->isEditable(),
                 'manage_bbs_adjustments' => $user->can('boq.manage_bbs_adjustments') && $manageBbs && $boq->isEditable(),
-                'manage_planning_map' => $user->can('update', $boq) && $boq->isEditable(),
+                'manage_planning_map' => $user->can('planning.update'),
             ],
         ]);
     }
@@ -332,17 +332,17 @@ class BoqItemWorkspaceController extends Controller
     {
         $this->requireAdvancedBoqCalculations();
         $this->assertScope($project, $boq, $item);
-        Gate::authorize('update', $boq);
+        abort_unless($request->user()->can('planning.update'), 403);
 
         $data = $request->validate([
             'maps' => ['present', 'array', 'max:100'],
             'maps.*.id' => ['nullable', 'integer'],
             'maps.*.project_task_id' => ['required', 'integer'],
             'maps.*.mapping_method' => ['required', Rule::enum(PlanningBoqMappingMethod::class)],
-            'maps.*.tracking_basis' => ['nullable', 'string', Rule::enum(PlanningTrackingBasis::class)],
+            'maps.*.tracking_basis' => ['required', 'string', Rule::enum(PlanningTrackingBasis::class)],
             'maps.*.allocated_boq_qty' => ['nullable', 'numeric', 'min:0'],
             'maps.*.boq_unit_symbol' => ['nullable', 'string', 'max:40'],
-            'maps.*.planning_qty' => ['nullable', 'numeric', 'min:0'],
+            'maps.*.planning_qty' => ['required', 'numeric', 'gt:0'],
             'maps.*.planning_unit_symbol' => ['nullable', 'string', 'max:40'],
             'maps.*.conversion_factor' => ['nullable', 'numeric', 'min:0'],
             'maps.*.remarks' => ['nullable', 'string', 'max:500'],
@@ -352,7 +352,7 @@ class BoqItemWorkspaceController extends Controller
 
         return redirect()
             ->route('projects.boqs.items.workspace', [$project, $boq, $item, 'planning_map' => 1])
-            ->with('success', 'Planning mapping saved. Conversion factors calculated on the server.');
+            ->with('success', 'Planning mapping saved. Manual allocation validated on the server.');
     }
 
     public function suggestCostRate(Request $request, Project $project, Boq $boq, BoqItem $item): JsonResponse

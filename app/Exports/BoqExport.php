@@ -34,7 +34,7 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
             : [];
 
         return [
-            'Section', 'Code', 'Name', 'Description', 'HSN/SAC', 'Unit',
+            'Section', 'WBS', 'Code', 'Name', 'Description', 'HSN/SAC', 'Unit',
             'Nos', 'Length', 'Width', 'Height', 'Quantity',
             ...$costs, 'Client Rate', 'Client Amount',
         ];
@@ -46,7 +46,7 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
     public function array(): array
     {
         $sections = $this->boq->sections()->get()->keyBy('id');
-        $items = $this->boq->items()->with('unit:id,symbol')->orderBy('sort_order')->orderBy('id')->get();
+        $items = $this->boq->items()->with(['unit:id,symbol', 'projectCostHead:id,code,name'])->orderBy('sort_order')->orderBy('id')->get();
 
         $rows = [];
         foreach ($this->orderedSectionIds($sections) as $sectionId) {
@@ -56,9 +56,12 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
         }
 
         $totals = array_fill(0, count($this->headings()), null);
-        $totals[2] = 'Total';
+        $totals[3] = 'Total';
         if ($this->withCosts) {
-            $totals[16] = $this->boq->total_cost_amount;
+            $costAmountIdx = array_search('Cost Amount', $this->headings(), true);
+            if ($costAmountIdx !== false) {
+                $totals[$costAmountIdx] = $this->boq->total_cost_amount;
+            }
         }
         $totals[count($totals) - 1] = $this->boq->total_client_amount;
         $rows[] = $totals;
@@ -75,8 +78,13 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
             ? [$item->material_rate, $item->labour_rate, $item->equipment_rate, $item->subcontract_rate, $item->cost_rate, $item->cost_amount, $item->margin_percent]
             : [];
 
+        $wbs = $item->projectCostHead
+            ? trim(($item->projectCostHead->code ? $item->projectCostHead->code.' ' : '').($item->projectCostHead->name ?? ''))
+            : null;
+
         return [
             SpreadsheetText::cell($section),
+            SpreadsheetText::cell($wbs !== '' ? $wbs : null),
             SpreadsheetText::cell($item->item_code),
             SpreadsheetText::cell($item->name),
             SpreadsheetText::cell($item->description),

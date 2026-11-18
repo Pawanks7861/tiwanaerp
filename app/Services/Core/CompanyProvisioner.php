@@ -15,6 +15,7 @@ use App\Models\Masters\ExpenseCategory;
 use App\Models\Masters\LabourTrade;
 use App\Models\Masters\TaxRate;
 use App\Models\Masters\Unit;
+use App\Services\Boq\ConcreteMixProfileService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Services\Projects\ProjectCostHeadService;
 use App\Services\Scrap\ScrapMasterBootstrapper;
@@ -52,6 +53,7 @@ class CompanyProvisioner
                     $this->grantMissingSystemRoleDefaults($company);
                     $this->seedMasters();
                     app(ProjectCostHeadService::class)->ensureDefaults($company);
+                    app(ConcreteMixProfileService::class)->ensureDefaults($company);
                     app(ScrapMasterBootstrapper::class)->seedForCompany($company);
                     $this->seedFinancialYear($company);
                     $this->seedApprovalWorkflows($roles);

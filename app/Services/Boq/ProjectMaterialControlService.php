@@ -23,6 +23,8 @@ use App\Models\Procurement\MaterialRequestItem;
 use App\Models\Procurement\PurchaseOrderItem;
 use App\Models\Projects\Project;
 use App\Support\Boq\BoqCompanySettings;
+use App\Support\Cache\ErpCache;
+use App\Support\Cache\ErpCacheKey;
 use App\Support\Math\Decimal;
 use App\Support\Reports\Num;
 use Illuminate\Support\Carbon;
@@ -36,7 +38,7 @@ use Illuminate\Validation\ValidationException;
  * → Stock Ledger Issue/Return → Net Consumption → Variance.
  *
  * Actual cost uses inventory ledger valuation (issue_out − return_in values), never Material Master price.
- * Zero side effects.
+ * Zero side effects. Aggregate report payloads may be cache-aside cached; stock validation never uses this cache.
  */
 class ProjectMaterialControlService
 {
@@ -44,6 +46,7 @@ class ProjectMaterialControlService
         private readonly MaterialReconciliationService $reconciliation,
         private readonly BoqBudgetMaterialSyncService $budgetSync,
         private readonly UnitConversionService $conversions,
+        private readonly ErpCache $cache,
     ) {}
 
     /**
@@ -69,6 +72,27 @@ class ProjectMaterialControlService
      * }
      */
     public function report(Project $project, array $filters = []): array
+    {
+        $companyId = (int) $project->company_id;
+        $projectId = (int) $project->id;
+        $normalized = ErpCacheKey::normalize($filters);
+        $filterHash = ErpCacheKey::filterHash($normalized);
+
+        return $this->cache->remember(
+            'material_control',
+            $companyId,
+            ErpCacheKey::materialControl($companyId, $projectId, $filterHash),
+            ['project' => $projectId, 'filters' => $normalized],
+            fn () => $this->buildReport($project, $filters),
+            lock: true,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array<string, mixed>
+     */
+    private function buildReport(Project $project, array $filters = []): array
     {
         $asOf = $this->asOfDate($filters['as_of_date'] ?? null);
         $budget = $this->resolveBudget($project, isset($filters['budget_version_id']) ? (int) $filters['budget_version_id'] : null);

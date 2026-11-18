@@ -175,7 +175,7 @@ const statusNote = computed(() => {
                                 <td class="px-3 py-2.5 text-slate-400 tabular">{{ i + 1 }}</td>
                                 <td class="px-3 py-2.5">
                                     <div class="text-sm font-medium text-slate-900">{{ item.description }}</div>
-                                    <div class="text-slate-500"><span class="font-mono">{{ item.item_code }}</span><template v-if="item.hsn_sac"> · HSN {{ item.hsn_sac }}</template><template v-if="item.material_request"> · {{ item.material_request }}</template></div>
+                                    <div class="text-slate-500"><span class="font-mono">{{ item.item_code }}</span><template v-if="item.hsn_sac"> · HSN {{ item.hsn_sac }}</template><template v-if="item.material_request"> · {{ item.material_request }}</template><template v-if="item.material_request_source"> · {{ item.material_request_source }}</template></div>
                                 </td>
                                 <td class="px-3 py-2.5 text-right tabular">{{ formatQty(item.quantity) }} {{ item.unit }}</td>
                                 <td class="px-3 py-2.5 text-right tabular">{{ formatRate(item.rate) }}</td>

@@ -39,6 +39,8 @@ use App\Models\Boq\BoqRevisionChangeOrder;
 use App\Models\Boq\BoqSection;
 use App\Models\Boq\BoqVariation;
 use App\Models\Boq\BoqVariationItem;
+use App\Models\Boq\ConcreteMixProfile;
+use App\Models\Boq\ConcreteMixProfileLine;
 use App\Models\Boq\CostingRateLibraryEntry;
 use App\Models\Boq\MaterialRecipeTemplate;
 use App\Models\Boq\MaterialRecipeTemplateLine;
@@ -253,6 +255,8 @@ use App\Services\Files\Cad\CadPreviewManager;
 use App\Services\Files\LocalPreviewConverter;
 use App\Services\Files\PreviewConverter;
 use App\Services\Uploads\NullFileSecurityScanner;
+use App\Support\Cache\ErpCache;
+use App\Support\Cache\ErpCacheInvalidationService;
 use App\Support\Reports\DashboardCache;
 use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -275,7 +279,9 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(CurrentCompany::class);
         $this->app->singleton(FileSecurityScannerInterface::class, NullFileSecurityScanner::class);
         $this->app->singleton(PreviewConverter::class, fn ($app) => new LocalPreviewConverter($app->make(CadPreviewManager::class)));
+        $this->app->scoped(ErpCache::class);
         $this->app->scoped(DashboardCache::class);
+        $this->app->scoped(ErpCacheInvalidationService::class);
 
         foreach (MasterPolicy::PERMISSIONS as $prefix) {
             $this->app->singleton(MasterPolicy::containerKey($prefix), fn () => new MasterPolicy($prefix));
@@ -327,6 +333,8 @@ class AppServiceProvider extends ServiceProvider
             'boq_cost_component' => BoqCostComponent::class,
             'boq_rate_comparison_quote' => BoqRateComparisonQuote::class,
             'boq_planning_map' => BoqPlanningMap::class,
+            'concrete_mix_profile' => ConcreteMixProfile::class,
+            'concrete_mix_profile_line' => ConcreteMixProfileLine::class,
             'boq_material_norm' => BoqMaterialNorm::class,
             'boq_bbs' => BoqBbs::class,
             'boq_bbs_line' => BoqBbsLine::class,
@@ -542,20 +550,37 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(NcrRaised::class, [SendOperationalNotifications::class, 'handleNcrRaised']);
         Event::listen(MessageSent::class, [SendChatNotification::class, 'handle']);
 
-        // Dashboard KPIs are cached per filter set; any write to their sources invalidates the company's entries.
-        $bump = fn (Model $model) => app(DashboardCache::class)->bump((int) ($model->getAttributes()['company_id'] ?? 0));
+        // ERP performance caches (dashboards, cost control, material, reports): bump after commit.
+        $operational = fn (Model $model) => app(ErpCacheInvalidationService::class)->onOperationalWrite($model);
         foreach ([
             Project::class, ProjectBudget::class, ProjectCostEntry::class, StockTransaction::class, LowStockAlert::class,
             ProgressEntry::class, ProjectTask::class, ClientInvoice::class, Payment::class, RetentionRelease::class,
             VendorBill::class, SubcontractorBill::class, LabourPayment::class, PurchaseOrder::class, WorkOrder::class,
             Grn::class, Expense::class, PettyCashTransaction::class, Ncr::class, QualityInspection::class,
+            BoqRevisionChangeOrder::class,
         ] as $model) {
-            $model::saved($bump);
-            $model::deleted($bump);
+            $model::saved($operational);
+            $model::deleted($operational);
         }
+
+        $approvals = fn (Model $model) => app(ErpCacheInvalidationService::class)->onApprovalWrite($model);
+        foreach ([ApprovalRequest::class, ApprovalDelegation::class] as $model) {
+            $model::saved($approvals);
+            $model::deleted($approvals);
+        }
+
+        $settings = fn (Model $model) => app(ErpCacheInvalidationService::class)->onSettingsWrite($model);
+        CompanySetting::saved($settings);
+        CompanySetting::deleted($settings);
+        Company::saved(fn (Model $model) => app(ErpCacheInvalidationService::class)->onSettingsWrite($model));
+
+        $masters = fn (Model $model) => app(ErpCacheInvalidationService::class)->onMasterWrite($model);
+        ProjectCostHead::saved($masters);
+        ProjectCostHead::deleted($masters);
+
         Event::listen(TransactionRolledBack::class, function (TransactionRolledBack $event) {
             if ($event->connection->transactionLevel() === 0) {
-                app(DashboardCache::class)->forgetPending();
+                app(ErpCache::class)->forgetPending();
             }
         });
 

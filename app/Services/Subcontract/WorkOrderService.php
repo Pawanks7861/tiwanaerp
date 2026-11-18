@@ -373,7 +373,9 @@ class WorkOrderService
                 'rate' => $rate->toRate(),
                 'amount' => $amount->toMoney(),
                 'certified_qty' => '0',
-                'project_cost_head_id' => filled($row['project_cost_head_id'] ?? null) ? (int) $row['project_cost_head_id'] : null,
+                'project_cost_head_id' => filled($row['project_cost_head_id'] ?? null)
+                    ? (int) $row['project_cost_head_id']
+                    : ($boqItem?->project_cost_head_id ? (int) $boqItem->project_cost_head_id : null),
                 'sort_order' => $index,
             ])->save();
         }

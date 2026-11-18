@@ -337,6 +337,7 @@ Route::middleware(['auth', 'company'])->group(function () {
             Route::get('/tasks/gantt', [GanttController::class, 'show'])->name('gantt');
             Route::get('/tasks/gantt/data', [GanttController::class, 'data'])->name('gantt.data');
             Route::put('/tasks/{task}', [ProjectTaskController::class, 'update'])->whereNumber('task')->name('tasks.update');
+            Route::put('/tasks/{task}/boq-maps', [ProjectTaskController::class, 'saveBoqMaps'])->whereNumber('task')->name('tasks.boq-maps');
             Route::delete('/tasks/{task}', [ProjectTaskController::class, 'destroy'])->whereNumber('task')->name('tasks.destroy');
             Route::patch('/tasks/{task}/status', [ProjectTaskController::class, 'updateStatus'])->whereNumber('task')->name('tasks.status');
             Route::post('/tasks/{task}/dependencies', [TaskDependencyController::class, 'store'])->whereNumber('task')->name('tasks.dependencies.store');

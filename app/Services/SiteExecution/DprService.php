@@ -14,13 +14,13 @@ use App\Models\SiteExecution\DprEquipment;
 use App\Models\SiteExecution\DprItem;
 use App\Models\SiteExecution\DprLabour;
 use App\Models\SiteExecution\DprMaterial;
-use App\Support\Math\Decimal;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
 use App\Services\Files\FilePreviewService;
 use App\Services\Numbering\DocumentNumberService;
 use App\Services\Planning\ProgressLedgerService;
 use App\Services\SiteExecution\Concerns\ResolvesWorkLines;
+use App\Support\Math\Decimal;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -378,8 +378,10 @@ class DprService
             $item ??= (new DprItem)->forceFill(['dpr_id' => $dpr->id]);
 
             $hold = $this->quantity($row['hold_quantity'] ?? '0', "items.{$i}.hold_quantity", allowZero: true);
-            $targetQty = isset($row['today_target_qty']) && $row['today_target_qty'] !== '' && $row['today_target_qty'] !== null
-                ? $this->quantity($row['today_target_qty'], "items.{$i}.today_target_qty", allowZero: true)
+            // Planning owns the daily target — never accept a client-edited value.
+            $planningTarget = $target['task']?->daily_target_qty;
+            $targetQty = $planningTarget !== null && $planningTarget !== ''
+                ? Decimal::of((string) $planningTarget)
                 : null;
             $executed = $this->quantity($row['executed_qty'] ?? null, "items.{$i}.executed_qty", allowZero: true);
 
@@ -512,5 +514,4 @@ class DprService
 
         $this->ledger->snapshot($dpr);
     }
-
 }
