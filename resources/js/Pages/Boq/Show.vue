@@ -857,7 +857,13 @@ function heightDepthLabel(row) {
                 </div>
                 <div v-if="approval" class="border-t border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900 sm:px-5">
                     <template v-if="approval_stage_label">{{ approval_stage_label }} · </template>
-                    Awaiting approval · level {{ approval.level }} of {{ approval.levels }}<template v-if="approval.step_name"> ({{ approval.step_name }})</template>
+                    Awaiting approval · level {{ approval.level }} of {{ approval.levels }}
+                    <template v-if="approval.step_name"> ({{ approval.step_name }})</template>
+                    <template v-if="approval.role_label"> · {{ approval.role_label }}</template>
+                    <template v-if="approval.pending_approvers?.length">
+                        · Waiting on
+                        {{ approval.pending_approvers.map((a) => a.name).join(', ') }}
+                    </template>
                     <span v-if="boq.technical_approved_at" class="ml-2 inline-flex rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">Technical Approved</span>
                 </div>
                 <div v-else-if="lockedReason" class="border-t border-line bg-slate-50 px-4 py-2.5 text-xs text-slate-600 sm:px-5">

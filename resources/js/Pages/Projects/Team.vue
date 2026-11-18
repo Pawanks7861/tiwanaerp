@@ -22,6 +22,7 @@ const props = defineProps({
 
 const columns = [
     { key: 'name', label: 'Member' },
+    { key: 'company_roles', label: 'Company roles' },
     { key: 'project_role', label: 'Project role' },
     { key: 'mobile', label: 'Mobile', mobile: false },
 ];
@@ -80,6 +81,12 @@ function remove() {
                         </div>
                     </div>
                 </template>
+                <template #cell-company_roles="{ row }">
+                    <div v-if="row.company_roles?.length" class="flex flex-wrap gap-1">
+                        <AppBadge v-for="role in row.company_roles" :key="role" color="slate">{{ role }}</AppBadge>
+                    </div>
+                    <span v-else class="text-slate-400">—</span>
+                </template>
                 <template #cell-project_role="{ row }">
                     <select
                         v-if="can.manage && !row.is_manager"
@@ -107,9 +114,16 @@ function remove() {
                     :options="candidates"
                     :error="addForm.errors.user_id"
                     placeholder="Select a company user"
-                    help="Only active users of this company are listed."
+                    help="Company roles (from Users & Roles) appear under each name. Project role below is this project's assignment."
                 />
-                <FormSelect v-model="addForm.project_role" label="Project role" required :options="roles" :error="addForm.errors.project_role" />
+                <FormSelect
+                    v-model="addForm.project_role"
+                    label="Project role"
+                    required
+                    :options="roles"
+                    :error="addForm.errors.project_role"
+                    help="Project role controls project access and PM/approver routing for this project only."
+                />
             </form>
             <template #footer>
                 <AppButton variant="secondary" @click="showAdd = false">Cancel</AppButton>

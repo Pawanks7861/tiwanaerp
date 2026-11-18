@@ -186,6 +186,7 @@ class BoqController extends Controller
                 'level' => $pending->current_level,
                 'levels' => count($pending->steps ?? []),
                 'step_name' => $pending->currentStep()['name'] ?? null,
+                ...$this->approvals->pendingLevelContext($pending),
                 'is_last_level' => $pending->isLastLevel(),
                 'is_commercial_level' => (bool) $atCommercial,
                 'can_act' => $this->approvals->canAct($pending, $user),

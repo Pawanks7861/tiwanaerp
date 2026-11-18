@@ -102,7 +102,12 @@ const lockedReason = computed(() => {
                     </div>
                 </div>
                 <div v-if="approval" class="border-t border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900 sm:px-5">
-                    Awaiting approval · level {{ approval.level }} of {{ approval.levels }}<template v-if="approval.step_name"> ({{ approval.step_name }})</template>
+                    Awaiting approval · level {{ approval.level }} of {{ approval.levels }}
+                    <template v-if="approval.step_name"> ({{ approval.step_name }})</template>
+                    <template v-if="approval.role_label"> · {{ approval.role_label }}</template>
+                    <template v-if="approval.pending_approvers?.length">
+                        · Waiting on {{ approval.pending_approvers.map((a) => a.name).join(', ') }}
+                    </template>
                 </div>
                 <div v-else-if="lockedReason" class="border-t border-line bg-slate-50 px-4 py-2.5 text-xs text-slate-600 sm:px-5">
                     <Icon name="info" :size="14" class="mr-1 inline align-text-bottom" />{{ lockedReason }}

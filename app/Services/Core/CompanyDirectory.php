@@ -29,12 +29,25 @@ class CompanyDirectory
     }
 
     /**
-     * @return list<array{value: int, label: string}>
+     * @return list<array{value: int, label: string, description?: string|null}>
      */
     public function memberOptions(): array
     {
-        return $this->membersQuery()->get(['id', 'name'])
-            ->map(fn (User $u) => ['value' => $u->id, 'label' => $u->name])
+        $companyId = $this->tenancy->require()->id;
+        $teamKey = config('permission.column_names.team_foreign_key');
+
+        return $this->membersQuery()
+            ->with(['roles' => fn ($q) => $q->where($teamKey, $companyId)->orderBy('name')])
+            ->get(['id', 'name'])
+            ->map(function (User $u) {
+                $roleNames = $u->roles->pluck('name')->filter()->values();
+
+                return [
+                    'value' => $u->id,
+                    'label' => $u->name,
+                    'description' => $roleNames->isNotEmpty() ? $roleNames->implode(', ') : null,
+                ];
+            })
             ->all();
     }
 }

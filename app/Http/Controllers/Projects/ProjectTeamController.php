@@ -23,8 +23,14 @@ class ProjectTeamController extends Controller
 
     public function index(Request $request, Project $project): Response
     {
+        $companyId = $project->company_id;
+        $teamKey = config('permission.column_names.team_foreign_key');
+
         $members = $project->members()
-            ->with('user:id,name,email,mobile')
+            ->with([
+                'user:id,name,email,mobile',
+                'user.roles' => fn ($q) => $q->where($teamKey, $companyId)->orderBy('name'),
+            ])
             ->where('is_active', true)
             ->get()
             ->sortBy(fn (ProjectUser $m) => $m->user?->name)
@@ -36,6 +42,7 @@ class ProjectTeamController extends Controller
                 'email' => $m->user?->email,
                 'mobile' => $m->user?->mobile,
                 'project_role' => $m->project_role->value,
+                'company_roles' => $m->user?->roles->pluck('name')->filter()->values()->all() ?? [],
                 'is_manager' => (int) $project->project_manager_id === (int) $m->user_id,
             ]);
 

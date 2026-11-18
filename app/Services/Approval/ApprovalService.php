@@ -6,6 +6,8 @@ use App\Contracts\Approvable;
 use App\Enums\Approval\ApprovalActionType;
 use App\Enums\Approval\ApprovalMode;
 use App\Enums\Approval\ApprovalStatus;
+use App\Enums\Approval\ApproverType;
+use App\Enums\ProjectRole;
 use App\Events\Approval\ApprovalCompleted;
 use App\Events\Approval\ApprovalRejected;
 use App\Events\Approval\ApprovalRequested;
@@ -20,6 +22,7 @@ use App\Support\Tenancy\CurrentCompany;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Spatie\Permission\Models\Role;
 
 /**
  * Generic approval engine shared by every approvable document (architecture J.1).
@@ -213,6 +216,38 @@ class ApprovalService
     public function approversForCurrentLevel(ApprovalRequest $request): Collection
     {
         return $this->resolver->forLevel($request, $request->current_level);
+    }
+
+    /**
+     * UI context for the current pending level: step title, resolved role label, and people who can act.
+     *
+     * @return array{
+     *   step_name: ?string,
+     *   role_label: ?string,
+     *   pending_approvers: list<array{id: int, name: string}>
+     * }
+     */
+    public function pendingLevelContext(ApprovalRequest $request): array
+    {
+        $step = $request->currentStep() ?? [];
+        $type = isset($step['approver_type']) ? ApproverType::tryFrom((string) $step['approver_type']) : null;
+
+        $roleLabel = match ($type) {
+            ApproverType::Role => Role::query()->whereKey($step['role_id'] ?? 0)->value('name'),
+            ApproverType::ProjectRole => ProjectRole::tryFrom((string) ($step['project_role'] ?? ''))?->label()
+                ?? ($step['project_role'] ?? null),
+            ApproverType::User => User::query()->whereKey($step['user_id'] ?? 0)->value('name'),
+            default => null,
+        };
+
+        return [
+            'step_name' => isset($step['name']) ? (string) $step['name'] : null,
+            'role_label' => $roleLabel !== null ? (string) $roleLabel : null,
+            'pending_approvers' => $this->approversForCurrentLevel($request)
+                ->map(fn (User $user) => ['id' => $user->id, 'name' => $user->name])
+                ->values()
+                ->all(),
+        ];
     }
 
     /**

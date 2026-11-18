@@ -38,12 +38,15 @@ final class ProcurementPresenter
             return null;
         }
 
+        $approvals = app(ApprovalService::class);
+
         return [
             'id' => $pending->id,
             'level' => $pending->current_level,
             'levels' => count($pending->steps ?? []),
             'step_name' => $pending->currentStep()['name'] ?? null,
-            'can_act' => app(ApprovalService::class)->canAct($pending, $user),
+            ...$approvals->pendingLevelContext($pending),
+            'can_act' => $approvals->canAct($pending, $user),
             'can_cancel' => (int) $pending->submitted_by === (int) $user->id,
         ];
     }
