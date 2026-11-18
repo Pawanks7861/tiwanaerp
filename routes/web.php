@@ -314,10 +314,12 @@ Route::middleware(['auth', 'company'])->group(function () {
 
         // Budget
         Route::get('/budget', [ProjectBudgetController::class, 'index'])->name('projects.budget.index');
+        Route::post('/budget/create-main', [ProjectBudgetController::class, 'createMain'])->name('projects.budget.create-main');
         Route::post('/budget/generate', [ProjectBudgetController::class, 'generate'])->name('projects.budget.generate');
         Route::post('/budget/sync-materials', [ProjectBudgetController::class, 'syncMaterials'])->name('projects.budget.sync-materials');
         Route::get('/budget/sync-preview', [ProjectBudgetController::class, 'syncPreview'])->name('projects.budget.sync-preview');
         Route::post('/budget/new-version', [ProjectBudgetController::class, 'newVersion'])->name('projects.budget.new-version');
+        Route::put('/budget/wbs-allocations', [ProjectBudgetController::class, 'saveWbsAllocations'])->name('projects.budget.wbs-allocations');
         Route::post('/budget/lines', [ProjectBudgetController::class, 'storeLine'])->name('projects.budget.lines.store');
         Route::put('/budget/lines/{budgetLine}', [ProjectBudgetController::class, 'updateLine'])->whereNumber('budgetLine')->name('projects.budget.lines.update');
         Route::delete('/budget/lines/{budgetLine}', [ProjectBudgetController::class, 'destroyLine'])->whereNumber('budgetLine')->name('projects.budget.lines.destroy');

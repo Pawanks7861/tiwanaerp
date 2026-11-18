@@ -376,15 +376,18 @@ class ProjectMaterialControlService
 
     private function resolveBudget(Project $project, ?int $budgetId): ?ProjectBudget
     {
+        // Material Control uses BOQ Estimate quantities/costs — never Main Project Budget.
         if ($budgetId !== null) {
             return ProjectBudget::query()
                 ->where('project_id', $project->id)
+                ->boqEstimate()
                 ->whereKey($budgetId)
                 ->first();
         }
 
         $approved = ProjectBudget::query()
             ->where('project_id', $project->id)
+            ->boqEstimate()
             ->where('status', BudgetStatus::Approved)
             ->orderByDesc('version')
             ->first();
@@ -394,6 +397,7 @@ class ProjectMaterialControlService
 
         return ProjectBudget::query()
             ->where('project_id', $project->id)
+            ->boqEstimate()
             ->where('status', BudgetStatus::Draft)
             ->orderByDesc('version')
             ->first();

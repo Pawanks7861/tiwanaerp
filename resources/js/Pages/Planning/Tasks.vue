@@ -170,6 +170,21 @@ function save() {
             payload.hold_quantity = null;
             payload.planned_start = null;
             payload.planned_finish = null;
+            delete payload.maps;
+        } else {
+            // Same-step Activity + optional BOQ mapping (no prior Activity id required).
+            payload.maps = (mapForm.maps || [])
+                .filter((m) => m.boq_item_id)
+                .map((m, i) => ({
+                    id: m.id || null,
+                    boq_item_id: m.boq_item_id,
+                    tracking_basis: m.tracking_basis || 'boq_quantity',
+                    mapping_method: m.mapping_method || 'conversion_based',
+                    planning_qty: m.planning_qty,
+                    allocated_boq_qty: m.tracking_basis === 'boq_quantity' ? m.planning_qty : m.allocated_boq_qty,
+                    is_primary: i === 0 || !!m.is_primary,
+                    remarks: m.remarks || null,
+                }));
         }
         delete payload.boq_item_id;
 
@@ -177,6 +192,14 @@ function save() {
     })[task.value ? 'put' : 'post'](url, {
         preserveScroll: true,
         onSuccess: () => (drawer.value = null),
+        onError: (errors) => {
+            // Surface nested maps.* validation on the mapping form too.
+            Object.keys(errors || {}).forEach((key) => {
+                if (key === 'maps' || key.startsWith('maps.')) {
+                    mapForm.setError(key, errors[key]);
+                }
+            });
+        },
     });
 }
 
@@ -225,11 +248,19 @@ function loadMapsFromTask(t) {
 function onMapBasisChange(row) {
     const item = (props.options.boq_items || []).find((i) => i.value === row.boq_item_id);
     if (!item) return;
-    if (row.tracking_basis === 'nos' && !item.measurement_nos) {
+    if (row.tracking_basis === 'nos' && !item.effective_nos && !item.measurement_nos) {
         row.tracking_basis = 'boq_quantity';
     }
     row.planning_qty = '';
     row.allocated_boq_qty = '';
+}
+
+function boqItemFor(row) {
+    return (props.options.boq_items || []).find((i) => i.value === row.boq_item_id) || null;
+}
+
+function nosMappingAvailable(item) {
+    return !!(item?.effective_nos || item?.measurement_nos || item?.allocation?.nos_mapping_available);
 }
 function previewEquivalent(row) {
     const item = (props.options.boq_items || []).find((i) => i.value === row.boq_item_id);
@@ -242,20 +273,6 @@ function previewEquivalent(row) {
     }
     return `${(qty / factor).toFixed(4)} Nos`;
 }
-function saveMaps() {
-    if (!task.value) return;
-    mapForm.transform((d) => ({
-        maps: d.maps.map((m, i) => ({
-            ...m,
-            is_primary: i === 0 || !!m.is_primary,
-            allocated_boq_qty: m.tracking_basis === 'boq_quantity' ? m.planning_qty : m.allocated_boq_qty,
-            mapping_method: m.mapping_method || 'conversion_based',
-        })),
-    })).put(route('projects.planning.tasks.boq-maps', [props.project.id, task.value.id]), {
-        preserveScroll: true,
-    });
-}
-
 const deleting = ref(null);
 const deleteProcessing = ref(false);
 function destroy() {
@@ -466,13 +483,13 @@ const summaryCards = computed(() => [
                             <FormSelect v-model="form.milestone_id" label="Milestone" placeholder="None" :options="options.milestones" :error="form.errors.milestone_id" />
                         </div>
                         <FormInput v-model="form.description" label="Remarks" multiline :rows="2" :error="form.errors.description" />
-                        <p class="text-[11px] text-slate-400">Executed, balance and % complete are calculated from approved DPR progress. DPR Planned Target comes from Daily target qty. BOQ is not required.</p>
+                        <p class="text-[11px] text-slate-400">Executed, balance and % complete are calculated from approved DPR progress. DPR Planned Target comes from Daily target qty. BOQ is optional.</p>
                     </template>
                 </fieldset>
             </form>
 
-            <template v-if="task && drawer?.mode === 'activity'">
-                <section class="mt-5 rounded-lg border border-line p-3">
+            <template v-if="drawer?.mode === 'activity'">
+                <section v-if="task" class="mt-5 rounded-lg border border-line p-3">
                     <h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Progress (from approved DPR)</h3>
                     <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                         <dt class="text-slate-500">Executed</dt><dd class="text-right tabular">{{ formatQty(task.completed_qty) }} {{ task.unit ?? '' }}</dd>
@@ -494,13 +511,16 @@ const summaryCards = computed(() => [
                     </div>
                 </section>
 
-                <section v-if="can.update" class="mt-5 space-y-3 rounded-lg border border-line p-3">
+                <section v-if="editable" class="mt-5 space-y-3 rounded-lg border border-line p-3">
                     <div class="flex items-center justify-between gap-2">
-                        <h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">BOQ Mapping</h3>
+                        <h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">BOQ Mapping (Optional)</h3>
                         <AppButton size="sm" variant="secondary" @click="mapForm.maps.push(blankMap())">Add BOQ link</AppButton>
                     </div>
-                    <p class="text-[11px] text-slate-500">Optional. Manually allocate Nos or BOQ Quantity to this activity. Partial allocation and split across activities are supported.</p>
-                    <p v-if="mapForm.errors.maps" class="text-xs text-red-600">{{ mapForm.errors.maps }}</p>
+                    <p class="text-[11px] text-slate-500">
+                        Link BOQ while creating or editing this activity. One Save creates the activity and mapping together.
+                        Total Nos = NOB × Nos / Building. Partial allocation and split across activities are supported.
+                    </p>
+                    <p v-if="mapForm.errors.maps || form.errors.maps" class="text-xs text-red-600">{{ mapForm.errors.maps || form.errors.maps }}</p>
                     <div v-for="(row, index) in mapForm.maps" :key="index" class="space-y-2 rounded-md border border-slate-100 bg-slate-50/70 p-3">
                         <div class="flex items-start justify-between gap-2">
                             <SearchSelect
@@ -509,48 +529,49 @@ const summaryCards = computed(() => [
                                 placeholder="Select BOQ item…"
                                 :options="options.boq_items || []"
                                 class="flex-1"
-                                :error="mapForm.errors[`maps.${index}.boq_item_id`]"
+                                :error="mapForm.errors[`maps.${index}.boq_item_id`] || form.errors[`maps.${index}.boq_item_id`]"
                                 @update:model-value="onMapBasisChange(row)"
                             />
                             <button type="button" class="mt-6 text-xs text-rose-600" @click="mapForm.maps.splice(index, 1)">Remove</button>
                         </div>
-                        <template v-if="(options.boq_items || []).find((i) => i.value === row.boq_item_id)">
+                        <template v-if="boqItemFor(row)">
                             <dl class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-600">
-                                <dt>BOQ</dt><dd class="text-right">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.boq_label || '—' }}</dd>
-                                <dt>Total Nos</dt><dd class="text-right tabular">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.measurement_nos ?? '—' }}</dd>
-                                <dt>Total Qty</dt><dd class="text-right tabular">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.quantity }} {{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.unit }}</dd>
-                                <dt>Available Nos</dt><dd class="text-right tabular">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.allocation?.available_nos ?? '—' }}</dd>
-                                <dt>Available Qty</dt><dd class="text-right tabular">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.allocation?.available_boq_qty }} {{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.unit }}</dd>
-                                <dt>Conversion</dt><dd class="text-right tabular">{{ (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.allocation?.conversion_factor || '—' }}</dd>
+                                <dt>BOQ</dt><dd class="text-right">{{ boqItemFor(row)?.boq_label || '—' }}</dd>
+                                <dt title="Number of Buildings">NOB</dt><dd class="text-right tabular">{{ boqItemFor(row)?.measurement_nob ?? 1 }}</dd>
+                                <dt>Nos / Building</dt><dd class="text-right tabular">{{ boqItemFor(row)?.nos_per_building ?? '—' }}</dd>
+                                <dt title="NOB × Nos / Building">Total Nos</dt><dd class="text-right tabular font-medium text-slate-800">{{ boqItemFor(row)?.effective_nos ?? boqItemFor(row)?.measurement_nos ?? '—' }}</dd>
+                                <dt>BOQ Qty</dt><dd class="text-right tabular">{{ boqItemFor(row)?.quantity }} {{ boqItemFor(row)?.unit }}</dd>
+                                <dt>Available Nos</dt><dd class="text-right tabular">{{ boqItemFor(row)?.allocation?.available_nos ?? '—' }}</dd>
+                                <dt>Available Qty</dt><dd class="text-right tabular">{{ boqItemFor(row)?.allocation?.available_boq_qty }} {{ boqItemFor(row)?.unit }}</dd>
+                                <dt>Conversion</dt><dd class="text-right tabular">{{ boqItemFor(row)?.allocation?.conversion_factor || '—' }} {{ boqItemFor(row)?.unit ? `${boqItemFor(row).unit}/No` : '' }}</dd>
                             </dl>
                             <div class="grid grid-cols-2 gap-2">
                                 <FormSelect
                                     v-model="row.tracking_basis"
                                     label="Map by"
-                                    :options="(options.tracking_bases || []).filter((b) => b.value !== 'nos' || (options.boq_items || []).find((i) => i.value === row.boq_item_id)?.measurement_nos)"
-                                    :error="mapForm.errors[`maps.${index}.tracking_basis`]"
+                                    :options="(options.tracking_bases || []).filter((b) => b.value !== 'nos' || nosMappingAvailable(boqItemFor(row)))"
+                                    :error="mapForm.errors[`maps.${index}.tracking_basis`] || form.errors[`maps.${index}.tracking_basis`]"
                                     @update:model-value="onMapBasisChange(row)"
                                 />
                                 <DecimalInput
                                     v-model="row.planning_qty"
                                     :label="row.tracking_basis === 'nos' ? 'Allocated Nos' : 'Allocated BOQ Qty'"
                                     :decimals="4"
-                                    :error="mapForm.errors[`maps.${index}.planning_qty`] || mapForm.errors[`maps.${index}.allocated_boq_qty`]"
+                                    :error="mapForm.errors[`maps.${index}.planning_qty`] || form.errors[`maps.${index}.planning_qty`] || mapForm.errors[`maps.${index}.allocated_boq_qty`] || form.errors[`maps.${index}.allocated_boq_qty`]"
                                 />
                             </div>
                             <p v-if="previewEquivalent(row)" class="text-[11px] text-slate-500">Equivalent: {{ previewEquivalent(row) }}</p>
-                            <FormInput v-model="row.remarks" label="Remarks" maxlength="500" :error="mapForm.errors[`maps.${index}.remarks`]" />
+                            <FormInput v-model="row.remarks" label="Remarks" maxlength="500" :error="mapForm.errors[`maps.${index}.remarks`] || form.errors[`maps.${index}.remarks`]" />
                         </template>
                     </div>
-                    <div v-if="!mapForm.maps.length" class="text-xs text-slate-500">No BOQ linked. Save the activity first, then add a mapping.</div>
-                    <AppButton v-if="mapForm.maps.length" size="sm" :loading="mapForm.processing" @click="saveMaps">Save BOQ mapping</AppButton>
+                    <div v-if="!mapForm.maps.length" class="text-xs text-slate-500">No BOQ linked — activity can be saved without a mapping.</div>
                 </section>
             </template>
 
             <template #footer>
                 <AppButton v-if="task && can.delete" variant="ghost" class="mr-auto text-red-600" icon="trash" @click="deleting = task">Delete</AppButton>
                 <AppButton variant="secondary" @click="drawer = null">Close</AppButton>
-                <AppButton v-if="editable" type="submit" form="task-form" :loading="form.processing">{{ task ? 'Save' : 'Create' }}</AppButton>
+                <AppButton v-if="editable" type="submit" form="task-form" :loading="form.processing">{{ task ? 'Save Activity' : 'Save Activity' }}</AppButton>
             </template>
         </AppDrawer>
 

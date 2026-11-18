@@ -3,6 +3,7 @@
 namespace App\Services\Projects;
 
 use App\Enums\Boq\BudgetStatus;
+use App\Enums\Boq\BudgetType;
 use App\Enums\Boq\RevisionChangeOrderStatus;
 use App\Models\Core\Company;
 use App\Models\Projects\Project;
@@ -90,12 +91,9 @@ class ManagementDashboardService
             $portfolio = $this->costPayload($user, $company, $projectIds, $period['as_of']);
             $executive = $this->dashboard->executive($company, $user, $projectIds, $period);
 
-            $pendingBudget = DB::table('project_budgets')
-                ->where('company_id', $cid)
-                ->whereIn('project_id', $projectIds ?: [0])
-                ->where('status', BudgetStatus::Draft->value)
-                ->whereNull('deleted_at')
-                ->count();
+            $pendingMainBudget = $this->pendingBudgetDrafts($cid, $projectIds, BudgetType::MainProject);
+            $pendingBoqEstimate = $this->pendingBudgetDrafts($cid, $projectIds, BudgetType::BoqEstimate);
+            $pendingBudget = $pendingMainBudget + $pendingBoqEstimate;
 
             $pendingGrn = DB::table('grns')
                 ->where('company_id', $cid)
@@ -120,6 +118,8 @@ class ManagementDashboardService
                 'operations' => [
                     'pending_approvals' => $user->can('approvals.view') ? $this->approvals->pendingCountFor($user) : 0,
                     'pending_budget_revisions' => $pendingBudget,
+                    'pending_main_budget_revisions' => $pendingMainBudget,
+                    'pending_boq_estimate_revisions' => $pendingBoqEstimate,
                     'pending_grn' => $pendingGrn,
                     'vendor_bills_pending' => $pendingBills,
                     'open_ncr' => array_sum(array_diff_key($ncr, ['closed' => true])),
@@ -148,10 +148,12 @@ class ManagementDashboardService
         ], function () use ($company, $user, $projectIds, $period, $cid) {
             $portfolio = $this->costPayload($user, $company, $projectIds, $period['as_of']);
 
+            $pendingMainBudget = $this->pendingBudgetDrafts($cid, $projectIds, BudgetType::MainProject);
+            $pendingBoqEstimate = $this->pendingBudgetDrafts($cid, $projectIds, BudgetType::BoqEstimate);
             $budgetChanges = [
-                'pending_revisions' => DB::table('project_budgets')
-                    ->where('company_id', $cid)->whereIn('project_id', $projectIds ?: [0])
-                    ->where('status', BudgetStatus::Draft->value)->whereNull('deleted_at')->count(),
+                'pending_revisions' => $pendingMainBudget + $pendingBoqEstimate,
+                'pending_main_budget_revisions' => $pendingMainBudget,
+                'pending_boq_estimate_revisions' => $pendingBoqEstimate,
                 'approved_boq_variations' => DB::table('boq_revision_change_orders')
                     ->where('company_id', $cid)->whereIn('project_id', $projectIds ?: [0])
                     ->where('status', RevisionChangeOrderStatus::Approved->value)->whereNull('deleted_at')->count(),
@@ -256,5 +258,19 @@ class ManagementDashboardService
         }
 
         return $this->costControl->portfolio((int) $company->id, $projectIds, $asOf);
+    }
+
+    /**
+     * @param  list<int>  $projectIds
+     */
+    private function pendingBudgetDrafts(int $companyId, array $projectIds, BudgetType $type): int
+    {
+        return (int) DB::table('project_budgets')
+            ->where('company_id', $companyId)
+            ->whereIn('project_id', $projectIds ?: [0])
+            ->where('budget_type', $type->value)
+            ->where('status', BudgetStatus::Draft->value)
+            ->whereNull('deleted_at')
+            ->count();
     }
 }

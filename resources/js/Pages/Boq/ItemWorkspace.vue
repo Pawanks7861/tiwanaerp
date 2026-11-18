@@ -1720,15 +1720,18 @@ function confirmRefreshRates(scope) {
         <div v-else-if="tab === 'planning_map'" class="space-y-4">
             <AppCard title="Planning Mapping">
                 <p class="mb-3 text-sm text-slate-600">
-                    Manually allocate part of this BOQ item to Planning activities (Nos or BOQ Quantity). Conversion is derived from BOQ measurements. Partial and split allocations are supported.
+                    Manually allocate part of this BOQ item to Planning activities (Nos or BOQ Quantity). Total Nos = NOB × Nos / Building; conversion = BOQ Qty ÷ Total Nos. Partial and split allocations are supported.
                 </p>
                 <div v-if="!planning_map" class="py-8 text-center text-sm text-slate-500">Loading planning mapping…</div>
                 <form v-else class="space-y-4" @submit.prevent="savePlanningMap">
                     <dl v-if="planning_map.allocation" class="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border border-line bg-slate-50 p-3 text-xs sm:grid-cols-4">
-                        <dt class="text-slate-500">BOQ Nos</dt><dd class="text-right tabular">{{ planning_map.allocation.boq_total_nos ?? '—' }}</dd>
+                        <dt class="text-slate-500" title="Number of Buildings">NOB</dt><dd class="text-right tabular">{{ planning_map.boq_item?.measurement_nob ?? 1 }}</dd>
+                        <dt class="text-slate-500">Nos / Building</dt><dd class="text-right tabular">{{ planning_map.boq_item?.nos_per_building ?? '—' }}</dd>
+                        <dt class="text-slate-500" title="NOB × Nos / Building">Total Nos</dt><dd class="text-right tabular font-medium text-slate-800">{{ planning_map.allocation.boq_total_nos ?? planning_map.boq_item?.effective_nos ?? '—' }}</dd>
                         <dt class="text-slate-500">BOQ Qty</dt><dd class="text-right tabular">{{ planning_map.allocation.boq_total_qty }} {{ planning_map.allocation.boq_unit }}</dd>
                         <dt class="text-slate-500">Mapped</dt><dd class="text-right tabular">{{ planning_map.allocation.mapped_nos }} Nos / {{ planning_map.allocation.mapped_boq_qty }} {{ planning_map.allocation.boq_unit }}</dd>
                         <dt class="text-slate-500">Available</dt><dd class="text-right tabular">{{ planning_map.allocation.available_nos ?? '—' }} Nos / {{ planning_map.allocation.available_boq_qty }} {{ planning_map.allocation.boq_unit }}</dd>
+                        <dt class="text-slate-500">Conversion</dt><dd class="text-right tabular">{{ planning_map.allocation.conversion_factor || '—' }} {{ planning_map.allocation.boq_unit ? `${planning_map.allocation.boq_unit}/No` : '' }}</dd>
                     </dl>
                     <div class="overflow-x-auto rounded-xl border border-line">
                         <table class="min-w-[980px] w-full text-left text-xs">

@@ -6,6 +6,7 @@ use App\Enums\Boq\BoqStatus;
 use App\Enums\Boq\BudgetLineSource;
 use App\Enums\Boq\BudgetSource;
 use App\Enums\Boq\BudgetStatus;
+use App\Enums\Boq\BudgetType;
 use App\Enums\CostHead;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
@@ -20,8 +21,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Versioned project budgets. A draft budget is rebuilt in place; once approved, any change
- * produces a new draft version and the approved one is superseded only when the new one is approved.
+ * Versioned project budgets by budget_type:
+ * - main_project: management ceiling (project create / WBS allocations)
+ * - boq_estimate: technical estimate synced from BOQ costing
+ *
+ * Streams never overwrite each other. Cost Control uses Main only.
  */
 class ProjectBudgetService
 {
@@ -33,15 +37,18 @@ class ProjectBudgetService
     ];
 
     /**
-     * Create Budget Version 1 (Draft) with WBS / Project Cost Head allocations for a new project.
+     * Create Main Project Budget Version 1 (Draft) with WBS allocations.
      *
      * @param  array<int|string, mixed>  $amountByHeadId  project_cost_head_id => amount
      */
     public function createInitialBudget(Project $project, array $amountByHeadId = []): ProjectBudget
     {
-        if (ProjectBudget::query()->where('project_id', $project->id)->exists()) {
+        if (ProjectBudget::query()
+            ->where('project_id', $project->id)
+            ->where('budget_type', BudgetType::MainProject)
+            ->exists()) {
             throw ValidationException::withMessages([
-                'budget' => 'This project already has a budget. Create a new version instead.',
+                'budget' => 'This project already has a Main Project Budget. Create a new version instead.',
             ]);
         }
 
@@ -51,6 +58,7 @@ class ProjectBudgetService
         $budget = new ProjectBudget;
         $budget->forceFill([
             'project_id' => $project->id,
+            'budget_type' => BudgetType::MainProject,
             'version' => 1,
             'source' => BudgetSource::Manual,
             'boq_id' => null,
@@ -83,7 +91,68 @@ class ProjectBudgetService
     }
 
     /**
-     * Build budget lines from the current approved BOQ: one line per BOQ line and cost head.
+     * Update Main Project Budget WBS line amounts on a draft.
+     *
+     * @param  array<int|string, mixed>  $amountByHeadId
+     */
+    public function saveWbsAllocations(ProjectBudget $budget, array $amountByHeadId): ProjectBudget
+    {
+        if ($budget->budget_type !== BudgetType::MainProject) {
+            throw ValidationException::withMessages([
+                'budget' => 'WBS allocations apply to Main Project Budget only.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($budget, $amountByHeadId) {
+            $locked = ProjectBudget::query()->whereKey($budget->id)->lockForUpdate()->firstOrFail();
+            $locked->assertEditable();
+
+            $project = $locked->project ?? Project::query()->findOrFail($locked->project_id);
+            $project->loadMissing('company');
+            $heads = app(ProjectCostHeadService::class)->ensureDefaults($project->company);
+
+            foreach ($heads as $head) {
+                $raw = $amountByHeadId[$head->id] ?? $amountByHeadId[(string) $head->id] ?? null;
+                if ($raw === null) {
+                    continue;
+                }
+                $amount = Decimal::of((string) ($raw === '' ? '0' : $raw));
+                if ($amount->isNegative()) {
+                    throw ValidationException::withMessages([
+                        "wbs_allocations.{$head->id}" => 'Budget amounts cannot be negative.',
+                    ]);
+                }
+
+                $line = $locked->lines()
+                    ->where('project_cost_head_id', $head->id)
+                    ->where('source_type', BudgetLineSource::Manual->value)
+                    ->first();
+
+                if ($line === null) {
+                    $line = new ProjectBudgetLine([
+                        'cost_head' => CostHead::Other->value,
+                        'project_cost_head_id' => $head->id,
+                        'description' => $head->name,
+                        'amount' => $amount->toMoney(),
+                        'source_type' => BudgetLineSource::Manual->value,
+                    ]);
+                    $line->budget()->associate($locked);
+                    $line->save();
+                } else {
+                    $line->forceFill([
+                        'description' => $head->name,
+                        'amount' => $amount->toMoney(),
+                    ])->save();
+                }
+            }
+
+            return $this->recalculate($locked->fresh());
+        });
+    }
+
+    /**
+     * Build / refresh BOQ Estimate draft from the current approved BOQ.
+     * Never writes Main Project Budget.
      */
     public function generateFromBoq(Project $project, Boq $boq): ProjectBudget
     {
@@ -92,8 +161,9 @@ class ProjectBudgetService
         }
 
         return DB::transaction(function () use ($project, $boq) {
-            $budget = $this->draftFor($project);
+            $budget = $this->draftFor($project, BudgetType::BoqEstimate);
             $budget->forceFill([
+                'budget_type' => BudgetType::BoqEstimate,
                 'source' => BudgetSource::Boq,
                 'boq_id' => $boq->id,
                 'materials_sync_pending' => false,
@@ -102,7 +172,6 @@ class ProjectBudgetService
             $budget->lines()->get()->each->delete();
 
             // Advanced BOQ: workbook cost components + BBS are the only estimate source.
-            // Do not also roll up item material_rate / labour_rate cost heads (double-count).
             if (! BoqCompanySettings::enabled($project->company)) {
                 $materials = app(SimpleBoqMaterialCostService::class);
                 $boq->items()->with('simpleMaterialCosts')->orderBy('sort_order')->orderBy('id')->get()
@@ -137,9 +206,6 @@ class ProjectBudgetService
     }
 
     /**
-     * Split a BOQ line's cost amount by head. Each head is rounded to paise; any rounding difference
-     * goes to the last non-zero head so the heads always add up to the line's cost_amount exactly.
-     *
      * @return array<string, string> cost head value => amount
      */
     public function headAmounts(BoqItem $item): array
@@ -168,33 +234,29 @@ class ProjectBudgetService
     public function saveLine(Project $project, array $data, ?ProjectBudgetLine $line = null): ProjectBudget
     {
         return DB::transaction(function () use ($project, $data, $line) {
-            $budget = $line?->budget ?? $this->draftFor($project);
+            $type = $line?->budget?->budget_type ?? BudgetType::tryFrom((string) ($data['budget_type'] ?? '')) ?? BudgetType::MainProject;
+            $budget = $line?->budget ?? $this->draftFor($project, $type);
             $budget->assertEditable();
 
             $line ??= new ProjectBudgetLine;
             if ($line->exists && $line->source_type instanceof BudgetLineSource
                 && in_array($line->source_type->value, BudgetLineSource::syncOwnedValues(), true)) {
                 throw ValidationException::withMessages([
-                    'line' => 'BOQ-generated budget lines are updated by Sync from BOQ, not manual edit.',
+                    'line' => 'BOQ-generated estimate lines are updated by Sync BOQ Estimate, not manual edit.',
                 ]);
             }
+            if ($budget->budget_type === BudgetType::BoqEstimate && ! $line->exists) {
+                throw ValidationException::withMessages([
+                    'line' => 'BOQ Estimate lines come from BOQ costing. Sync BOQ Estimate instead of adding manual lines.',
+                ]);
+            }
+
             $line->fill([
                 'cost_head' => $data['cost_head'],
-                'project_cost_head_id' => array_key_exists('project_cost_head_id', $data)
-                    ? ($data['project_cost_head_id'] ?: null)
-                    : $line->project_cost_head_id,
+                'project_cost_head_id' => $data['project_cost_head_id'] ?? $line->project_cost_head_id,
                 'description' => $data['description'],
                 'amount' => Decimal::of($data['amount'])->toMoney(),
-                'source_type' => BudgetLineSource::Manual->value,
-                'source_key' => null,
-                'material_id' => null,
-                'material_code' => null,
-                'material_name' => null,
-                'unit' => null,
-                'quantity' => null,
-                'rate' => null,
-                'sources' => null,
-                'boq_item_id' => $line->exists ? $line->boq_item_id : null,
+                'source_type' => $line->source_type?->value ?? BudgetLineSource::Manual->value,
             ]);
             $line->budget()->associate($budget);
             $line->save();
@@ -208,6 +270,12 @@ class ProjectBudgetService
         return DB::transaction(function () use ($line) {
             $budget = $line->budget;
             $budget->assertEditable();
+            if ($line->source_type instanceof BudgetLineSource
+                && in_array($line->source_type->value, BudgetLineSource::syncOwnedValues(), true)) {
+                throw ValidationException::withMessages([
+                    'line' => 'BOQ-generated estimate lines are removed by Sync BOQ Estimate.',
+                ]);
+            }
             $line->delete();
 
             return $this->recalculate($budget);
@@ -226,6 +294,7 @@ class ProjectBudgetService
 
             ProjectBudget::query()
                 ->where('project_id', $locked->project_id)
+                ->where('budget_type', $locked->budget_type)
                 ->where('status', BudgetStatus::Approved)
                 ->get()
                 ->each(fn (ProjectBudget $old) => $old->forceFill(['status' => BudgetStatus::Superseded])->save());
@@ -250,13 +319,13 @@ class ProjectBudgetService
     }
 
     /**
-     * The project's open draft budget, or a new draft version that starts as a copy of the
-     * approved budget (so editing an approved budget never overwrites it).
+     * Open draft for a budget type, or copy the approved version of that type.
      */
-    private function draftFor(Project $project): ProjectBudget
+    public function draftFor(Project $project, BudgetType $type): ProjectBudget
     {
         $latest = ProjectBudget::query()->withTrashed()
             ->where('project_id', $project->id)
+            ->where('budget_type', $type)
             ->orderByDesc('version')
             ->lockForUpdate()
             ->first();
@@ -267,14 +336,16 @@ class ProjectBudgetService
 
         $approved = ProjectBudget::query()
             ->where('project_id', $project->id)
+            ->where('budget_type', $type)
             ->where('status', BudgetStatus::Approved)
             ->first();
 
         $budget = new ProjectBudget;
         $budget->forceFill([
             'project_id' => $project->id,
+            'budget_type' => $type,
             'version' => ($latest?->version ?? 0) + 1,
-            'source' => $approved?->source ?? BudgetSource::Manual,
+            'source' => $approved?->source ?? ($type === BudgetType::BoqEstimate ? BudgetSource::Boq : BudgetSource::Manual),
             'boq_id' => $approved?->boq_id,
             'status' => BudgetStatus::Draft,
             'total_amount' => $approved?->total_amount ?? '0.00',
@@ -289,24 +360,24 @@ class ProjectBudgetService
         return $budget;
     }
 
-    /**
-     * Start a new draft version explicitly (copy of the approved budget, if any).
-     */
-    public function newVersion(Project $project): ProjectBudget
+    public function newVersion(Project $project, BudgetType $type = BudgetType::MainProject): ProjectBudget
     {
-        return DB::transaction(function () use ($project) {
-            $budget = $this->draftFor($project);
+        return DB::transaction(function () use ($project, $type) {
+            $budget = $this->draftFor($project, $type);
 
-            $approvedPending = ProjectBudget::query()
-                ->where('project_id', $project->id)
-                ->where('status', BudgetStatus::Approved)
-                ->where('materials_sync_pending', true)
-                ->exists();
+            if ($type === BudgetType::BoqEstimate) {
+                $approvedPending = ProjectBudget::query()
+                    ->where('project_id', $project->id)
+                    ->where('budget_type', BudgetType::BoqEstimate)
+                    ->where('status', BudgetStatus::Approved)
+                    ->where('materials_sync_pending', true)
+                    ->exists();
 
-            if ($approvedPending && $budget->boq_id) {
-                $boq = Boq::query()->find($budget->boq_id);
-                if ($boq !== null) {
-                    return app(BoqBudgetMaterialSyncService::class)->applyToDraft($budget, $boq);
+                if ($approvedPending && $budget->boq_id) {
+                    $boq = Boq::query()->find($budget->boq_id);
+                    if ($boq !== null) {
+                        return app(BoqBudgetMaterialSyncService::class)->applyToDraft($budget, $boq);
+                    }
                 }
             }
 
@@ -314,11 +385,17 @@ class ProjectBudgetService
         });
     }
 
-    /**
-     * Open draft budget for the project (creates a new version when the latest is approved).
-     */
-    public function ensureDraft(Project $project): ProjectBudget
+    public function ensureDraft(Project $project, BudgetType $type = BudgetType::MainProject): ProjectBudget
     {
-        return DB::transaction(fn () => $this->draftFor($project));
+        return DB::transaction(fn () => $this->draftFor($project, $type));
+    }
+
+    public function approvedOfType(Project $project, BudgetType $type): ?ProjectBudget
+    {
+        return ProjectBudget::query()
+            ->where('project_id', $project->id)
+            ->where('budget_type', $type)
+            ->where('status', BudgetStatus::Approved)
+            ->first();
     }
 }

@@ -276,7 +276,7 @@ class PlanningBoqMappingService
         return BoqPlanningMap::query()
             ->where('project_task_id', $task->id)
             ->where('is_active', true)
-            ->with(['item:id,name,item_code,quantity,measurement_nos,unit_id', 'item.unit:id,symbol', 'boq:id,boq_number,version,status,is_current'])
+            ->with(['item:id,name,item_code,quantity,measurement_nob,measurement_nos,unit_id', 'item.unit:id,symbol', 'boq:id,boq_number,version,status,is_current'])
             ->orderByDesc('is_primary')
             ->orderBy('sequence')
             ->orderBy('id')
@@ -317,6 +317,7 @@ class PlanningBoqMappingService
 
         return $items->map(function (BoqItem $item) {
             $summary = $this->allocationSummary($item);
+            $nos = SimpleBoqMeasurementCalculator::nosBreakdown($item);
 
             return [
                 'value' => $item->id,
@@ -329,9 +330,10 @@ class PlanningBoqMappingService
                 'item_code' => $item->item_code,
                 'unit' => $item->unit?->symbol,
                 'quantity' => Decimal::of($item->quantity ?? '0')->toQuantity(),
-                'measurement_nos' => $item->measurement_nos !== null
-                    ? Decimal::of($item->measurement_nos)->toQuantity()
-                    : null,
+                'measurement_nob' => $nos['measurement_nob'],
+                'nos_per_building' => $nos['nos_per_building'],
+                'measurement_nos' => $nos['effective_nos'],
+                'effective_nos' => $nos['effective_nos'],
                 'allocation' => $summary,
             ];
         })->values()->all();
@@ -671,22 +673,16 @@ class PlanningBoqMappingService
 
     private function conversionFactor(BoqItem $item): ?Decimal
     {
-        $nos = $this->boqNos($item);
-        $qty = Decimal::of($item->quantity ?? '0');
-        if ($nos === null || ! $nos->isPositive() || ! $qty->isPositive()) {
-            return null;
-        }
-
-        return $qty->dividedBy($nos, Decimal::QTY_SCALE)->round(Decimal::QTY_SCALE);
+        return SimpleBoqMeasurementCalculator::conversionFactorFromItem($item);
     }
 
+    /**
+     * Effective BOQ Nos for Planning = NOB × Nos (historical null NOB → 1).
+     * Raw Nos alone is never used as the allocation ceiling.
+     */
     private function boqNos(BoqItem $item): ?Decimal
     {
-        if ($item->measurement_nos === null || $item->measurement_nos === '') {
-            return null;
-        }
-
-        return Decimal::of($item->measurement_nos)->round(Decimal::QTY_SCALE);
+        return SimpleBoqMeasurementCalculator::effectiveNosFromItem($item);
     }
 
     private function requirePositiveQty(mixed $value, string $key, string $message): Decimal
@@ -717,6 +713,7 @@ class PlanningBoqMappingService
     private function boqItemSnapshot(BoqItem $item): array
     {
         $summary = $this->allocationSummary($item);
+        $nos = SimpleBoqMeasurementCalculator::nosBreakdown($item);
 
         return [
             'id' => $item->id,
@@ -724,9 +721,10 @@ class PlanningBoqMappingService
             'item_code' => $item->item_code,
             'quantity' => Decimal::of($item->quantity ?? '0')->toQuantity(),
             'unit_symbol' => $item->unit?->symbol,
-            'measurement_nos' => $item->measurement_nos !== null
-                ? Decimal::of($item->measurement_nos)->toQuantity()
-                : null,
+            'measurement_nob' => $nos['measurement_nob'],
+            'nos_per_building' => $nos['nos_per_building'],
+            'measurement_nos' => $nos['effective_nos'],
+            'effective_nos' => $nos['effective_nos'],
             'conversion_factor' => $summary['conversion_factor'],
             'nos_mapping_available' => $summary['nos_mapping_available'],
             'allocation' => $summary,

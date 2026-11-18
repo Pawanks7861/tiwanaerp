@@ -25,6 +25,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -91,7 +92,7 @@ class ProjectTaskController extends Controller
         $mapsByTask = BoqPlanningMap::query()
             ->whereIn('project_task_id', $tasks->modelKeys())
             ->where('is_active', true)
-            ->with(['item:id,name,item_code,quantity,measurement_nos,unit_id', 'item.unit:id,symbol', 'boq:id,boq_number,version'])
+            ->with(['item:id,name,item_code,quantity,measurement_nob,measurement_nos,unit_id', 'item.unit:id,symbol', 'boq:id,boq_number,version'])
             ->orderByDesc('is_primary')
             ->orderBy('sequence')
             ->orderBy('id')
@@ -136,17 +137,53 @@ class ProjectTaskController extends Controller
     public function store(ProjectTaskRequest $request, Project $project): RedirectResponse
     {
         $data = $request->taskData($request->user());
-        $task = $this->planning->saveTask($project, $data);
-        $label = ! empty($data['as_head']) || $task->isPlanningHead() ? 'Planning head' : 'Activity';
+        $maps = $request->mapsData();
 
-        return back()->with('success', "{$label} {$task->wbs_code} created.");
+        $task = DB::transaction(function () use ($project, $data, $maps, $request) {
+            $task = $this->planning->saveTask($project, $data);
+            if ($maps !== null && $maps !== [] && ! $task->isPlanningHead()) {
+                $this->boqMaps->saveMapsForTask($task, $this->normalizeMapRows($maps), $request->user());
+            }
+
+            return $task;
+        });
+
+        $label = ! empty($data['as_head']) || $task->isPlanningHead() ? 'Planning head' : 'Activity';
+        $suffix = ($maps !== null && $maps !== [] && ! $task->isPlanningHead()) ? ' with BOQ mapping' : '';
+
+        return back()->with('success', "{$label} {$task->wbs_code} created{$suffix}.");
     }
 
     public function update(ProjectTaskRequest $request, Project $project, ProjectTask $task): RedirectResponse
     {
-        $this->planning->saveTask($project, $request->taskData($request->user()), $task);
+        $maps = $request->mapsData();
+
+        DB::transaction(function () use ($request, $project, $task, $maps) {
+            $this->planning->saveTask($project, $request->taskData($request->user()), $task);
+            if ($maps !== null && ! $task->fresh()->isPlanningHead()) {
+                $this->boqMaps->saveMapsForTask($task->fresh(), $this->normalizeMapRows($maps), $request->user());
+            }
+        });
 
         return back()->with('success', 'Planning updated.');
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $maps
+     * @return list<array<string, mixed>>
+     */
+    private function normalizeMapRows(array $maps): array
+    {
+        return array_values(array_map(function (array $m, int $i) {
+            $basis = (string) ($m['tracking_basis'] ?? 'boq_quantity');
+            if ($basis === 'boq_quantity' && empty($m['allocated_boq_qty'])) {
+                $m['allocated_boq_qty'] = $m['planning_qty'] ?? null;
+            }
+            $m['is_primary'] = $i === 0 || ! empty($m['is_primary']);
+            $m['mapping_method'] = $m['mapping_method'] ?? 'conversion_based';
+
+            return $m;
+        }, $maps, array_keys($maps)));
     }
 
     public function updateStatus(Request $request, Project $project, ProjectTask $task): RedirectResponse

@@ -4,6 +4,7 @@ namespace App\Services\Boq;
 
 use App\Enums\Boq\SimpleBoqMeasurementFormula;
 use App\Enums\Boq\SimpleBoqMeasurementMode;
+use App\Models\Boq\BoqItem;
 use App\Support\Math\Decimal;
 use Illuminate\Validation\ValidationException;
 
@@ -115,6 +116,83 @@ class SimpleBoqMeasurementCalculator
         } catch (ValidationException) {
             return null;
         }
+    }
+
+    /**
+     * Effective Planning Nos = NOB × Nos (per building).
+     * Missing / blank NOB → 1. Null/blank/non-positive Nos → null (Nos mapping unavailable).
+     */
+    public static function effectiveNos(mixed $nob, mixed $nos): ?Decimal
+    {
+        if ($nos === null || $nos === '') {
+            return null;
+        }
+
+        $nosQty = Decimal::of(is_string($nos) || is_int($nos) || is_float($nos) ? (string) $nos : (string) $nos)
+            ->round(Decimal::QTY_SCALE);
+        if (! $nosQty->isPositive()) {
+            return null;
+        }
+
+        $nobQty = ($nob === null || $nob === '')
+            ? Decimal::of('1')
+            : Decimal::of(is_string($nob) || is_int($nob) || is_float($nob) ? (string) $nob : (string) $nob);
+
+        if (! $nobQty->isPositive()) {
+            $nobQty = Decimal::of('1');
+        }
+
+        return $nosQty->times($nobQty)->round(Decimal::QTY_SCALE);
+    }
+
+    /**
+     * Effective Nos from a BOQ item's measurement_nob × measurement_nos.
+     * Advanced items without Nos still return null — do not invent counts.
+     */
+    public static function effectiveNosFromItem(BoqItem $item): ?Decimal
+    {
+        return self::effectiveNos($item->measurement_nob ?? null, $item->measurement_nos ?? null);
+    }
+
+    /**
+     * Conversion factor BOQ Qty ÷ Effective Nos (NOB × Nos). Null when unavailable.
+     */
+    public static function conversionFactorFromItem(BoqItem $item): ?Decimal
+    {
+        $effective = self::effectiveNosFromItem($item);
+        $qty = Decimal::of($item->quantity ?? '0')->round(Decimal::QTY_SCALE);
+        if ($effective === null || ! $effective->isPositive() || ! $qty->isPositive()) {
+            return null;
+        }
+
+        return $qty->dividedBy($effective, Decimal::QTY_SCALE)->round(Decimal::QTY_SCALE);
+    }
+
+    /**
+     * Display helpers for Planning / API (null-safe).
+     *
+     * @return array{
+     *   measurement_nob: int,
+     *   nos_per_building: ?string,
+     *   effective_nos: ?string
+     * }
+     */
+    public static function nosBreakdown(BoqItem $item): array
+    {
+        $nob = (int) ($item->measurement_nob ?? 1);
+        if ($nob < 1) {
+            $nob = 1;
+        }
+        $perBuilding = ($item->measurement_nos !== null && $item->measurement_nos !== '')
+            ? Decimal::of($item->measurement_nos)->toQuantity()
+            : null;
+        $effective = self::effectiveNosFromItem($item);
+
+        return [
+            'measurement_nob' => $nob,
+            'nos_per_building' => $perBuilding,
+            'effective_nos' => $effective?->toQuantity(),
+        ];
     }
 
     private static function resolveFormula(mixed $raw, mixed $unitSymbol): SimpleBoqMeasurementFormula

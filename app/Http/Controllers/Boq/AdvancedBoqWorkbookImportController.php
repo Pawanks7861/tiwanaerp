@@ -168,7 +168,7 @@ class AdvancedBoqWorkbookImportController extends Controller
 
         return redirect()
             ->route('projects.boqs.show', [$project, $result['result']['boq_id']])
-            ->with('success', 'Advanced costing workbook imported. Budget Sync Required — run Sync from BOQ separately.');
+            ->with('success', 'Advanced costing workbook imported. BOQ Estimate Sync Required — run Sync BOQ Estimate separately. Main Project Budget is not updated.');
     }
 
     public function report(Request $request, Project $project, DataImport $import): JsonResponse|StreamedResponse

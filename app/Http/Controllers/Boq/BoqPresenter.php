@@ -12,6 +12,7 @@ use App\Models\Documents\DrawingRevision;
 use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Boq\SimpleBoqMaterialCostService;
+use App\Services\Boq\SimpleBoqMeasurementCalculator;
 use App\Support\Boq\AdvancedBoqApprovalStage;
 use App\Support\Boq\BoqCompanySettings;
 use App\Support\Math\Decimal;
@@ -88,7 +89,10 @@ final class BoqPresenter
         $data['concrete_mix_profile_name'] = is_array($snapshot) ? ($snapshot['name'] ?? null) : null;
         $data['measurement_mode'] = $item->measurement_mode?->value ?? $data['measurement_mode'] ?? null;
         $data['measurement_formula'] = $item->measurement_formula?->value ?? $data['measurement_formula'] ?? null;
-        $data['measurement_nob'] = (int) ($item->measurement_nob ?? 1);
+        $nos = SimpleBoqMeasurementCalculator::nosBreakdown($item);
+        $data['measurement_nob'] = $nos['measurement_nob'];
+        $data['nos_per_building'] = $nos['nos_per_building'];
+        $data['effective_nos'] = $nos['effective_nos'];
         $data['source_label'] = ($item->source_type === 'import' && $item->source_sheet && $item->source_row)
             ? "Imported from {$item->source_sheet} → Row {$item->source_row}"
             : null;

@@ -49,6 +49,8 @@ const props = defineProps({
     budget_sync: { type: Object, default: null },
     concrete_mix_profiles: { type: Array, default: () => [] },
     cost_heads: { type: Array, default: () => [] },
+    qty_totals_by_unit: { type: Array, default: () => [] },
+    section_qty_totals: { type: Object, default: () => ({}) },
 });
 
 const COST_FIELDS = ['material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent'];
@@ -357,6 +359,47 @@ const sectionTotal = (sectionId, field) => {
 };
 const unitLabel = (id) => props.units.find((u) => u.value === id)?.label ?? '—';
 const unitOptions = computed(() => props.units.map((u) => ({ value: u.value, label: u.label, description: u.name })));
+
+/** Live Qty totals from authoritative line quantity (not raw dimensions), grouped by unit. */
+function qtyTotalsForRows(sectionRows) {
+    const buckets = {};
+    sectionRows.forEach((r) => {
+        const unit = unitLabel(r.unit_id) || '—';
+        try {
+            const q = new Decimal(r.quantity === null || r.quantity === undefined || r.quantity === '' ? 0 : String(r.quantity));
+            buckets[unit] = (buckets[unit] || new Decimal(0)).plus(q);
+        } catch {
+            // ignore bad qty
+        }
+    });
+
+    return Object.keys(buckets)
+        .sort()
+        .map((unit) => ({
+            unit,
+            quantity: buckets[unit].toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4),
+        }))
+        .filter((t) => Number(t.quantity) !== 0);
+}
+
+function sectionQtyTotals(sectionId) {
+    const ids = [sectionId, ...childrenOf(sectionId).map((c) => c.id)];
+    const live = qtyTotalsForRows(rows.value.filter((r) => ids.includes(r.boq_section_id)));
+    if (live.length || editable.value) {
+        return live;
+    }
+
+    return props.section_qty_totals?.[sectionId] || props.section_qty_totals?.[String(sectionId)] || [];
+}
+
+const grandQtyTotals = computed(() => {
+    const live = qtyTotalsForRows(rows.value);
+    if (live.length || editable.value) {
+        return live;
+    }
+
+    return props.qty_totals_by_unit || [];
+});
 
 // ---- Row operations ----------------------------------------------------------------------------
 const editingRow = ref(null);
@@ -936,7 +979,7 @@ function heightDepthLabel(row) {
             <AppCard
                 v-if="advanced && budget_sync && can.view_costs"
                 title="Budget Sync"
-                subtitle="Workbook-driven Material Cost (A) + Labour Cost (B) + BBS/equipment → Project Budget. Commercial Rate is not the budget source."
+                subtitle="Workbook-driven Material Cost (A) + Labour Cost (B) + BBS/equipment → BOQ Estimate. Commercial Rate is not the estimate source. Main Project Budget is separate."
             >
                 <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
                     <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
@@ -963,7 +1006,7 @@ function heightDepthLabel(row) {
                 </div>
                 <div class="mt-3">
                     <Link :href="budget_sync.budget_index_url" class="text-sm font-medium text-brand-700 hover:underline">
-                        Open Project Budget → Sync from BOQ
+                        Open BOQ Estimate → Sync BOQ Estimate
                     </Link>
                 </div>
             </AppCard>
@@ -1229,8 +1272,15 @@ function heightDepthLabel(row) {
                                         <td :colspan="colCount - 2" class="px-2 py-2" :class="section.parent_id ? 'pl-6' : ''">
                                             <span class="font-semibold text-slate-800">{{ sectionLabel(section) }}</span>
                                             <span v-if="section.discipline" class="ml-2 text-[11px] text-slate-500">{{ section.discipline }}</span>
+                                            <span
+                                                v-if="!section.parent_id && sectionQtyTotals(section.id).length"
+                                                class="ml-3 inline-flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-bold tabular text-slate-900"
+                                                title="Section quantity totals by unit"
+                                            >
+                                                <span v-for="t in sectionQtyTotals(section.id)" :key="`${section.id}-${t.unit}`">{{ formatQty(t.quantity) }} {{ t.unit }}</span>
+                                            </span>
                                         </td>
-                                        <td class="px-2 py-2 text-right font-semibold text-slate-800 tabular">{{ section.parent_id ? '' : formatMoney(sectionTotal(section.id, 'client_amount')) }}</td>
+                                        <td class="px-2 py-2 text-right font-bold text-slate-900 tabular">{{ section.parent_id ? '' : formatMoney(sectionTotal(section.id, 'client_amount')) }}</td>
                                         <td class="px-2 py-2 text-right whitespace-nowrap">
                                             <template v-if="editable">
                                                 <button type="button" class="rounded px-1.5 py-0.5 text-brand-700 hover:bg-white" @click="addRow(section.id)">+ Item</button>
@@ -1304,7 +1354,7 @@ function heightDepthLabel(row) {
                                             <td class="px-2 py-1.5">{{ unitLabel(row.unit_id) }}</td>
                                             <td class="px-2 py-1.5 font-mono text-slate-600" :title="wbsTitle(row.project_cost_head_id)">{{ wbsLabel(row.project_cost_head_id) }}</td>
                                             <template v-if="showSimpleMeasurements">
-                                                <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_nob != null ? row.measurement_nob : '—' }}</td>
+                                                <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_nob != null && row.measurement_nob !== '' ? row.measurement_nob : 1 }}</td>
                                                 <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_nos != null ? formatQty(row.measurement_nos) : '—' }}</td>
                                                 <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_length != null ? formatQty(row.measurement_length) : '—' }}</td>
                                                 <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_width != null ? formatQty(row.measurement_width) : '—' }}</td>
@@ -1352,8 +1402,13 @@ function heightDepthLabel(row) {
                             </template>
                         </tbody>
                         <tfoot class="sticky bottom-0 bg-white shadow-[0_-1px_0_0_rgb(226_232_240)]">
-                            <tr class="font-semibold text-slate-900">
-                                <td :colspan="colCount - 2" class="px-2 py-2 text-right text-[11px] uppercase">Total</td>
+                            <tr class="font-bold text-slate-900">
+                                <td :colspan="colCount - 2" class="px-2 py-2 text-right text-[11px] uppercase">
+                                    Total
+                                    <span v-if="grandQtyTotals.length" class="ml-3 inline-flex flex-wrap justify-end gap-x-2 gap-y-0.5 text-[11px] normal-case tabular">
+                                        <span v-for="t in grandQtyTotals" :key="`g-${t.unit}`">{{ formatQty(t.quantity) }} {{ t.unit }}</span>
+                                    </span>
+                                </td>
                                 <td class="px-2 py-2 text-right tabular">{{ formatMoney(totals.client) }}</td>
                                 <td></td>
                             </tr>
@@ -1366,7 +1421,15 @@ function heightDepthLabel(row) {
                     <template v-for="top in topSections" :key="top.id">
                         <section v-for="section in [top, ...childrenOf(top.id)]" :key="section.id">
                             <div class="flex items-center justify-between gap-2 px-4 py-2.5" :class="section.parent_id ? 'bg-slate-50 pl-6' : 'bg-brand-50/60'">
-                                <span class="text-sm font-semibold text-slate-800">{{ sectionLabel(section) }}</span>
+                                <div class="min-w-0">
+                                    <span class="text-sm font-semibold text-slate-800">{{ sectionLabel(section) }}</span>
+                                    <p
+                                        v-if="!section.parent_id && sectionQtyTotals(section.id).length"
+                                        class="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-bold tabular text-slate-900"
+                                    >
+                                        <span v-for="t in sectionQtyTotals(section.id)" :key="`m-${section.id}-${t.unit}`">{{ formatQty(t.quantity) }} {{ t.unit }}</span>
+                                    </p>
+                                </div>
                                 <div v-if="editable" class="flex shrink-0 items-center gap-1">
                                     <button type="button" class="rounded px-2 py-1 text-xs font-medium text-brand-700" @click="addRow(section.id)">+ Item</button>
                                     <button type="button" class="rounded p-1 text-slate-400" aria-label="Edit section" @click="openSection(section)"><Icon name="pencil" :size="16" /></button>
@@ -1392,8 +1455,13 @@ function heightDepthLabel(row) {
                             </button>
                         </section>
                     </template>
-                    <div class="flex justify-between px-4 py-3 text-sm font-semibold">
-                        <span>Total</span><span class="tabular">{{ formatMoney(totals.client) }}</span>
+                    <div class="space-y-1 px-4 py-3 text-sm font-bold text-slate-900">
+                        <div v-if="grandQtyTotals.length" class="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] tabular">
+                            <span v-for="t in grandQtyTotals" :key="`mg-${t.unit}`">{{ formatQty(t.quantity) }} {{ t.unit }}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Total</span><span class="tabular">{{ formatMoney(totals.client) }}</span>
+                        </div>
                     </div>
                 </div>
 

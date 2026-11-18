@@ -20,12 +20,12 @@ use App\Models\Equipment\EquipmentFuelLog;
 use App\Models\Equipment\EquipmentRepair;
 use App\Models\Equipment\EquipmentUsageLog;
 use App\Models\Finance\ClientInvoice;
-use App\Models\Gate\GatePass;
 use App\Models\Finance\Expense;
 use App\Models\Finance\Payment;
 use App\Models\Finance\PettyCashAccount;
 use App\Models\Finance\RetentionRelease;
 use App\Models\Finance\VendorBill;
+use App\Models\Gate\GatePass;
 use App\Models\Inventory\MaterialIssue;
 use App\Models\Inventory\MaterialReturn;
 use App\Models\Inventory\StockAdjustment;
@@ -188,6 +188,26 @@ class Project extends Model
     public function budgets(): HasMany
     {
         return $this->hasMany(ProjectBudget::class);
+    }
+
+    /**
+     * Management Main Project Budget versions only.
+     *
+     * @return HasMany<ProjectBudget, $this>
+     */
+    public function mainBudgets(): HasMany
+    {
+        return $this->budgets()->mainProject();
+    }
+
+    /**
+     * BOQ Estimate versions only (technical estimate from BOQ costing).
+     *
+     * @return HasMany<ProjectBudget, $this>
+     */
+    public function boqEstimates(): HasMany
+    {
+        return $this->budgets()->boqEstimate();
     }
 
     /**

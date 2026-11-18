@@ -6,6 +6,7 @@ use App\Enums\Boq\BbsStatus;
 use App\Enums\Boq\BudgetLineSource;
 use App\Enums\Boq\BudgetSource;
 use App\Enums\Boq\BudgetStatus;
+use App\Enums\Boq\BudgetType;
 use App\Enums\Boq\CostComponentType;
 use App\Enums\CostHead;
 use App\Models\Boq\Boq;
@@ -23,13 +24,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Syncs BOQ material / labour / equipment / other into draft project budget lines.
+ * Syncs BOQ costing into the BOQ Estimate draft (never Main Project Budget).
  *
  * Advanced BOQ: workbook-driven cost components + approved BBS steel
  * (ignores legacy simple materials / flat labour_rate).
  * Simplified BOQ: legacy `boq_item_material_costs` + `boq_items.labour_rate`.
  *
- * Approved budgets are never mutated; a pending flag signals that a revision is required.
+ * Approved BOQ Estimate versions are never mutated; materials_sync_pending signals revision.
  */
 class BoqBudgetMaterialSyncService
 {
@@ -54,6 +55,7 @@ class BoqBudgetMaterialSyncService
 
         $draft = ProjectBudget::query()
             ->where('project_id', $project->id)
+            ->boqEstimate()
             ->where('status', BudgetStatus::Draft)
             ->first();
 
@@ -63,12 +65,13 @@ class BoqBudgetMaterialSyncService
             return [
                 'status' => 'synced',
                 'budget_id' => $synced->id,
-                'message' => 'Draft budget materials synced from BOQ.',
+                'message' => 'Draft BOQ Estimate synced from BOQ.',
             ];
         }
 
         $approved = ProjectBudget::query()
             ->where('project_id', $project->id)
+            ->boqEstimate()
             ->where('status', BudgetStatus::Approved)
             ->first();
 
@@ -78,14 +81,14 @@ class BoqBudgetMaterialSyncService
             return [
                 'status' => 'pending_revision',
                 'budget_id' => $approved->id,
-                'message' => 'Budget requires revision: BOQ material changes are pending a budget update.',
+                'message' => 'BOQ Estimate requires revision: BOQ costing changes are pending Sync BOQ Estimate.',
             ];
         }
 
         return [
             'status' => 'skipped',
             'budget_id' => null,
-            'message' => 'No project budget to sync.',
+            'message' => 'No BOQ Estimate yet — run Sync BOQ Estimate after BOQ costing exists.',
         ];
     }
 
@@ -99,7 +102,7 @@ class BoqBudgetMaterialSyncService
         }
 
         return DB::transaction(function () use ($project, $boq) {
-            $budget = $this->budgets->ensureDraft($project);
+            $budget = $this->budgets->ensureDraft($project, BudgetType::BoqEstimate);
             $budget->assertEditable();
 
             return $this->applyToDraft($budget, $boq);
@@ -114,6 +117,12 @@ class BoqBudgetMaterialSyncService
             throw ValidationException::withMessages(['budget' => 'Budget and BOQ must belong to the same project.']);
         }
 
+        if ($budget->budget_type !== BudgetType::BoqEstimate) {
+            throw ValidationException::withMessages([
+                'budget' => 'BOQ costing syncs into BOQ Estimate only — Main Project Budget is not updated.',
+            ]);
+        }
+
         return DB::transaction(function () use ($budget, $boq) {
             $locked = ProjectBudget::query()->whereKey($budget->id)->lockForUpdate()->firstOrFail();
             $locked->assertEditable();
@@ -125,10 +134,16 @@ class BoqBudgetMaterialSyncService
                 ->get()
                 ->each->delete();
 
+            $headByItem = BoqItem::query()
+                ->where('boq_id', $boq->id)
+                ->pluck('project_cost_head_id', 'id');
+
             foreach ($payload['lines'] as $row) {
+                $itemId = $row['boq_item_id'] ?? null;
                 $line = new ProjectBudgetLine;
                 $line->forceFill([
                     'cost_head' => $row['cost_head'],
+                    'project_cost_head_id' => $row['project_cost_head_id'] ?? ($itemId ? $headByItem[$itemId] ?? null : null),
                     'boq_item_id' => $row['boq_item_id'],
                     'source_type' => $row['source_type'],
                     'source_key' => $row['source_key'],
@@ -147,6 +162,7 @@ class BoqBudgetMaterialSyncService
             }
 
             $locked->forceFill([
+                'budget_type' => BudgetType::BoqEstimate,
                 'source' => BudgetSource::Boq,
                 'boq_id' => $boq->id,
                 'materials_synced_at' => now(),
@@ -155,6 +171,7 @@ class BoqBudgetMaterialSyncService
 
             ProjectBudget::query()
                 ->where('project_id', $locked->project_id)
+                ->boqEstimate()
                 ->where('status', BudgetStatus::Approved)
                 ->where('materials_sync_pending', true)
                 ->update(['materials_sync_pending' => false]);
@@ -494,6 +511,7 @@ class BoqBudgetMaterialSyncService
     {
         $budget ??= ProjectBudget::query()
             ->where('project_id', $project->id)
+            ->boqEstimate()
             ->where('status', BudgetStatus::Draft)
             ->orderByDesc('version')
             ->first();
@@ -533,6 +551,7 @@ class BoqBudgetMaterialSyncService
 
         $approved = ProjectBudget::query()
             ->where('project_id', $project->id)
+            ->boqEstimate()
             ->where('status', BudgetStatus::Approved)
             ->first();
 
@@ -541,6 +560,7 @@ class BoqBudgetMaterialSyncService
             'boq_label' => "{$boq->boq_number} v{$boq->version}",
             'budget_id' => $budget?->id,
             'budget_version' => $budget?->version,
+            'budget_type' => BudgetType::BoqEstimate->value,
             'blocked_by_approved' => $budget === null && $approved !== null,
             'creates' => count($create),
             'updates' => count($update),
@@ -574,14 +594,24 @@ class BoqBudgetMaterialSyncService
     public function syncStatus(Project $project, ?Boq $boq = null): array
     {
         $boq ??= $project->boqs()->where('is_current', true)->orderByDesc('version')->first();
-        $draft = ProjectBudget::query()->where('project_id', $project->id)->where('status', BudgetStatus::Draft)->orderByDesc('version')->first();
-        $approved = ProjectBudget::query()->where('project_id', $project->id)->where('status', BudgetStatus::Approved)->first();
+        $draft = ProjectBudget::query()
+            ->where('project_id', $project->id)
+            ->boqEstimate()
+            ->where('status', BudgetStatus::Draft)
+            ->orderByDesc('version')
+            ->first();
+        $approved = ProjectBudget::query()
+            ->where('project_id', $project->id)
+            ->boqEstimate()
+            ->where('status', BudgetStatus::Approved)
+            ->first();
         $pending = (bool) ($approved?->materials_sync_pending);
 
         $empty = [
             'status' => 'never_synced',
             'label' => 'Never Synced',
             'budget_version' => null,
+            'budget_type' => BudgetType::BoqEstimate->value,
             'materials_sync_pending' => false,
             'last_synced_at' => null,
             'last_synced_by' => null,
@@ -609,8 +639,9 @@ class BoqBudgetMaterialSyncService
         if ($pending && $draft === null) {
             return [
                 'status' => 'blocked_by_approved',
-                'label' => 'Blocked by Approved Budget',
+                'label' => 'Blocked by Approved BOQ Estimate',
                 'budget_version' => $approved?->version,
+                'budget_type' => BudgetType::BoqEstimate->value,
                 'materials_sync_pending' => true,
                 'last_synced_at' => $approved?->materials_synced_at?->toIso8601String(),
                 'last_synced_by' => $syncedBy($approved),
@@ -624,8 +655,9 @@ class BoqBudgetMaterialSyncService
         if ($pending) {
             return [
                 'status' => 'sync_required',
-                'label' => 'Budget Sync Required',
+                'label' => 'BOQ Estimate Sync Required',
                 'budget_version' => $draft?->version ?? $approved?->version,
+                'budget_type' => BudgetType::BoqEstimate->value,
                 'materials_sync_pending' => true,
                 'last_synced_at' => ($draft ?? $approved)?->materials_synced_at?->toIso8601String(),
                 'last_synced_by' => $syncedBy($draft ?? $approved),
@@ -648,7 +680,7 @@ class BoqBudgetMaterialSyncService
         if ($target->boq_id !== null && (int) $target->boq_id !== (int) $boq->id) {
             return [
                 'status' => 'sync_required',
-                'label' => 'Budget Sync Required (BOQ revision mismatch)',
+                'label' => 'BOQ Estimate Sync Required (BOQ revision mismatch)',
                 'budget_version' => $target->version,
                 'materials_sync_pending' => false,
                 'last_synced_at' => $target->materials_synced_at?->toIso8601String(),

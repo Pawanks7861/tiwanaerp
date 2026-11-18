@@ -3,6 +3,7 @@
 namespace App\Services\Projects;
 
 use App\Enums\Boq\BudgetStatus;
+use App\Enums\Boq\BudgetType;
 use App\Enums\Finance\ExpenseStatus;
 use App\Enums\Finance\VendorBillStatus;
 use App\Enums\Subcontract\SubcontractorBillStatus;
@@ -62,8 +63,10 @@ class ProjectCostControlService
         $companyId = (int) $project->company_id;
         $projectId = (int) $project->id;
         $heads = $this->heads->activeForCompany($project->company);
-        $original = $this->originalByHead($companyId, [$projectId])[$projectId] ?? [];
-        $revised = $this->revisedByHead($companyId, [$projectId])[$projectId] ?? [];
+        // Cost Control ceiling = Main Project Budget only. BOQ Estimate is reference.
+        $original = $this->originalByHead($companyId, [$projectId], BudgetType::MainProject)[$projectId] ?? [];
+        $revised = $this->revisedByHead($companyId, [$projectId], BudgetType::MainProject)[$projectId] ?? [];
+        $boqEstimate = $this->revisedByHead($companyId, [$projectId], BudgetType::BoqEstimate)[$projectId] ?? [];
         $invoiced = $this->actualInvoicedByHead($companyId, [$projectId], $asOf)[$projectId] ?? [];
         $open = $this->openCommitmentByHead($companyId, [$projectId])[$projectId] ?? [];
         $gst = $this->gstExposureByHead($companyId, [$projectId], $asOf)[$projectId] ?? [];
@@ -81,22 +84,28 @@ class ProjectCostControlService
                 $invoiced[$head->id] ?? Decimal::zero(),
                 $open[$head->id] ?? Decimal::zero(),
                 $gst[$head->id] ?? Decimal::zero(),
+                $boqEstimate[$head->id] ?? Decimal::zero(),
             );
         }
 
         $unallocatedInvoiced = $invoiced[0] ?? Decimal::zero();
         $unallocatedOpen = $open[0] ?? Decimal::zero();
         $unallocatedGst = $gst[0] ?? Decimal::zero();
+        $unallocatedBoq = $boqEstimate[0] ?? Decimal::zero();
         $unallocated = $this->headRow(
             null,
             'UNALLOC',
-            'Unallocated',
+            'Unallocated Project Cost',
             Decimal::zero(),
             Decimal::zero(),
             $unallocatedInvoiced,
             $unallocatedOpen,
             $unallocatedGst,
+            $unallocatedBoq,
         );
+        if ($unallocatedBoq->isPositive()) {
+            $unallocated['name'] = 'Unallocated Project Cost / Unallocated BOQ Estimate';
+        }
 
         $totals = $this->sumRows([...$rows, $unallocated]);
         $status = $this->deriveStatus($totals, $unallocated);
@@ -105,7 +114,9 @@ class ProjectCostControlService
             'project_id' => $projectId,
             'as_of' => $asOf,
             'date_basis' => [
-                'budget' => 'Current approved Project Budget version (Original = first approved baseline)',
+                'main_project_budget' => 'Current approved Main Project Budget (Original = first approved Main baseline)',
+                'boq_estimate' => 'Current approved BOQ Estimate (technical; not a commitment)',
+                'budget' => 'Current approved Main Project Budget (Original = first approved Main baseline)',
                 'commitment' => 'Current open approved PO / WO commitment',
                 'actual_invoiced' => 'Cumulative approved / certified documents'.($asOf ? " to {$asOf}" : ''),
                 'cash_paid' => 'Payment date',
@@ -113,6 +124,9 @@ class ProjectCostControlService
             'heads' => $rows,
             'unallocated' => $unallocated,
             'totals' => $totals,
+            'main_project_budget' => $totals['revised_budget'],
+            'boq_estimate' => $totals['boq_estimate'],
+            'boq_vs_main_budget' => $totals['boq_vs_main_budget'],
             'cash_paid' => $cash->toMoney(),
             'balance_payable' => ($payable['vendor'] ?? Decimal::zero())->plus($payable['subcontract'] ?? Decimal::zero())->toMoney(),
             'status' => $status,
@@ -164,8 +178,9 @@ class ProjectCostControlService
 
         $company = Company::query()->findOrFail($companyId);
         $heads = $this->heads->activeForCompany($company);
-        $originalAll = $this->originalByHead($companyId, $projectIds);
-        $revisedAll = $this->revisedByHead($companyId, $projectIds);
+        $originalAll = $this->originalByHead($companyId, $projectIds, BudgetType::MainProject);
+        $revisedAll = $this->revisedByHead($companyId, $projectIds, BudgetType::MainProject);
+        $boqAll = $this->revisedByHead($companyId, $projectIds, BudgetType::BoqEstimate);
         $invoicedAll = $this->actualInvoicedByHead($companyId, $projectIds, $asOf);
         $openAll = $this->openCommitmentByHead($companyId, $projectIds);
         $gstAll = $this->gstExposureByHead($companyId, $projectIds, $asOf);
@@ -178,6 +193,7 @@ class ProjectCostControlService
             $pid = (int) $p->id;
             $original = Decimal::sum(array_values($originalAll[$pid] ?? []));
             $revised = Decimal::sum(array_values($revisedAll[$pid] ?? []));
+            $boqEstimate = Decimal::sum(array_values($boqAll[$pid] ?? []));
             $invoiced = Decimal::sum(array_values($invoicedAll[$pid] ?? []));
             $open = Decimal::sum(array_values($openAll[$pid] ?? []));
             $assigned = $invoiced->plus($open);
@@ -188,6 +204,9 @@ class ProjectCostControlService
                 'original_budget' => $original->toMoney(),
                 'approved_changes' => $changes->toMoney(),
                 'revised_budget' => $revised->toMoney(),
+                'main_project_budget' => $revised->toMoney(),
+                'boq_estimate' => $boqEstimate->toMoney(),
+                'boq_vs_main_budget' => $boqEstimate->minus($revised)->toMoney(),
                 'actual_invoiced' => $invoiced->toMoney(),
                 'open_commitment' => $open->toMoney(),
                 'total_assigned' => $assigned->toMoney(),
@@ -216,11 +235,13 @@ class ProjectCostControlService
         foreach ($heads as $head) {
             $orig = Decimal::zero();
             $rev = Decimal::zero();
+            $boq = Decimal::zero();
             $act = Decimal::zero();
             $opn = Decimal::zero();
             foreach ($projectIds as $pid) {
                 $orig = $orig->plus($originalAll[$pid][$head->id] ?? Decimal::zero());
                 $rev = $rev->plus($revisedAll[$pid][$head->id] ?? Decimal::zero());
+                $boq = $boq->plus($boqAll[$pid][$head->id] ?? Decimal::zero());
                 $act = $act->plus($invoicedAll[$pid][$head->id] ?? Decimal::zero());
                 $opn = $opn->plus($openAll[$pid][$head->id] ?? Decimal::zero());
             }
@@ -230,6 +251,9 @@ class ProjectCostControlService
                 'code' => $head->code,
                 'name' => $head->name,
                 'revised_budget' => $rev->toMoney(),
+                'main_project_budget' => $rev->toMoney(),
+                'boq_estimate' => $boq->toMoney(),
+                'boq_vs_main_budget' => $boq->minus($rev)->toMoney(),
                 'actual_invoiced' => $act->toMoney(),
                 'open_commitment' => $opn->toMoney(),
                 'available_budget' => $rev->minus($assigned)->toMoney(),
@@ -242,6 +266,9 @@ class ProjectCostControlService
             'original_budget' => Decimal::sum(array_column($projectRows, 'original_budget'))->toMoney(),
             'approved_changes' => Decimal::sum(array_column($projectRows, 'approved_changes'))->toMoney(),
             'revised_budget' => Decimal::sum(array_column($projectRows, 'revised_budget'))->toMoney(),
+            'main_project_budget' => Decimal::sum(array_column($projectRows, 'main_project_budget'))->toMoney(),
+            'boq_estimate' => Decimal::sum(array_column($projectRows, 'boq_estimate'))->toMoney(),
+            'boq_vs_main_budget' => Decimal::sum(array_column($projectRows, 'boq_vs_main_budget'))->toMoney(),
             'actual_invoiced' => Decimal::sum(array_column($projectRows, 'actual_invoiced'))->toMoney(),
             'open_commitment' => Decimal::sum(array_column($projectRows, 'open_commitment'))->toMoney(),
             'total_assigned' => Decimal::sum(array_column($projectRows, 'total_assigned'))->toMoney(),
@@ -452,7 +479,12 @@ class ProjectCostControlService
             ];
         }
 
-        $budgetTotal = Decimal::sum(array_values($this->revisedByHead((int) $project->company_id, [(int) $project->id])[(int) $project->id] ?? []));
+        $budgetTotal = Decimal::sum(array_values(
+            $this->revisedByHead((int) $project->company_id, [(int) $project->id], BudgetType::MainProject)[(int) $project->id] ?? []
+        ));
+        $boqEstimateTotal = Decimal::sum(array_values(
+            $this->revisedByHead((int) $project->company_id, [(int) $project->id], BudgetType::BoqEstimate)[(int) $project->id] ?? []
+        ));
         $plannedTotal = $plan ? Num::dec($plan->total_planned) : Decimal::zero();
 
         return [
@@ -464,6 +496,8 @@ class ProjectCostControlService
                 'total_planned' => Num::dec($plan->total_planned)->toMoney(),
             ] : null,
             'budget_total' => $budgetTotal->toMoney(),
+            'main_project_budget' => $budgetTotal->toMoney(),
+            'boq_estimate' => $boqEstimateTotal->toMoney(),
             'plan_reconciles' => $plan ? $plannedTotal->equals($budgetTotal) : null,
             'months' => $rows,
         ];
@@ -487,7 +521,7 @@ class ProjectCostControlService
             ->whereNull('b.deleted_at')
             ->tap(fn ($q) => $headFilter($q, 'bl.project_cost_head_id'))
             ->orderByDesc('b.version')
-            ->get(['bl.id', 'b.version', 'b.status', 'bl.description', 'bl.amount', 'bl.project_cost_head_id']);
+            ->get(['bl.id', 'b.version', 'b.status', 'b.budget_type', 'bl.description', 'bl.amount', 'bl.project_cost_head_id']);
 
         $pos = DB::table('purchase_order_items as poi')
             ->join('purchase_orders as po', 'po.id', '=', 'poi.purchase_order_id')
@@ -572,11 +606,12 @@ class ProjectCostControlService
      * @param  list<int>  $projectIds
      * @return array<int, array<int, Decimal>> project => headId(0=unalloc) => amount
      */
-    public function originalByHead(int $companyId, array $projectIds): array
+    public function originalByHead(int $companyId, array $projectIds, BudgetType $type = BudgetType::MainProject): array
     {
         $baselines = DB::table('project_budgets')
             ->where('company_id', $companyId)
             ->whereIn('project_id', $projectIds ?: [0])
+            ->where('budget_type', $type->value)
             ->whereIn('status', [BudgetStatus::Approved->value, BudgetStatus::Superseded->value])
             ->whereNull('deleted_at')
             ->orderBy('project_id')
@@ -598,11 +633,12 @@ class ProjectCostControlService
      * @param  list<int>  $projectIds
      * @return array<int, array<int, Decimal>>
      */
-    public function revisedByHead(int $companyId, array $projectIds): array
+    public function revisedByHead(int $companyId, array $projectIds, BudgetType $type = BudgetType::MainProject): array
     {
         $ids = DB::table('project_budgets')
             ->where('company_id', $companyId)
             ->whereIn('project_id', $projectIds ?: [0])
+            ->where('budget_type', $type->value)
             ->where('status', BudgetStatus::Approved->value)
             ->whereNull('deleted_at')
             ->pluck('id')
@@ -862,10 +898,13 @@ class ProjectCostControlService
     {
         return ProjectBudget::query()
             ->where('project_id', $project->id)
+            ->orderBy('budget_type')
             ->orderByDesc('version')
-            ->get(['id', 'version', 'status', 'source', 'total_amount', 'approved_at'])
+            ->get(['id', 'budget_type', 'version', 'status', 'source', 'total_amount', 'approved_at'])
             ->map(fn (ProjectBudget $b) => [
                 'id' => $b->id,
+                'budget_type' => $b->budget_type?->value ?? BudgetType::MainProject->value,
+                'budget_type_label' => $b->budget_type?->label() ?? BudgetType::MainProject->label(),
                 'version' => $b->version,
                 'status' => $b->status->value,
                 'status_label' => $b->status->label(),
@@ -940,7 +979,9 @@ class ProjectCostControlService
         Decimal $invoiced,
         Decimal $open,
         Decimal $gst,
+        ?Decimal $boqEstimate = null,
     ): array {
+        $boq = $boqEstimate ?? Decimal::zero();
         $changes = $revised->minus($original);
         $assigned = $invoiced->plus($open);
         $available = $revised->minus($assigned);
@@ -952,6 +993,9 @@ class ProjectCostControlService
             'original_budget' => $original->toMoney(),
             'approved_changes' => $changes->toMoney(),
             'revised_budget' => $revised->toMoney(),
+            'main_project_budget' => $revised->toMoney(),
+            'boq_estimate' => $boq->toMoney(),
+            'boq_vs_main_budget' => $boq->minus($revised)->toMoney(),
             'actual_invoiced' => $invoiced->toMoney(),
             'open_commitment' => $open->toMoney(),
             'total_assigned' => $assigned->toMoney(),
@@ -973,7 +1017,8 @@ class ProjectCostControlService
     private function sumRows(array $rows): array
     {
         $keys = [
-            'original_budget', 'approved_changes', 'revised_budget', 'actual_invoiced',
+            'original_budget', 'approved_changes', 'revised_budget', 'main_project_budget',
+            'boq_estimate', 'boq_vs_main_budget', 'actual_invoiced',
             'open_commitment', 'total_assigned', 'available_budget', 'gst_exposure',
         ];
         $totals = [];

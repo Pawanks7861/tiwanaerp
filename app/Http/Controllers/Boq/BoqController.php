@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Boq;
 
 use App\Enums\Boq\BoqStatus;
+use App\Enums\Boq\BudgetType;
 use App\Enums\Imports\ImportStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Projects\ProjectHeader;
@@ -23,6 +24,7 @@ use App\Services\Approval\ApprovalService;
 use App\Services\Boq\AdvancedBoqRevisionComparisonService;
 use App\Services\Boq\AdvancedBoqTechnicalApprovalValidator;
 use App\Services\Boq\BoqBudgetMaterialSyncService;
+use App\Services\Boq\BoqQtyTotals;
 use App\Services\Boq\BoqRevisionService;
 use App\Services\Boq\BoqService;
 use App\Services\Projects\ProjectCostHeadService;
@@ -127,11 +129,14 @@ class BoqController extends Controller
             ->with(array_values(array_filter([
                 'attachments.uploader:id,name',
                 'projectCostHead:id,code,name',
+                'unit:id,symbol',
                 $withCosts ? 'simpleMaterialCosts' : null,
             ])))
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get();
+        $qtyTotalsByUnit = BoqQtyTotals::forItems($items);
+        $sectionQtyTotals = BoqQtyTotals::forSections($items, $sections);
 
         $analyses = $withCosts && $boq->isEditable()
             ? $this->boqs->applicableAnalyses($boq)->values()->map(
@@ -158,6 +163,8 @@ class BoqController extends Controller
             'has_newer_approved_revision' => collect($drawings)->contains(fn (array $row) => $row['newer_revision'] !== null),
             'sections' => $sections->map(fn (BoqSection $s) => $s->only(['id', 'parent_id', 'code', 'name', 'discipline', 'sort_order']))->all(),
             'items' => $items->map(fn (BoqItem $i) => BoqPresenter::item($i, $withCosts))->all(),
+            'qty_totals_by_unit' => $qtyTotalsByUnit,
+            'section_qty_totals' => $sectionQtyTotals,
             'units' => Unit::query()->active()->orderBy('symbol')->get(['id', 'name', 'symbol'])
                 ->map(fn (Unit $u) => ['value' => $u->id, 'label' => $u->symbol, 'name' => $u->name])->all(),
             'cost_heads' => collect(app(ProjectCostHeadService::class)->options($project->company))
@@ -320,7 +327,11 @@ class BoqController extends Controller
             'material_cost_a' => $proposed['reconciliation']['material'],
             'labour_cost_b' => $proposed['reconciliation']['labour'],
             'budget_generated_cost' => $budgetGenerated,
-            'budget_index_url' => route('projects.budget.index', $project),
+            'boq_estimate_cost' => $budgetGenerated,
+            'budget_index_url' => route('projects.budget.index', [
+                $project,
+                'budget_type' => BudgetType::BoqEstimate->value,
+            ]),
         ];
     }
 

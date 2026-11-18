@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests\Planning;
 
+use App\Enums\Boq\PlanningBoqMappingMethod;
+use App\Enums\Boq\PlanningTrackingBasis;
 use App\Enums\Planning\TaskPriority;
 use App\Http\Requests\Concerns\NormalizesDecimals;
 use App\Models\Masters\Unit;
@@ -60,6 +62,16 @@ class ProjectTaskRequest extends FormRequest
             'hold_quantity' => ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
             'budget_amount' => ['nullable', 'numeric', 'min:0', 'max:9999999999999999', 'decimal:0,2'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
+            // Optional same-step BOQ mapping (create/update activity in one request).
+            'maps' => ['sometimes', 'array', 'max:50'],
+            'maps.*.id' => ['nullable', 'integer'],
+            'maps.*.boq_item_id' => ['required', 'integer'],
+            'maps.*.tracking_basis' => ['required', Rule::enum(PlanningTrackingBasis::class)],
+            'maps.*.mapping_method' => ['nullable', Rule::enum(PlanningBoqMappingMethod::class)],
+            'maps.*.planning_qty' => ['required', 'numeric', 'gt:0'],
+            'maps.*.allocated_boq_qty' => ['nullable', 'numeric', 'min:0'],
+            'maps.*.is_primary' => ['nullable', 'boolean'],
+            'maps.*.remarks' => ['nullable', 'string', 'max:500'],
         ];
     }
 
@@ -98,7 +110,25 @@ class ProjectTaskRequest extends FormRequest
         if (! $user->can('boq.view_costs')) {
             unset($data['budget_amount']);
         }
+        unset($data['maps']);
 
         return $data;
+    }
+
+    /**
+     * Optional BOQ maps submitted with create/update. Empty / absent = no mapping change on create.
+     *
+     * @return list<array<string, mixed>>|null null = maps key not present (do not touch maps on update)
+     */
+    public function mapsData(): ?array
+    {
+        if (! $this->exists('maps')) {
+            return null;
+        }
+
+        /** @var list<array<string, mixed>> $maps */
+        $maps = $this->validated('maps') ?? [];
+
+        return array_values($maps);
     }
 }

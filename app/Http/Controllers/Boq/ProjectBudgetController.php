@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Boq;
 use App\Enums\Boq\BoqStatus;
 use App\Enums\Boq\BudgetLineSource;
 use App\Enums\Boq\BudgetStatus;
+use App\Enums\Boq\BudgetType;
 use App\Enums\CostHead;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Projects\ProjectHeader;
@@ -14,6 +15,7 @@ use App\Models\Boq\ProjectBudgetLine;
 use App\Models\Projects\Project;
 use App\Services\Boq\BoqBudgetMaterialSyncService;
 use App\Services\Boq\ProjectBudgetService;
+use App\Services\Projects\ProjectCostHeadService;
 use App\Support\Math\Decimal;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -28,6 +30,7 @@ class ProjectBudgetController extends Controller
     public function __construct(
         private readonly ProjectBudgetService $budgets,
         private readonly BoqBudgetMaterialSyncService $materialSync,
+        private readonly ProjectCostHeadService $costHeads,
     ) {}
 
     public function index(Request $request, Project $project): Response
@@ -35,7 +38,14 @@ class ProjectBudgetController extends Controller
         Gate::authorize('viewAny', [ProjectBudget::class, $project]);
 
         $user = $request->user();
-        $versions = $project->budgets()->with(['approver:id,name', 'boq:id,boq_number,version'])->orderByDesc('version')->get()
+        $type = BudgetType::tryFrom((string) $request->query('budget_type', BudgetType::MainProject->value))
+            ?? BudgetType::MainProject;
+
+        $versions = $project->budgets()
+            ->ofType($type)
+            ->with(['approver:id,name', 'boq:id,boq_number,version'])
+            ->orderByDesc('version')
+            ->get()
             ->each->setRelation('project', $project);
 
         $selectedId = (int) $request->query('version_id', 0);
@@ -51,6 +61,18 @@ class ProjectBudgetController extends Controller
             ];
         }
 
+        $wbsHeads = $this->costHeads->ensureDefaults($project->company)->map(function ($head) use ($lines) {
+            $line = $lines->firstWhere('project_cost_head_id', $head->id);
+
+            return [
+                'id' => $head->id,
+                'code' => $head->code,
+                'name' => $head->name,
+                'line_id' => $line?->id,
+                'amount' => $line ? (string) $line->amount : '0.00',
+            ];
+        })->values()->all();
+
         $currentBoqs = $project->boqs()->where('status', BoqStatus::Approved)->where('is_current', true)
             ->orderBy('boq_number')->get(['id', 'boq_number', 'version', 'title', 'total_cost_amount']);
 
@@ -63,14 +85,24 @@ class ProjectBudgetController extends Controller
         )->values();
 
         $pendingRevision = $project->budgets()
+            ->boqEstimate()
             ->where('status', BudgetStatus::Approved)
             ->where('materials_sync_pending', true)
             ->exists();
 
+        $mainApproved = $this->budgets->approvedOfType($project, BudgetType::MainProject);
+        $boqApproved = $this->budgets->approvedOfType($project, BudgetType::BoqEstimate);
+
         return Inertia::render('Budget/Index', [
             'project' => ProjectHeader::for($project),
+            'budget_type' => $type->value,
+            'budget_type_label' => $type->label(),
+            'budget_types' => BudgetType::options(),
+            'main_project_budget_total' => $mainApproved?->total_amount,
+            'boq_estimate_total' => $boqApproved?->total_amount,
             'versions' => $versions->map(fn (ProjectBudget $b) => [
                 ...$b->only(['id', 'version', 'total_amount', 'boq_id', 'materials_sync_pending']),
+                'budget_type' => $b->budget_type->value,
                 'status' => $b->status->value,
                 'status_label' => $b->status->label(),
                 'source' => $b->source->value,
@@ -82,6 +114,7 @@ class ProjectBudgetController extends Controller
             ])->all(),
             'budget' => $budget ? [
                 ...$budget->only(['id', 'version', 'total_amount', 'boq_id']),
+                'budget_type' => $budget->budget_type->value,
                 'status' => $budget->status->value,
                 'editable' => $budget->status === BudgetStatus::Draft,
                 'can_approve' => $budget->status === BudgetStatus::Draft && $user->can('approve', $budget),
@@ -91,6 +124,7 @@ class ProjectBudgetController extends Controller
                     ? "{$budget->boq->boq_number} v{$budget->boq->version}"
                     : null,
             ] : null,
+            'wbsHeads' => $wbsHeads,
             'heads' => $byHead,
             'lines' => $otherLines->map(fn (ProjectBudgetLine $l) => $this->linePayload($l))->all(),
             'materialLines' => $materialLines->map(fn (ProjectBudgetLine $l) => $this->materialLinePayload($l))->all(),
@@ -114,6 +148,60 @@ class ProjectBudgetController extends Controller
         ]);
     }
 
+    public function createMain(Project $project): RedirectResponse
+    {
+        Gate::authorize('update', [ProjectBudget::class, $project]);
+
+        $budget = $this->budgets->createInitialBudget($project, []);
+
+        return redirect()->route('projects.budget.index', [
+            $project,
+            'budget_type' => BudgetType::MainProject->value,
+            'version_id' => $budget->id,
+        ])->with('success', 'Main Project Budget draft created with WBS heads. Enter allocations, then Approve.');
+    }
+
+    public function saveWbsAllocations(Request $request, Project $project): RedirectResponse
+    {
+        Gate::authorize('update', [ProjectBudget::class, $project]);
+
+        $rawAllocations = $request->input('wbs_allocations', []);
+        if (is_array($rawAllocations)) {
+            foreach ($rawAllocations as $headId => $amount) {
+                if (is_int($amount) || is_float($amount)) {
+                    $rawAllocations[$headId] = is_float($amount)
+                        ? rtrim(rtrim(sprintf('%.6F', $amount), '0'), '.')
+                        : (string) $amount;
+                }
+            }
+            $request->merge(['wbs_allocations' => $rawAllocations]);
+        }
+
+        $data = $request->validate([
+            'version_id' => ['nullable', 'integer'],
+            'wbs_allocations' => ['required', 'array'],
+            'wbs_allocations.*' => ['nullable', 'numeric', 'min:0', 'max:9999999999999999', 'decimal:0,2'],
+        ]);
+
+        $budgetQuery = $project->budgets()->mainProject();
+        $budget = ! empty($data['version_id'])
+            ? $budgetQuery->whereKey((int) $data['version_id'])->firstOrFail()
+            : $budgetQuery->where('status', BudgetStatus::Draft)->orderByDesc('version')->firstOrFail();
+
+        $amounts = [];
+        foreach ($data['wbs_allocations'] as $headId => $amount) {
+            $amounts[$headId] = $amount === null || $amount === '' ? '0' : (string) $amount;
+        }
+
+        $budget = $this->budgets->saveWbsAllocations($budget, $amounts);
+
+        return redirect()->route('projects.budget.index', [
+            $project,
+            'budget_type' => BudgetType::MainProject->value,
+            'version_id' => $budget->id,
+        ])->with('success', 'Main Project Budget WBS allocations saved.');
+    }
+
     public function generate(Request $request, Project $project): RedirectResponse
     {
         Gate::authorize('update', [ProjectBudget::class, $project]);
@@ -122,8 +210,11 @@ class ProjectBudgetController extends Controller
         $boq = $project->boqs()->findOrFail($data['boq_id']);
         $budget = $this->budgets->generateFromBoq($project, $boq);
 
-        return redirect()->route('projects.budget.index', [$project, 'version_id' => $budget->id])
-            ->with('success', "Budget v{$budget->version} generated from {$boq->boq_number} v{$boq->version}.");
+        return redirect()->route('projects.budget.index', [
+            $project,
+            'budget_type' => BudgetType::BoqEstimate->value,
+            'version_id' => $budget->id,
+        ])->with('success', "BOQ Estimate v{$budget->version} generated from {$boq->boq_number} v{$boq->version}. Main Project Budget was not changed.");
     }
 
     public function syncPreview(Request $request, Project $project): JsonResponse
@@ -131,7 +222,7 @@ class ProjectBudgetController extends Controller
         Gate::authorize('update', [ProjectBudget::class, $project]);
 
         $data = $request->validate(['boq_id' => ['nullable', 'integer']]);
-        $draft = $project->budgets()->where('status', BudgetStatus::Draft)->orderByDesc('version')->first();
+        $draft = $project->budgets()->boqEstimate()->where('status', BudgetStatus::Draft)->orderByDesc('version')->first();
         $boqId = $data['boq_id'] ?? $draft?->boq_id
             ?? $project->boqs()->where('status', BoqStatus::Approved)->where('is_current', true)->value('id');
         $boq = $project->boqs()->findOrFail($boqId);
@@ -148,7 +239,7 @@ class ProjectBudgetController extends Controller
             'confirm' => ['sometimes', 'boolean'],
         ]);
 
-        $draft = $project->budgets()->where('status', BudgetStatus::Draft)->orderByDesc('version')->first();
+        $draft = $project->budgets()->boqEstimate()->where('status', BudgetStatus::Draft)->orderByDesc('version')->first();
         $boqId = $data['boq_id'] ?? $draft?->boq_id;
         if ($boqId === null) {
             $boqId = $project->boqs()->where('status', BoqStatus::Approved)->where('is_current', true)->value('id');
@@ -157,12 +248,15 @@ class ProjectBudgetController extends Controller
         $boq = $project->boqs()->findOrFail($boqId);
 
         if ($draft === null) {
-            $approved = $project->budgets()->where('status', BudgetStatus::Approved)->first();
+            $approved = $project->budgets()->boqEstimate()->where('status', BudgetStatus::Approved)->first();
             if ($approved !== null) {
                 $approved->forceFill(['materials_sync_pending' => true])->save();
 
-                return redirect()->route('projects.budget.index', [$project, 'version_id' => $approved->id])
-                    ->with('error', 'Approved budget cannot be modified. Create a new budget version, then Sync from BOQ.');
+                return redirect()->route('projects.budget.index', [
+                    $project,
+                    'budget_type' => BudgetType::BoqEstimate->value,
+                    'version_id' => $approved->id,
+                ])->with('error', 'Approved BOQ Estimate cannot be modified. Create a new BOQ Estimate version, then Sync BOQ Estimate.');
             }
         }
 
@@ -173,18 +267,26 @@ class ProjectBudgetController extends Controller
 
         $budget = $this->materialSync->syncDraftFromBoq($project, $boq);
 
-        return redirect()->route('projects.budget.index', [$project, 'version_id' => $budget->id])
-            ->with('success', "Budget synced from {$boq->boq_number} v{$boq->version} (Material A + Labour B + BBS/equipment).");
+        return redirect()->route('projects.budget.index', [
+            $project,
+            'budget_type' => BudgetType::BoqEstimate->value,
+            'version_id' => $budget->id,
+        ])->with('success', "BOQ Estimate synced from {$boq->boq_number} v{$boq->version}. Main Project Budget was not changed.");
     }
 
-    public function newVersion(Project $project): RedirectResponse
+    public function newVersion(Request $request, Project $project): RedirectResponse
     {
         Gate::authorize('update', [ProjectBudget::class, $project]);
 
-        $budget = $this->budgets->newVersion($project);
+        $type = BudgetType::tryFrom((string) $request->input('budget_type', $request->query('budget_type', BudgetType::MainProject->value)))
+            ?? BudgetType::MainProject;
+        $budget = $this->budgets->newVersion($project, $type);
 
-        return redirect()->route('projects.budget.index', [$project, 'version_id' => $budget->id])
-            ->with('success', "Draft budget v{$budget->version} ready.");
+        return redirect()->route('projects.budget.index', [
+            $project,
+            'budget_type' => $type->value,
+            'version_id' => $budget->id,
+        ])->with('success', "Draft {$type->label()} v{$budget->version} ready.");
     }
 
     public function storeLine(Request $request, Project $project): RedirectResponse
@@ -193,7 +295,11 @@ class ProjectBudgetController extends Controller
 
         $budget = $this->budgets->saveLine($project, $this->lineData($request));
 
-        return redirect()->route('projects.budget.index', [$project, 'version_id' => $budget->id])->with('success', 'Budget line added.');
+        return redirect()->route('projects.budget.index', [
+            $project,
+            'budget_type' => $budget->budget_type->value,
+            'version_id' => $budget->id,
+        ])->with('success', 'Main Project Budget line added.');
     }
 
     public function updateLine(Request $request, Project $project, ProjectBudgetLine $budgetLine): RedirectResponse
@@ -220,11 +326,11 @@ class ProjectBudgetController extends Controller
 
         $this->budgets->approve($budget, $request->user());
 
-        return back()->with('success', "Budget v{$budget->version} approved.");
+        return back()->with('success', "{$budget->budget_type->label()} v{$budget->version} approved.");
     }
 
     /**
-     * @return array{cost_head: string, description: string, amount: string}
+     * @return array{cost_head: string, description: string, amount: string, budget_type?: string}
      */
     private function lineData(Request $request): array
     {
@@ -237,6 +343,7 @@ class ProjectBudgetController extends Controller
             'cost_head' => ['required', Rule::enum(CostHead::class)],
             'description' => ['required', 'string', 'max:255'],
             'amount' => ['required', 'numeric', 'min:0', 'max:9999999999999999', 'decimal:0,2'],
+            'budget_type' => ['sometimes', Rule::enum(BudgetType::class)],
         ]);
     }
 

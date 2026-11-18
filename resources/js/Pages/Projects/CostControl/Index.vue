@@ -83,25 +83,25 @@ function applyAsOf() {
             </form>
 
             <div v-if="totals" class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-                <StatCard label="Revised budget" :value="formatMoney(totals.revised_budget)" icon="banknotes" tone="brand" />
+                <StatCard label="Revised Main Budget" :value="formatMoney(totals.revised_budget)" icon="banknotes" tone="brand" />
+                <StatCard label="BOQ Estimate" :value="formatMoney(totals.boq_estimate)" icon="scale" />
+                <StatCard label="BOQ vs Main" :value="formatMoney(totals.boq_vs_main_budget)" icon="scale" tone="slate" />
+                <StatCard label="Main Budget Available" :value="formatMoney(totals.available_budget)" icon="check-circle" tone="green" />
                 <StatCard label="Actual invoiced" :value="formatMoney(totals.actual_invoiced)" icon="banknotes" tone="orange" />
                 <StatCard label="Open commitment" :value="formatMoney(totals.open_commitment)" icon="truck" />
-                <StatCard label="Available" :value="formatMoney(totals.available_budget)" icon="check-circle" tone="green" />
                 <StatCard label="Cash paid" :value="formatMoney(summary.cash_paid)" icon="banknotes" />
                 <StatCard label="Balance payable" :value="formatMoney(summary.balance_payable)" icon="receipt" />
-                <StatCard label="GST exposure" :value="formatMoney(totals.gst_exposure)" icon="receipt" tone="slate" />
-                <StatCard label="Assigned" :value="totals.percent_assigned != null ? `${totals.percent_assigned}%` : '—'" icon="scale" />
             </div>
 
-            <AppCard title="WBS / Cost head summary" subtitle="Budget, commitments, and actual cost. Forecast at completion is deferred." :padded="false">
+            <AppCard title="WBS / Cost head summary" subtitle="Main Project Budget controls commitments. BOQ Estimate is a technical reference only and is not included in Total Assigned." :padded="false">
                 <div v-if="heads.length" class="overflow-x-auto">
                     <table class="min-w-full text-sm">
                         <thead class="bg-slate-50 text-[11px] tracking-wide text-slate-500 uppercase">
                             <tr>
-                                <th class="px-3 py-2 text-left">Cost head</th>
-                                <th class="px-3 py-2 text-right">Original</th>
-                                <th class="px-3 py-2 text-right">Approved changes</th>
-                                <th class="px-3 py-2 text-right">Revised</th>
+                                <th class="px-3 py-2 text-left">WBS</th>
+                                <th class="px-3 py-2 text-right">Main Budget</th>
+                                <th class="px-3 py-2 text-right">BOQ Estimate</th>
+                                <th class="px-3 py-2 text-right">BOQ vs Main</th>
                                 <th class="px-3 py-2 text-right">Invoiced</th>
                                 <th class="px-3 py-2 text-right">Commitment</th>
                                 <th class="px-3 py-2 text-right">Available</th>
@@ -115,9 +115,9 @@ function applyAsOf() {
                                         <span v-if="head.code" class="mr-2 font-mono text-xs text-slate-500">{{ head.code }}</span>{{ head.name }}
                                     </Link>
                                 </td>
-                                <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(head.original_budget) }}</td>
-                                <td class="px-3 py-2 text-right tabular whitespace-nowrap" :class="moneyClass(head.approved_changes)">{{ formatMoney(head.approved_changes) }}</td>
                                 <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(head.revised_budget) }}</td>
+                                <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(head.boq_estimate) }}</td>
+                                <td class="px-3 py-2 text-right tabular whitespace-nowrap" :class="moneyClass(head.boq_vs_main_budget)">{{ formatMoney(head.boq_vs_main_budget) }}</td>
                                 <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(head.actual_invoiced) }}</td>
                                 <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(head.open_commitment) }}</td>
                                 <td class="px-3 py-2 text-right tabular whitespace-nowrap" :class="moneyClass(head.available_budget)">{{ formatMoney(head.available_budget) }}</td>
@@ -129,9 +129,9 @@ function applyAsOf() {
                         <tfoot v-if="totals" class="border-t border-line bg-slate-50 font-medium">
                             <tr>
                                 <td class="px-3 py-2 text-slate-900">Total</td>
-                                <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(totals.original_budget) }}</td>
-                                <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(totals.approved_changes) }}</td>
                                 <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(totals.revised_budget) }}</td>
+                                <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(totals.boq_estimate) }}</td>
+                                <td class="px-3 py-2 text-right tabular whitespace-nowrap" :class="moneyClass(totals.boq_vs_main_budget)">{{ formatMoney(totals.boq_vs_main_budget) }}</td>
                                 <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(totals.actual_invoiced) }}</td>
                                 <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(totals.open_commitment) }}</td>
                                 <td class="px-3 py-2 text-right tabular whitespace-nowrap" :class="moneyClass(totals.available_budget)">{{ formatMoney(totals.available_budget) }}</td>
@@ -143,11 +143,12 @@ function applyAsOf() {
                 <p v-else class="p-5 text-sm text-slate-500">No project cost heads.</p>
             </AppCard>
 
-            <AppCard title="Budget versions" :padded="false">
+            <AppCard title="Budget versions" subtitle="Main Project Budget and BOQ Estimate keep independent version streams." :padded="false">
                 <div v-if="versionRows.length" class="overflow-x-auto">
                     <table class="min-w-full text-sm">
                         <thead class="bg-slate-50 text-[11px] tracking-wide text-slate-500 uppercase">
                             <tr>
+                                <th class="px-3 py-2 text-left">Type</th>
                                 <th class="px-3 py-2 text-left">Version</th>
                                 <th class="px-3 py-2 text-left">Status</th>
                                 <th class="px-3 py-2 text-left">Source</th>
@@ -157,8 +158,9 @@ function applyAsOf() {
                         </thead>
                         <tbody class="divide-y divide-line">
                             <tr v-for="version in versionRows" :key="version.id">
+                                <td class="px-3 py-2 text-slate-700">{{ version.budget_type_label || version.budget_type || '—' }}</td>
                                 <td class="px-3 py-2">
-                                    <Link :href="route('projects.budget.index', [project.id, { version_id: version.id }])" class="font-medium text-brand-700 hover:underline">v{{ version.version }}</Link>
+                                    <Link :href="route('projects.budget.index', [project.id, { budget_type: version.budget_type || 'main_project', version_id: version.id }])" class="font-medium text-brand-700 hover:underline">v{{ version.version }}</Link>
                                 </td>
                                 <td class="px-3 py-2"><StatusBadge :status="version.status" :label="version.status_label" /></td>
                                 <td class="px-3 py-2 text-slate-700">{{ version.source_label || version.source || '—' }}</td>

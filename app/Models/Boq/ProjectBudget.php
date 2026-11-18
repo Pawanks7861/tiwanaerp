@@ -4,11 +4,13 @@ namespace App\Models\Boq;
 
 use App\Enums\Boq\BudgetSource;
 use App\Enums\Boq\BudgetStatus;
+use App\Enums\Boq\BudgetType;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\Blameable;
 use App\Models\Projects\Project;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -16,8 +18,9 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Versioned project cost budget. Approved budgets are never overwritten: a new version is created.
- * All columns are written by ProjectBudgetService.
+ * Versioned project budget by budget_type (Main Project Budget vs BOQ Estimate).
+ * Approved versions are never overwritten: a new version is created within the same type.
+ * All columns are written by ProjectBudgetService / BoqBudgetMaterialSyncService.
  */
 class ProjectBudget extends Model
 {
@@ -58,9 +61,47 @@ class ProjectBudget extends Model
         }
     }
 
+    public function isMainProject(): bool
+    {
+        return $this->budget_type === BudgetType::MainProject;
+    }
+
+    public function isBoqEstimate(): bool
+    {
+        return $this->budget_type === BudgetType::BoqEstimate;
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeOfType(Builder $query, BudgetType $type): Builder
+    {
+        return $query->where('budget_type', $type);
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeMainProject(Builder $query): Builder
+    {
+        return $query->ofType(BudgetType::MainProject);
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeBoqEstimate(Builder $query): Builder
+    {
+        return $query->ofType(BudgetType::BoqEstimate);
+    }
+
     protected function casts(): array
     {
         return [
+            'budget_type' => BudgetType::class,
             'status' => BudgetStatus::class,
             'source' => BudgetSource::class,
             'version' => 'integer',

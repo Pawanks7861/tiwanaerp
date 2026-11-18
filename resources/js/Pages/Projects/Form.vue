@@ -128,21 +128,21 @@ function submit() {
                         :error="form.errors.contract_value"
                     />
                     <div v-else class="sm:col-span-2 rounded-md border border-line bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                        Project Budget is the total of WBS allocations below
+                        Main Project Budget is the total of WBS allocations below (management ceiling — not BOQ Estimate)
                         <span class="ml-2 font-semibold text-slate-900 tabular">{{ formatMoney(budgetTotal) }}</span>
                     </div>
                     <FormInput v-model="form.description" label="Description" multiline class="sm:col-span-2" :error="form.errors.description" />
                 </div>
             </AppCard>
 
-            <AppCard v-if="showInitialBudget" title="Initial Project Budget" subtitle="Allocate budget by WBS Code. Blank amounts are saved as zero. Contingency Reserve is a budget reserve — do not use it for ordinary transactions.">
+            <AppCard v-if="showInitialBudget" title="Main Project Budget" subtitle="Management-approved project budget by WBS head. Blank amounts are saved as zero. Contingency Reserve is a reserve — do not use it for ordinary transactions. BOQ Estimate is created separately from BOQ costing.">
                 <div class="overflow-x-auto">
                     <table class="min-w-full text-sm">
                         <thead class="bg-slate-50 text-xs tracking-wide text-slate-500 uppercase">
                             <tr>
                                 <th class="px-3 py-2 text-left">WBS Code</th>
                                 <th class="px-3 py-2 text-left">WBS Category</th>
-                                <th class="px-3 py-2 text-right">Budget</th>
+                                <th class="px-3 py-2 text-right">Main Budget</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -158,7 +158,7 @@ function submit() {
                                 </td>
                             </tr>
                             <tr class="border-t border-slate-200 bg-slate-50">
-                                <td class="px-3 py-3 text-xs font-medium tracking-wide text-slate-500 uppercase" colspan="2">TOTAL</td>
+                                <td class="px-3 py-3 text-xs font-medium tracking-wide text-slate-500 uppercase" colspan="2">TOTAL MAIN PROJECT BUDGET</td>
                                 <td class="px-3 py-3 text-right text-lg font-semibold text-slate-900 tabular">{{ formatMoney(budgetTotal) }}</td>
                             </tr>
                         </tbody>
