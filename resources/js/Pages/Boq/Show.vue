@@ -241,6 +241,7 @@ function toRow(item) {
         quantity: item.quantity ?? null,
         measurement_mode: item.measurement_mode ?? null,
         measurement_formula: item.measurement_formula ?? null,
+        measurement_nob: item.measurement_nob ?? 1,
         measurement_nos: item.measurement_nos ?? null,
         measurement_length: item.measurement_length ?? null,
         measurement_width: item.measurement_width ?? null,
@@ -438,7 +439,7 @@ function save() {
                     delete data[f];
                 });
                 [
-                    'measurement_mode', 'measurement_formula',
+                    'measurement_mode', 'measurement_formula', 'measurement_nob',
                     'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
                 ].forEach((f) => delete data[f]);
             } else if (!detailedCosts.value) {
@@ -692,11 +693,11 @@ const lockedReason = computed(() => {
     }[props.boq.status] ?? null;
 });
 const showSimpleMeasurements = computed(() => !advanced.value);
-/** Base columns + Nos/L/W/H when simplified + Labour Rate when costs visible. GST removed from BOQ. */
+/** Base columns + NOB/Nos/L/W/H when simplified + Labour Rate when costs visible. GST removed from BOQ. */
 const colCount = computed(() => {
     let n = 9; // # Code Item Unit WBS Qty Rate Amount Actions
     if (showSimpleMeasurements.value) {
-        n += 4; // Nos Length Width Height
+        n += 5; // NOB Nos Length Width Height
     }
     if (showLegacyLabourRateColumn.value) {
         n += 1; // Labour Rate (Simplified / Normal only)
@@ -725,6 +726,9 @@ function applyMeasurementPreview(row) {
 
 function onMeasurementModeChange(row) {
     if (row.measurement_mode === 'auto') {
+        if (row.measurement_nob == null || row.measurement_nob === '') {
+            row.measurement_nob = 1;
+        }
         if (row.measurement_nos == null || row.measurement_nos === '') {
             row.measurement_nos = '1';
         }
@@ -735,9 +739,28 @@ function onMeasurementModeChange(row) {
     }
 }
 
+function resolvedMeasurementFormula(row) {
+    return row?.measurement_formula || inferSimpleFormula(unitSymbol(row?.unit_id));
+}
+
+function showsLength(row) {
+    const formula = resolvedMeasurementFormula(row);
+
+    return formula === 'volume' || formula === 'area' || formula === 'length';
+}
+
+function showsWidth(row) {
+    const formula = resolvedMeasurementFormula(row);
+
+    return formula === 'volume' || formula === 'area';
+}
+
+function showsHeight(row) {
+    return resolvedMeasurementFormula(row) === 'volume';
+}
+
 function heightDepthLabel(row) {
-    const formula = row?.measurement_formula || inferSimpleFormula(unitSymbol(row?.unit_id));
-    if (formula === 'volume') {
+    if (resolvedMeasurementFormula(row) === 'volume') {
         return 'Height / Depth';
     }
 
@@ -1173,6 +1196,7 @@ function heightDepthLabel(row) {
                                 <th class="px-2 py-2 text-left">Unit</th>
                                 <th class="px-2 py-2 text-left" title="Project Cost Head / WBS">WBS</th>
                                 <template v-if="showSimpleMeasurements">
+                                    <th class="px-2 py-2 text-right" title="Number of Buildings">NOB</th>
                                     <th class="px-2 py-2 text-right">Nos</th>
                                     <th class="px-2 py-2 text-right">Length</th>
                                     <th class="px-2 py-2 text-right">Width</th>
@@ -1237,6 +1261,7 @@ function heightDepthLabel(row) {
                                                 </select>
                                             </td>
                                             <template v-if="showSimpleMeasurements">
+                                                <td class="px-1 py-1"><CellDecimal v-model="row.measurement_nob" :decimals="0" :error="!!cellError(row, 'measurement_nob')" @update:model-value="applyMeasurementPreview(row)" /></td>
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.measurement_nos" :error="!!cellError(row, 'measurement_nos')" @update:model-value="applyMeasurementPreview(row)" /></td>
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.measurement_length" :error="!!cellError(row, 'measurement_length')" @update:model-value="applyMeasurementPreview(row)" /></td>
                                                 <td class="px-1 py-1"><CellDecimal v-model="row.measurement_width" :error="!!cellError(row, 'measurement_width')" @update:model-value="applyMeasurementPreview(row)" /></td>
@@ -1279,6 +1304,7 @@ function heightDepthLabel(row) {
                                             <td class="px-2 py-1.5">{{ unitLabel(row.unit_id) }}</td>
                                             <td class="px-2 py-1.5 font-mono text-slate-600" :title="wbsTitle(row.project_cost_head_id)">{{ wbsLabel(row.project_cost_head_id) }}</td>
                                             <template v-if="showSimpleMeasurements">
+                                                <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_nob != null ? row.measurement_nob : '—' }}</td>
                                                 <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_nos != null ? formatQty(row.measurement_nos) : '—' }}</td>
                                                 <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_length != null ? formatQty(row.measurement_length) : '—' }}</td>
                                                 <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_width != null ? formatQty(row.measurement_width) : '—' }}</td>
@@ -1421,7 +1447,7 @@ function heightDepthLabel(row) {
                         <div v-if="editingRow.measurement_mode === 'auto'">
                             <p class="text-xs font-medium text-slate-600">Quantity (calculated)</p>
                             <p class="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm tabular text-slate-900">{{ formatQty(editingRow.quantity) }}</p>
-                            <p class="mt-1 text-xs text-slate-500">From Nos × dimensions. Server recalculates on save.</p>
+                            <p class="mt-1 text-xs text-slate-500">From NOB × Nos × dimensions. Server recalculates on save.</p>
                         </div>
                         <DecimalInput
                             v-else
@@ -1437,20 +1463,22 @@ function heightDepthLabel(row) {
                             v-model="editingRow.measurement_formula"
                             label="Formula"
                             :options="[
-                                { value: 'volume', label: 'Cum (Nos × L × W × H)' },
-                                { value: 'area', label: 'Sqm (Nos × L × W)' },
-                                { value: 'length', label: 'RMT (Nos × L)' },
-                                { value: 'number', label: 'Nos' },
+                                { value: 'volume', label: 'Cum (NOB × Nos × L × W × H)' },
+                                { value: 'area', label: 'Sqm (NOB × Nos × L × W)' },
+                                { value: 'length', label: 'RMT (NOB × Nos × L)' },
+                                { value: 'number', label: 'Nos (NOB × Nos)' },
                             ]"
                             :error="cellError(editingRow, 'measurement_formula')"
                             @update:model-value="applyMeasurementPreview(editingRow)"
                         />
+                        <DecimalInput v-model="editingRow.measurement_nob" label="NOB (Number of Buildings)" :decimals="0" :error="cellError(editingRow, 'measurement_nob')" @update:model-value="applyMeasurementPreview(editingRow)" />
                         <DecimalInput v-model="editingRow.measurement_nos" label="Nos" :decimals="4" :error="cellError(editingRow, 'measurement_nos')" @update:model-value="applyMeasurementPreview(editingRow)" />
-                        <DecimalInput v-model="editingRow.measurement_length" label="Length" :decimals="4" :error="cellError(editingRow, 'measurement_length')" @update:model-value="applyMeasurementPreview(editingRow)" />
-                        <DecimalInput v-model="editingRow.measurement_width" label="Width" :decimals="4" :error="cellError(editingRow, 'measurement_width')" @update:model-value="applyMeasurementPreview(editingRow)" />
-                        <DecimalInput v-model="editingRow.measurement_height" :label="heightDepthLabel(editingRow)" :decimals="4" :error="cellError(editingRow, 'measurement_height')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                        <DecimalInput v-if="showsLength(editingRow)" v-model="editingRow.measurement_length" label="Length" :decimals="4" :error="cellError(editingRow, 'measurement_length')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                        <DecimalInput v-if="showsWidth(editingRow)" v-model="editingRow.measurement_width" label="Width" :decimals="4" :error="cellError(editingRow, 'measurement_width')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                        <DecimalInput v-if="showsHeight(editingRow)" v-model="editingRow.measurement_height" :label="heightDepthLabel(editingRow)" :decimals="4" :error="cellError(editingRow, 'measurement_height')" @update:model-value="applyMeasurementPreview(editingRow)" />
                     </div>
                     <div v-else-if="showSimpleMeasurements" class="grid grid-cols-2 gap-3">
+                        <DecimalInput v-model="editingRow.measurement_nob" label="NOB (optional)" :decimals="0" :error="cellError(editingRow, 'measurement_nob')" />
                         <DecimalInput v-model="editingRow.measurement_nos" label="Nos (optional)" :decimals="4" :error="cellError(editingRow, 'measurement_nos')" />
                     </div>
                     <FormSelect

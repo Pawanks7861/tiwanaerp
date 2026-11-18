@@ -89,7 +89,7 @@ class ProjectBudgetController extends Controller
                 'materials_sync_pending' => (bool) $budget->materials_sync_pending,
                 'boq_label' => $budget->boq
                     ? "{$budget->boq->boq_number} v{$budget->boq->version}"
-                    : ($versions->firstWhere('id', $budget->id)?->boq_label),
+                    : null,
             ] : null,
             'heads' => $byHead,
             'lines' => $otherLines->map(fn (ProjectBudgetLine $l) => $this->linePayload($l))->all(),

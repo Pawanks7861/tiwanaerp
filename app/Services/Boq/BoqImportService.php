@@ -25,7 +25,7 @@ class BoqImportService
     /** Template headings; their slugs are the row keys. */
     public const HEADINGS = [
         'Section Code', 'Section Name', 'Subsection Code', 'Subsection Name', 'Item Code', 'Name', 'Description',
-        'HSN SAC', 'Unit', 'Measurement Nos', 'Measurement Length', 'Measurement Width', 'Measurement Height',
+        'HSN SAC', 'Unit', 'Measurement NOB', 'Measurement Nos', 'Measurement Length', 'Measurement Width', 'Measurement Height',
         'Measurement Mode', 'Quantity',
         'Material Rate', 'Labour Rate', 'Equipment Rate', 'Subcontract Rate',
         'Margin Percent', 'Client Rate', 'Amount', 'Remarks',
@@ -34,7 +34,7 @@ class BoqImportService
     private const REQUIRED_COLUMNS = ['name', 'unit', 'quantity'];
 
     private const NUMERIC_COLUMNS = [
-        'quantity', 'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
+        'quantity', 'measurement_nob', 'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
         'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'margin_percent',
         'client_rate', 'gst_rate', 'amount',
     ];
@@ -331,6 +331,7 @@ class BoqImportService
             'description' => ['nullable', 'string', 'max:5000'],
             'hsn_sac' => ['nullable', 'string', 'max:16'],
             'unit' => ['required', 'string', 'max:20'],
+            'measurement_nob' => ['nullable', 'integer', 'min:1', 'max:999999'],
             'measurement_nos' => ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
             'measurement_length' => ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
             'measurement_width' => ['nullable', 'numeric', 'min:0', 'max:99999999999999', 'decimal:0,4'],
@@ -367,7 +368,7 @@ class BoqImportService
             if (! in_array($key, array_map(fn ($h) => Str::slug($h, '_'), self::HEADINGS), true)
                 && ! in_array($key, [
                     'section_code', 'section_name', 'subsection_code', 'subsection_name', 'item_code', 'name', 'description',
-                    'hsn_sac', 'unit', 'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
+                    'hsn_sac', 'unit', 'measurement_nob', 'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
                     'measurement_mode', 'quantity', 'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate',
                     'margin_percent', 'client_rate', 'gst_rate', 'amount', 'remarks',
                 ], true)) {

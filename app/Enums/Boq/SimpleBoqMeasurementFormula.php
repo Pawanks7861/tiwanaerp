@@ -20,10 +20,10 @@ enum SimpleBoqMeasurementFormula: string
     public function label(): string
     {
         return match ($this) {
-            self::Number => 'Nos',
-            self::Length => 'RMT (Nos × Length)',
-            self::Area => 'Sqm (Nos × Length × Width)',
-            self::Volume => 'Cum (Nos × Length × Width × Height)',
+            self::Number => 'Nos (NOB × Nos)',
+            self::Length => 'RMT (NOB × Nos × L)',
+            self::Area => 'Sqm (NOB × Nos × L × W)',
+            self::Volume => 'Cum (NOB × Nos × L × W × H)',
         };
     }
 

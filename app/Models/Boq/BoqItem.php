@@ -21,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  */
 #[Fillable([
     'boq_section_id', 'project_cost_head_id', 'line_uid', 'item_code', 'name', 'description', 'hsn_sac', 'unit_id', 'quantity',
-    'quantity_source', 'measurement_mode', 'measurement_formula',
+    'quantity_source', 'measurement_mode', 'measurement_formula', 'measurement_nob',
     'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
     'takeoff_reference', 'bbs_applicable',
     'material_rate', 'labour_rate', 'equipment_rate', 'subcontract_rate', 'cost_rate', 'cost_amount',
@@ -80,6 +80,7 @@ class BoqItem extends Model
             'quantity_source' => QuantitySource::class,
             'measurement_mode' => SimpleBoqMeasurementMode::class,
             'measurement_formula' => SimpleBoqMeasurementFormula::class,
+            'measurement_nob' => 'integer',
             'measurement_nos' => 'decimal:4',
             'measurement_length' => 'decimal:4',
             'measurement_width' => 'decimal:4',

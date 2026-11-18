@@ -41,7 +41,7 @@ class BoqService
 
     /** Simplified BOQ measurement columns (ignored as qty authority for Advanced BOQ). */
     private const MEASUREMENT_FIELDS = [
-        'measurement_mode', 'measurement_formula',
+        'measurement_mode', 'measurement_formula', 'measurement_nob',
         'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
     ];
 
@@ -342,6 +342,7 @@ class BoqService
             $measurementInput = [
                 'measurement_mode' => $row['measurement_mode'] ?? $item->getAttribute('measurement_mode')?->value ?? $item->getAttribute('measurement_mode'),
                 'measurement_formula' => $row['measurement_formula'] ?? $item->getAttribute('measurement_formula')?->value ?? $item->getAttribute('measurement_formula'),
+                'measurement_nob' => array_key_exists('measurement_nob', $row) ? $row['measurement_nob'] : ($item->measurement_nob ?? 1),
                 'measurement_nos' => array_key_exists('measurement_nos', $row) ? $row['measurement_nos'] : $item->measurement_nos,
                 'measurement_length' => array_key_exists('measurement_length', $row) ? $row['measurement_length'] : $item->measurement_length,
                 'measurement_width' => array_key_exists('measurement_width', $row) ? $row['measurement_width'] : $item->measurement_width,
@@ -365,6 +366,7 @@ class BoqService
             $item->fill([
                 'measurement_mode' => $resolved['measurement_mode'],
                 'measurement_formula' => $resolved['measurement_formula'],
+                'measurement_nob' => (int) $resolved['measurement_nob'],
                 'measurement_nos' => $resolved['measurement_nos'],
                 'measurement_length' => $resolved['measurement_length'],
                 'measurement_width' => $resolved['measurement_width'],

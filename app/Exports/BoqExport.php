@@ -35,7 +35,7 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
 
         return [
             'Section', 'WBS', 'Code', 'Name', 'Description', 'HSN/SAC', 'Unit',
-            'Nos', 'Length', 'Width', 'Height', 'Quantity',
+            'NOB', 'Nos', 'Length', 'Width', 'Height', 'Quantity',
             ...$costs, 'Client Rate', 'Client Amount',
         ];
     }
@@ -90,6 +90,7 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
             SpreadsheetText::cell($item->description),
             SpreadsheetText::cell($item->hsn_sac),
             $item->unit?->symbol,
+            $item->measurement_nob ?? 1,
             $item->measurement_nos,
             $item->measurement_length,
             $item->measurement_width,

@@ -115,6 +115,9 @@ class BoqItemsImportDefinition extends ImportDefinition
             new ImportField('unit', 'Unit', true, [
                 'unit', 'uom', 'u.o.m.', 'u.o.m', 'measurement unit', 'uom_name',
             ]),
+            new ImportField('measurement_nob', 'NOB', false, [
+                'nob', 'no of buildings', 'number of buildings', 'buildings', 'measurement_nob', 'measurement nob',
+            ], 'number', help: 'Number of Buildings. Whole number ≥ 1. Blank defaults to 1.'),
             new ImportField('measurement_nos', 'Nos', false, [
                 'nos', 'no', 'numbers', 'measurement_nos', 'no of',
             ], 'number'),
@@ -129,7 +132,7 @@ class BoqItemsImportDefinition extends ImportDefinition
             ], 'number'),
             new ImportField('measurement_mode', 'Measurement Mode', false, [
                 'measurement mode', 'mode', 'qty mode', 'measurement_mode',
-            ], help: 'auto or manual. Auto recalculates Qty from Nos/L/W/H.'),
+            ], help: 'auto or manual. Auto recalculates Qty from NOB × Nos/L/W/H.'),
             new ImportField('quantity', 'Quantity', true, [
                 'qty', 'quantity', 'boq qty', 'total qty',
             ], 'number'),

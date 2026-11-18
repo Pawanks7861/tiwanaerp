@@ -74,7 +74,7 @@ final class BoqPresenter
             'id', 'boq_section_id', 'project_cost_head_id', 'line_uid', 'item_code', 'name', 'description', 'hsn_sac', 'unit_id',
             'quantity', 'client_rate', 'client_amount', 'gst_rate', 'rate_analysis_id', 'sort_order',
             'source_type', 'source_sheet', 'source_row',
-            'measurement_mode', 'measurement_formula',
+            'measurement_mode', 'measurement_formula', 'measurement_nob',
             'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
             'concrete_mix_profile_id',
         ]);
@@ -88,6 +88,7 @@ final class BoqPresenter
         $data['concrete_mix_profile_name'] = is_array($snapshot) ? ($snapshot['name'] ?? null) : null;
         $data['measurement_mode'] = $item->measurement_mode?->value ?? $data['measurement_mode'] ?? null;
         $data['measurement_formula'] = $item->measurement_formula?->value ?? $data['measurement_formula'] ?? null;
+        $data['measurement_nob'] = (int) ($item->measurement_nob ?? 1);
         $data['source_label'] = ($item->source_type === 'import' && $item->source_sheet && $item->source_row)
             ? "Imported from {$item->source_sheet} → Row {$item->source_row}"
             : null;

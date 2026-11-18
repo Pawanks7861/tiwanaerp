@@ -16,8 +16,9 @@ const d = (value) => {
 const round = (value, places) => value.toDecimalPlaces(places, Decimal.ROUND_HALF_UP);
 
 /**
- * Preview Normal BOQ quantity from Nos/L/W/H. Server recalculates on save.
+ * Preview Normal BOQ quantity from NOB × Nos/L/W/H. Server recalculates on save.
  * formula: number | length | area | volume (or inferred from unitSymbol when auto).
+ * Blank NOB is treated as 1 (historical compatibility).
  */
 export function simpleBoqQty(row, unitSymbol = null) {
     if (row.measurement_mode !== 'auto') {
@@ -29,6 +30,12 @@ export function simpleBoqQty(row, unitSymbol = null) {
         return null;
     }
 
+    const nobRaw = row.measurement_nob;
+    const nob = (nobRaw === null || nobRaw === undefined || nobRaw === '') ? d(1) : d(nobRaw);
+    if (!nob.isInteger() || nob.lte(0)) {
+        return null;
+    }
+
     const nos = d(row.measurement_nos);
     const length = d(row.measurement_length);
     const width = d(row.measurement_width);
@@ -37,13 +44,13 @@ export function simpleBoqQty(row, unitSymbol = null) {
     try {
         let qty;
         if (formula === 'number') {
-            qty = nos;
+            qty = nob.times(nos);
         } else if (formula === 'length') {
-            qty = nos.times(length);
+            qty = nob.times(nos).times(length);
         } else if (formula === 'area') {
-            qty = nos.times(length).times(width);
+            qty = nob.times(nos).times(length).times(width);
         } else if (formula === 'volume') {
-            qty = nos.times(length).times(width).times(height);
+            qty = nob.times(nos).times(length).times(width).times(height);
         } else {
             return null;
         }

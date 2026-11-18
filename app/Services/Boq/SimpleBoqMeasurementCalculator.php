@@ -8,9 +8,10 @@ use App\Support\Math\Decimal;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Server-authoritative Normal / Simplified BOQ quantity from Nos / L / W / H.
+ * Server-authoritative Normal / Simplified BOQ quantity from NOB × Nos / L / W / H.
  * Reuses MeasurementCalculator whitelisted formulas. Never parses item description.
  * Historical rows (null mode) keep the stored manual quantity.
+ * Missing / blank NOB is treated as 1 so legacy quantities are unchanged.
  */
 class SimpleBoqMeasurementCalculator
 {
@@ -18,6 +19,7 @@ class SimpleBoqMeasurementCalculator
      * @param  array{
      *   measurement_mode?: string|null,
      *   measurement_formula?: string|null,
+     *   measurement_nob?: string|int|null,
      *   measurement_nos?: string|null,
      *   measurement_length?: string|null,
      *   measurement_width?: string|null,
@@ -29,6 +31,7 @@ class SimpleBoqMeasurementCalculator
      * @return array{
      *   measurement_mode: string|null,
      *   measurement_formula: string|null,
+     *   measurement_nob: string,
      *   measurement_nos: string|null,
      *   measurement_length: string|null,
      *   measurement_width: string|null,
@@ -45,6 +48,7 @@ class SimpleBoqMeasurementCalculator
                 ?? throw ValidationException::withMessages(['measurement_mode' => 'Choose Manual or Auto measurement.']))
             : null;
 
+        $nob = self::positiveIntegerNob($input['measurement_nob'] ?? null);
         $nos = self::nullableQty($input['measurement_nos'] ?? null, 'measurement_nos');
         $length = self::nullableQty($input['measurement_length'] ?? null, 'measurement_length');
         $width = self::nullableQty($input['measurement_width'] ?? null, 'measurement_width');
@@ -61,6 +65,7 @@ class SimpleBoqMeasurementCalculator
             return [
                 'measurement_mode' => $mode?->value,
                 'measurement_formula' => self::formulaOrNull($input['measurement_formula'] ?? null)?->value,
+                'measurement_nob' => $nob->toString(),
                 'measurement_nos' => $nos?->toQuantity(),
                 'measurement_length' => $length?->toQuantity(),
                 'measurement_width' => $width?->toQuantity(),
@@ -80,7 +85,7 @@ class SimpleBoqMeasurementCalculator
             'height_depth' => $height?->toQuantity(),
         ]);
 
-        $qty = Decimal::of($calc['calculated_quantity']);
+        $qty = Decimal::of($calc['calculated_quantity'])->times($nob)->round(Decimal::QTY_SCALE);
         if (! $allowZero && ! $qty->isPositive()) {
             throw ValidationException::withMessages(['quantity' => 'Calculated quantity must be greater than zero.']);
         }
@@ -88,6 +93,7 @@ class SimpleBoqMeasurementCalculator
         return [
             'measurement_mode' => $mode->value,
             'measurement_formula' => $formula->value,
+            'measurement_nob' => $nob->toString(),
             'measurement_nos' => $nos?->toQuantity(),
             'measurement_length' => $length?->toQuantity(),
             'measurement_width' => $width?->toQuantity(),
@@ -134,6 +140,26 @@ class SimpleBoqMeasurementCalculator
         }
 
         return SimpleBoqMeasurementFormula::tryFrom((string) $raw);
+    }
+
+    /**
+     * Blank / missing NOB → 1 (historical compatibility). Rejects 0, negatives, non-integers, text.
+     */
+    private static function positiveIntegerNob(mixed $value): Decimal
+    {
+        if ($value === null || $value === '') {
+            return Decimal::of('1');
+        }
+
+        $raw = is_string($value) || is_int($value) ? (string) $value : (string) $value;
+        $raw = trim($raw);
+        if (! preg_match('/^[1-9]\d*$/', $raw)) {
+            throw ValidationException::withMessages([
+                'measurement_nob' => 'NOB must be a whole number of 1 or more.',
+            ]);
+        }
+
+        return Decimal::of($raw);
     }
 
     private static function nullableQty(mixed $value, string $field): ?Decimal
