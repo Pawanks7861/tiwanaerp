@@ -18,7 +18,7 @@ const props = defineProps({
     title: { type: String, required: true },
     subtitle: { type: String, default: null },
     profileKey: { type: String, required: true },
-    projectSelector: { type: Boolean, default: false },
+    projectSelector: { type: Boolean, default: true },
     pendingApprovals: { type: Number, default: null },
     recentProjects: { type: Array, default: () => [] },
 });

@@ -18,5 +18,6 @@ defineProps({
         v-bind="$props"
         title="Dashboard"
         profile-key="md"
+        project-selector
     />
 </template>
