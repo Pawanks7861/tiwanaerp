@@ -452,7 +452,7 @@ class ProjectCostControlService
             ];
         }
 
-        usort($rows, fn ($a, $b) => Decimal::of($b['open_commitment'])->comparedTo(Decimal::of($a['open_commitment'])));
+        usort($rows, fn ($a, $b) => Decimal::of($b['open_commitment'])->compareTo(Decimal::of($a['open_commitment'])));
 
         return $rows;
     }
