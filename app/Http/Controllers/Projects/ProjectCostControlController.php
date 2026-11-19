@@ -92,12 +92,14 @@ class ProjectCostControlController extends Controller
         if ($type === 'vendors') {
             $vendors = $this->costControl->vendorExposure((int) $project->company_id, [(int) $project->id], is_string($asOf) ? $asOf : null);
             $rows = [[
-                'Vendor', 'Base Orders', 'Gross Orders', 'Actual Invoiced', 'Open Commitment',
+                'Party', 'Type', 'Primary WBS', 'Base Orders', 'Gross Orders', 'Actual Invoiced', 'Open Commitment',
                 'Retention Held', 'Cash Paid', 'Balance Payable', 'Status',
             ]];
             foreach ($vendors as $vendor) {
                 $rows[] = [
                     $vendor['vendor_name'] ?? '',
+                    $vendor['party_type'] ?? '',
+                    $vendor['primary_wbs'] ?? '',
                     $vendor['total_base_orders'] ?? '0.00',
                     $vendor['gross_orders'] ?? '0.00',
                     $vendor['actual_invoiced'] ?? '0.00',
@@ -116,8 +118,9 @@ class ProjectCostControlController extends Controller
         }
 
         $rows = [[
-            'Cost Head', 'Code', 'Original', 'Approved Changes', 'Revised', 'Actual Invoiced',
-            'Open Commitment', 'Total Assigned', 'Available', '% Assigned', 'GST Exposure',
+            'Cost Head', 'Code', 'Original', 'Approved Changes', 'Revised', 'BOQ Estimate', 'BOQ vs Main',
+            'Actual Invoiced', 'Open Commitment', 'Total Assigned', 'Available', '% Assigned',
+            'GST Exposure', 'Assigned Incl GST',
         ]];
         foreach ([...$summary['heads'], $summary['unallocated']] as $head) {
             $rows[] = [
@@ -126,12 +129,15 @@ class ProjectCostControlController extends Controller
                 $head['original_budget'] ?? '0.00',
                 $head['approved_changes'] ?? '0.00',
                 $head['revised_budget'] ?? '0.00',
+                $head['boq_estimate'] ?? '0.00',
+                $head['boq_vs_main_budget'] ?? '0.00',
                 $head['actual_invoiced'] ?? '0.00',
                 $head['open_commitment'] ?? '0.00',
                 $head['total_assigned'] ?? '0.00',
                 $head['available_budget'] ?? '0.00',
                 $head['percent_assigned'] ?? '',
                 $head['gst_exposure'] ?? '0.00',
+                $head['total_assigned_incl_gst'] ?? '0.00',
             ];
         }
 
@@ -166,6 +172,7 @@ class ProjectCostControlController extends Controller
 
             $plan = new ProjectCashFlowPlan;
             $plan->forceFill([
+                'company_id' => $project->company_id,
                 'project_id' => $project->id,
                 'name' => $data['name'] ?? 'Cash Flow Plan',
                 'is_active' => true,

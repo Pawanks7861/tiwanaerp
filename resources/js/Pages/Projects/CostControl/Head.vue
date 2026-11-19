@@ -20,11 +20,16 @@ const sections = computed(() => [
     { key: 'work_orders', label: 'Work orders', routeName: 'projects.work-orders.show', rows: props.drilldown.work_orders ?? [] },
     { key: 'vendor_bills', label: 'Vendor bills', routeName: 'projects.vendor-bills.show', rows: props.drilldown.vendor_bills ?? [] },
     { key: 'expenses', label: 'Expenses', routeName: 'projects.expenses.show', rows: props.drilldown.expenses ?? [] },
+    { key: 'payments', label: 'Payments (project-level)', routeName: 'projects.payments.show', rows: props.drilldown.payments ?? [] },
+    { key: 'variations', label: 'BOQ variations', routeName: null, rows: props.drilldown.variations ?? [] },
 ]);
 
 function rowHref(section, row) {
     if (section.key === 'budget_lines') {
         return route('projects.budget.index', props.project.id);
+    }
+    if (section.key === 'variations') {
+        return route('projects.boqs.index', props.project.id);
     }
     if (!section.routeName || !row.document_id) {
         return null;
@@ -51,7 +56,7 @@ function rowLabel(section, row) {
             <div>
                 <Link :href="route('projects.cost-control.index', project.id)" class="text-sm font-medium text-brand-700 hover:underline">Cost Control</Link>
                 <h2 class="mt-1 text-lg font-semibold text-slate-900">{{ title }}</h2>
-                <p class="text-sm text-slate-500">Source documents for this cost head. Forecast at completion is deferred.</p>
+                <p class="text-sm text-slate-500">Source documents for this cost head. Forecast at completion is deferred. Payments are project-level (not WBS-tagged).</p>
             </div>
 
             <AppCard v-for="section in sections" :key="section.key" :title="section.label" :padded="false">
@@ -77,7 +82,7 @@ function rowLabel(section, row) {
                                     <StatusBadge v-if="row.status" :status="row.status" />
                                     <span v-else class="text-slate-500">—</span>
                                 </td>
-                                <td class="px-3 py-2 text-slate-700">{{ row.description || '—' }}</td>
+                                <td class="px-3 py-2 text-slate-700">{{ row.description || row.party_type || '—' }}</td>
                                 <td class="px-3 py-2 text-right tabular whitespace-nowrap">{{ formatMoney(row.amount) }}</td>
                             </tr>
                         </tbody>

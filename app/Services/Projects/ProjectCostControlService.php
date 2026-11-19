@@ -306,15 +306,19 @@ class ProjectCostControlService
             ->get()
             ->keyBy('vendor_id');
 
+        $primaryWbsVendor = $this->primaryWbsForVendors($companyId, $ids);
+
         $wo = DB::table('work_orders as wo')
-            ->join('subcontractors as s', 's.id', '=', 'wo.subcontractor_id')
             ->where('wo.company_id', $companyId)
             ->whereIn('wo.project_id', $ids)
             ->whereIn('wo.status', CommittedCostQuery::WO_STATES)
             ->whereNull('wo.deleted_at')
             ->groupBy('wo.subcontractor_id')
             ->selectRaw('wo.subcontractor_id as party_id, SUM(wo.subtotal) as base_orders, SUM(wo.total_value) as gross_orders')
-            ->get();
+            ->get()
+            ->keyBy('party_id');
+
+        $primaryWbsSub = $this->primaryWbsForSubcontractors($companyId, $ids);
 
         $bills = DB::table('vendor_bills as vb')
             ->where('vb.company_id', $companyId)
@@ -327,7 +331,30 @@ class ProjectCostControlService
             ->get()
             ->keyBy('vendor_id');
 
-        $payments = DB::table('payments as p')
+        $scBills = DB::table('subcontractor_bills as sb')
+            ->where('sb.company_id', $companyId)
+            ->whereIn('sb.project_id', $ids)
+            ->where('sb.status', SubcontractorBillStatus::Certified->value)
+            ->whereNull('sb.deleted_at')
+            ->when($asOf, fn ($q) => $q->whereDate('sb.bill_date', '<=', $asOf))
+            ->groupBy('sb.subcontractor_id')
+            ->selectRaw('sb.subcontractor_id as party_id, SUM(sb.gross_amount) as invoiced, SUM(sb.net_payable) as net_payable, SUM(sb.retention_amount) as retention')
+            ->get()
+            ->keyBy('party_id');
+
+        $scRetentionReleased = DB::table('retention_releases as rr')
+            ->where('rr.company_id', $companyId)
+            ->whereIn('rr.project_id', $ids)
+            ->where('rr.releasable_type', 'subcontractor_bill')
+            ->where('rr.status', 'approved')
+            ->whereNull('rr.deleted_at')
+            ->when($asOf, fn ($q) => $q->whereDate('rr.release_date', '<=', $asOf))
+            ->join('subcontractor_bills as sb', 'sb.id', '=', 'rr.releasable_id')
+            ->groupBy('sb.subcontractor_id')
+            ->selectRaw('sb.subcontractor_id as party_id, SUM(rr.amount) as released')
+            ->pluck('released', 'party_id');
+
+        $vendorPayments = DB::table('payments as p')
             ->where('p.company_id', $companyId)
             ->whereIn('p.project_id', $ids)
             ->where('p.status', 'approved')
@@ -336,12 +363,26 @@ class ProjectCostControlService
             ->whereNull('p.deleted_at')
             ->when($asOf, fn ($q) => $q->whereDate('p.payment_date', '<=', $asOf))
             ->groupBy('p.party_id')
-            ->selectRaw('p.party_id as vendor_id, SUM(p.amount) as cash_paid')
-            ->get()
-            ->keyBy('vendor_id');
+            ->selectRaw('p.party_id as party_id, SUM(p.amount) as cash_paid')
+            ->pluck('cash_paid', 'party_id');
 
-        $vendorIds = $orders->keys()->merge($bills->keys())->merge($payments->keys())->unique()->filter()->values();
+        $scPayments = DB::table('payments as p')
+            ->where('p.company_id', $companyId)
+            ->whereIn('p.project_id', $ids)
+            ->where('p.status', 'approved')
+            ->where('p.direction', 'payment')
+            ->where('p.party_type', 'subcontractor')
+            ->whereNull('p.deleted_at')
+            ->when($asOf, fn ($q) => $q->whereDate('p.payment_date', '<=', $asOf))
+            ->groupBy('p.party_id')
+            ->selectRaw('p.party_id as party_id, SUM(p.amount) as cash_paid')
+            ->pluck('cash_paid', 'party_id');
+
+        $vendorIds = $orders->keys()->merge($bills->keys())->merge($vendorPayments->keys())->unique()->filter()->values();
         $names = DB::table('vendors')->whereIn('id', $vendorIds->all() ?: [0])->pluck('name', 'id');
+        $headNames = DB::table('project_cost_heads')
+            ->where('company_id', $companyId)
+            ->pluck('name', 'id');
 
         $rows = [];
         foreach ($vendorIds as $vendorId) {
@@ -352,49 +393,139 @@ class ProjectCostControlService
             if ($open->isNegative()) {
                 $open = Decimal::zero();
             }
-            $cash = Num::dec($payments[$vendorId]->cash_paid ?? null);
+            $cash = Num::dec($vendorPayments[$vendorId] ?? null);
             $balance = Num::dec($bills[$vendorId]->net_payable ?? null)->minus($cash);
-            $status = 'Settled';
-            if ($balance->isPositive()) {
-                $status = 'Payment Due';
-            } elseif ($open->isPositive()) {
-                $status = 'Active / Open Commitment';
-            }
+            $headId = $primaryWbsVendor[(int) $vendorId] ?? null;
 
             $rows[] = [
                 'vendor_id' => (int) $vendorId,
+                'subcontractor_id' => null,
+                'party_type' => 'vendor',
                 'vendor_name' => $names[$vendorId] ?? 'Vendor',
+                'primary_wbs' => $headId ? (string) ($headNames[$headId] ?? '') : null,
                 'total_base_orders' => $base->toMoney(),
                 'gross_orders' => $gross->toMoney(),
                 'actual_invoiced' => $invoiced->toMoney(),
                 'open_commitment' => $open->toMoney(),
+                // Vendor bills have no retention column in this ERP; held retention applies to subcontract bills.
                 'retention_held' => '0.00',
                 'net_cash_paid' => $cash->toMoney(),
                 'balance_payable' => $balance->toMoney(),
-                'status' => $status,
+                'status' => $this->exposureStatus($balance, $open),
+            ];
+        }
+
+        $scIds = $wo->keys()->merge($scBills->keys())->merge($scPayments->keys())->unique()->filter()->values();
+        $scNames = DB::table('subcontractors')->whereIn('id', $scIds->all() ?: [0])->pluck('name', 'id');
+
+        foreach ($scIds as $scId) {
+            $base = Num::dec($wo[$scId]->base_orders ?? null);
+            $gross = Num::dec($wo[$scId]->gross_orders ?? null);
+            $invoiced = Num::dec($scBills[$scId]->invoiced ?? null);
+            $open = $base->minus($invoiced);
+            if ($open->isNegative()) {
+                $open = Decimal::zero();
+            }
+            $retention = Num::dec($scBills[$scId]->retention ?? null)
+                ->minus(Num::dec($scRetentionReleased[$scId] ?? null));
+            if ($retention->isNegative()) {
+                $retention = Decimal::zero();
+            }
+            $cash = Num::dec($scPayments[$scId] ?? null);
+            $balance = Num::dec($scBills[$scId]->net_payable ?? null)->minus($cash);
+            $headId = $primaryWbsSub[(int) $scId] ?? null;
+
+            $rows[] = [
+                'vendor_id' => null,
+                'subcontractor_id' => (int) $scId,
+                'party_type' => 'subcontractor',
+                'vendor_name' => $scNames[$scId] ?? 'Subcontractor',
+                'primary_wbs' => $headId ? (string) ($headNames[$headId] ?? '') : null,
+                'total_base_orders' => $base->toMoney(),
+                'gross_orders' => $gross->toMoney(),
+                'actual_invoiced' => $invoiced->toMoney(),
+                'open_commitment' => $open->toMoney(),
+                'retention_held' => $retention->toMoney(),
+                'net_cash_paid' => $cash->toMoney(),
+                'balance_payable' => $balance->toMoney(),
+                'status' => $this->exposureStatus($balance, $open),
             ];
         }
 
         usort($rows, fn ($a, $b) => Decimal::of($b['open_commitment'])->comparedTo(Decimal::of($a['open_commitment'])));
 
-        // Subcontractor parties as separate exposure rows (reuse shape).
-        foreach ($wo as $row) {
-            $rows[] = [
-                'vendor_id' => null,
-                'subcontractor_id' => (int) $row->party_id,
-                'vendor_name' => 'Subcontractor #'.$row->party_id,
-                'total_base_orders' => Num::dec($row->base_orders)->toMoney(),
-                'gross_orders' => Num::dec($row->gross_orders)->toMoney(),
-                'actual_invoiced' => '0.00',
-                'open_commitment' => Num::dec($row->base_orders)->toMoney(),
-                'retention_held' => '0.00',
-                'net_cash_paid' => '0.00',
-                'balance_payable' => '0.00',
-                'status' => 'Active / Open Commitment',
-            ];
+        return $rows;
+    }
+
+    /**
+     * @param  list<int>  $projectIds
+     * @return array<int, int> vendor_id => project_cost_head_id
+     */
+    private function primaryWbsForVendors(int $companyId, array $projectIds): array
+    {
+        $rows = DB::table('purchase_order_items as poi')
+            ->join('purchase_orders as po', 'po.id', '=', 'poi.purchase_order_id')
+            ->where('po.company_id', $companyId)
+            ->whereIn('po.project_id', $projectIds ?: [0])
+            ->whereIn('po.status', CommittedCostQuery::PO_STATES)
+            ->whereNull('po.deleted_at')
+            ->whereNotNull('poi.project_cost_head_id')
+            ->groupBy('po.vendor_id', 'poi.project_cost_head_id')
+            ->selectRaw('po.vendor_id as party_id, poi.project_cost_head_id as head_id, SUM(poi.taxable_amount) as total')
+            ->orderByDesc('total')
+            ->get();
+
+        return $this->firstHeadPerParty($rows);
+    }
+
+    /**
+     * @param  list<int>  $projectIds
+     * @return array<int, int> subcontractor_id => project_cost_head_id
+     */
+    private function primaryWbsForSubcontractors(int $companyId, array $projectIds): array
+    {
+        $rows = DB::table('work_order_items as woi')
+            ->join('work_orders as wo', 'wo.id', '=', 'woi.work_order_id')
+            ->where('wo.company_id', $companyId)
+            ->whereIn('wo.project_id', $projectIds ?: [0])
+            ->whereIn('wo.status', CommittedCostQuery::WO_STATES)
+            ->whereNull('wo.deleted_at')
+            ->whereNotNull('woi.project_cost_head_id')
+            ->groupBy('wo.subcontractor_id', 'woi.project_cost_head_id')
+            ->selectRaw('wo.subcontractor_id as party_id, woi.project_cost_head_id as head_id, SUM(woi.amount) as total')
+            ->orderByDesc('total')
+            ->get();
+
+        return $this->firstHeadPerParty($rows);
+    }
+
+    /**
+     * @param  Collection<int, object>  $rows
+     * @return array<int, int>
+     */
+    private function firstHeadPerParty(Collection $rows): array
+    {
+        $out = [];
+        foreach ($rows as $row) {
+            $pid = (int) $row->party_id;
+            if (! isset($out[$pid]) && $row->head_id !== null) {
+                $out[$pid] = (int) $row->head_id;
+            }
         }
 
-        return $rows;
+        return $out;
+    }
+
+    private function exposureStatus(Decimal $balance, Decimal $open): string
+    {
+        if ($balance->isPositive()) {
+            return 'Payment Due';
+        }
+        if ($open->isPositive()) {
+            return 'Active / Open Commitment';
+        }
+
+        return 'Settled';
     }
 
     /**
@@ -469,6 +600,7 @@ class ProjectCostControlService
             $cash = Num::dec($paid[$ym] ?? null);
             $cumPlan = $cumPlan->plus($planAmt);
             $cumCash = $cumCash->plus($cash);
+            $variance = $plan ? $planAmt->minus($inv) : null;
             $rows[] = [
                 'year_month' => $ym,
                 'planned_outflow' => $plan ? $planAmt->toMoney() : null,
@@ -476,6 +608,7 @@ class ProjectCostControlService
                 'actual_cash_paid' => $cash->toMoney(),
                 'cumulative_planned' => $plan ? $cumPlan->toMoney() : null,
                 'cumulative_cash_paid' => $cumCash->toMoney(),
+                'variance_planned_minus_invoiced' => $variance?->toMoney(),
             ];
         }
 
@@ -486,6 +619,7 @@ class ProjectCostControlService
             $this->revisedByHead((int) $project->company_id, [(int) $project->id], BudgetType::BoqEstimate)[(int) $project->id] ?? []
         ));
         $plannedTotal = $plan ? Num::dec($plan->total_planned) : Decimal::zero();
+        $planDiff = $plan ? $plannedTotal->minus($budgetTotal) : null;
 
         return [
             'configured' => $plan !== null,
@@ -499,8 +633,43 @@ class ProjectCostControlService
             'main_project_budget' => $budgetTotal->toMoney(),
             'boq_estimate' => $boqEstimateTotal->toMoney(),
             'plan_reconciles' => $plan ? $plannedTotal->equals($budgetTotal) : null,
+            'plan_vs_budget' => $planDiff?->toMoney(),
             'months' => $rows,
+            // Seed empty months for the plan editor (current FY-style 12 months from project start or now).
+            'editor_months' => $this->cashFlowEditorMonths($project, $plan, $planned),
         ];
+    }
+
+    /**
+     * @param  array<string, Decimal>  $planned
+     * @return list<array{year_month: string, planned_amount: string}>
+     */
+    private function cashFlowEditorMonths(Project $project, ?ProjectCashFlowPlan $plan, array $planned): array
+    {
+        if ($plan !== null && $planned !== []) {
+            $months = array_keys($planned);
+            sort($months);
+
+            return array_map(
+                fn (string $ym) => [
+                    'year_month' => $ym,
+                    'planned_amount' => ($planned[$ym] ?? Decimal::zero())->toMoney(),
+                ],
+                $months,
+            );
+        }
+
+        $start = ($project->start_date?->copy() ?? now())->startOfMonth();
+        $rows = [];
+        for ($i = 0; $i < 12; $i++) {
+            $ym = $start->copy()->addMonths($i)->format('Y-m');
+            $rows[] = [
+                'year_month' => $ym,
+                'planned_amount' => ($planned[$ym] ?? Decimal::zero())->toMoney(),
+            ];
+        }
+
+        return $rows;
     }
 
     /**
@@ -554,6 +723,31 @@ class ProjectCostControlService
             ->tap(fn ($q) => $headFilter($q))
             ->get(['id', 'id as document_id', 'expense_number as document', 'status', 'amount', 'description']);
 
+        // Payments are project-scoped (no cost-head FK); shown on every head drilldown for context.
+        $payments = DB::table('payments')
+            ->where('company_id', $companyId)
+            ->where('project_id', $projectId)
+            ->whereNull('deleted_at')
+            ->orderByDesc('payment_date')
+            ->limit(100)
+            ->get(['id', 'id as document_id', 'payment_number as document', 'status', 'amount', 'direction', 'party_type', 'payment_date']);
+
+        $variations = DB::table('boq_variations')
+            ->where('company_id', $companyId)
+            ->where('project_id', $projectId)
+            ->whereNull('deleted_at')
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get([
+                'id',
+                'id as document_id',
+                'variation_number as document',
+                'status',
+                'cost_impact as amount',
+                'title as description',
+                'change_order_type',
+            ]);
+
         return [
             'project_cost_head_id' => $projectCostHeadId,
             'budget_lines' => $budgetLines,
@@ -561,6 +755,8 @@ class ProjectCostControlService
             'work_orders' => $wos,
             'vendor_bills' => $bills,
             'expenses' => $expenses,
+            'payments' => $payments,
+            'variations' => $variations,
         ];
     }
 
@@ -1002,6 +1198,7 @@ class ProjectCostControlService
             'available_budget' => $available->toMoney(),
             'percent_assigned' => $this->percentAssigned($assigned, $revised),
             'gst_exposure' => $gst->toMoney(),
+            'total_assigned_incl_gst' => $assigned->plus($gst)->toMoney(),
             'status' => $this->deriveStatus([
                 'total_assigned' => $assigned->toMoney(),
                 'revised_budget' => $revised->toMoney(),
@@ -1020,6 +1217,7 @@ class ProjectCostControlService
             'original_budget', 'approved_changes', 'revised_budget', 'main_project_budget',
             'boq_estimate', 'boq_vs_main_budget', 'actual_invoiced',
             'open_commitment', 'total_assigned', 'available_budget', 'gst_exposure',
+            'total_assigned_incl_gst',
         ];
         $totals = [];
         foreach ($keys as $key) {
