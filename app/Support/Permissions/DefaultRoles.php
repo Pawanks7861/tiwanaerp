@@ -190,10 +190,10 @@ final class DefaultRoles
                 ],
             ],
             self::CIVIL_LEAD => [
-                'description' => 'Head-office civil reviewer (BOQ, subcontract bills, quality and drawings).',
+                'description' => 'Head-office civil reviewer (BOQ commercial approval, subcontract bills, quality and drawings).',
                 'permissions' => [
                     'dashboard.view', 'approvals.view', 'projects.view',
-                    'boq.view', 'boq.view_material_requirements', 'boq.view_bbs', 'boq.view_reconciliation',
+                    'boq.view', 'boq.approve', 'boq.view_costs', 'boq.view_material_requirements', 'boq.view_bbs', 'boq.view_reconciliation',
                     'subcontract.view', 'subcontract.certify_bill', 'vendor_bills.view', 'quality.view', 'drawings.view',
                     'gate_pass.view', 'scrap.view',
                     'reports.view', ...$viewMasters,

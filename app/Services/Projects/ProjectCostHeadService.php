@@ -100,7 +100,7 @@ class ProjectCostHeadService
                     'code' => $h->code,
                     'name' => $h->name,
                     'sort_order' => $h->sort_order,
-                    'label' => $h->code.' — '.$h->name,
+                    'label' => $h->label(),
                 ])
                 ->values()
                 ->all(),

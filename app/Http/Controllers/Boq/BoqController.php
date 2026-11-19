@@ -161,7 +161,9 @@ class BoqController extends Controller
             'drawings' => $drawings,
             'approved_drawings' => $this->drawingOptions($project, $this->pickerRevisions($project, $linked), $user),
             'has_newer_approved_revision' => collect($drawings)->contains(fn (array $row) => $row['newer_revision'] !== null),
-            'sections' => $sections->map(fn (BoqSection $s) => $s->only(['id', 'parent_id', 'code', 'name', 'discipline', 'sort_order']))->all(),
+            'sections' => $sections->map(fn (BoqSection $s) => $s->only([
+                'id', 'parent_id', 'code', 'name', 'discipline', 'sort_order', 'default_project_cost_head_id',
+            ]))->all(),
             'items' => $items->map(fn (BoqItem $i) => BoqPresenter::item($i, $withCosts))->all(),
             'qty_totals_by_unit' => $qtyTotalsByUnit,
             'section_qty_totals' => $sectionQtyTotals,
@@ -170,7 +172,8 @@ class BoqController extends Controller
             'cost_heads' => collect(app(ProjectCostHeadService::class)->options($project->company))
                 ->map(fn (array $h) => [
                     'value' => $h['id'],
-                    'label' => $h['code'],
+                    'label' => $h['label'],
+                    'code' => $h['code'],
                     'description' => $h['name'],
                 ])->values()->all(),
             'concrete_mix_profiles' => (! $advanced)

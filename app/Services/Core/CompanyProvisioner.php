@@ -269,7 +269,7 @@ class CompanyProvisioner
             'retention_release' => ['Retention Release', [$pm, $role(DefaultRoles::DIRECTOR)]],
             'boq' => ['BOQ', [
                 ['approver_type' => ApproverType::ProjectRole, 'project_role' => ProjectRole::Manager->value, 'name' => 'Technical Approval'],
-                ['approver_type' => ApproverType::Role, 'role_id' => $roles[DefaultRoles::DIRECTOR]->id, 'name' => 'Commercial Approval'],
+                ['approver_type' => ApproverType::Role, 'role_id' => $roles[DefaultRoles::CIVIL_LEAD]->id, 'name' => 'Commercial Approval'],
             ]],
             'gate_pass' => ['Gate Pass', [$pm]],
             'scrap_generation' => ['Scrap Generation', [$pm]],

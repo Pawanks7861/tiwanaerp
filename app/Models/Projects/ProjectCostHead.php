@@ -62,4 +62,29 @@ class ProjectCostHead extends Model
     {
         return $this->hasMany(ProjectBudgetLine::class);
     }
+
+    /**
+     * Shared dropdown / report label: "WBS-02 — Building".
+     */
+    public function label(): string
+    {
+        return self::formatLabel($this->code, $this->name);
+    }
+
+    public static function formatLabel(?string $code, ?string $name): string
+    {
+        $code = trim((string) $code);
+        $name = trim((string) $name);
+        if ($code === '' && $name === '') {
+            return '';
+        }
+        if ($code === '') {
+            return $name;
+        }
+        if ($name === '') {
+            return $code;
+        }
+
+        return $code.' — '.$name;
+    }
 }

@@ -10,6 +10,7 @@ use App\Models\Boq\BoqItem;
 use App\Models\Boq\RateAnalysis;
 use App\Models\Documents\DrawingRevision;
 use App\Models\Projects\Project;
+use App\Models\Projects\ProjectCostHead;
 use App\Models\User;
 use App\Services\Boq\SimpleBoqMaterialCostService;
 use App\Services\Boq\SimpleBoqMeasurementCalculator;
@@ -79,12 +80,12 @@ final class BoqPresenter
             'measurement_nos', 'measurement_length', 'measurement_width', 'measurement_height',
             'concrete_mix_profile_id',
         ]);
-        $data['wbs_code'] = $item->relationLoaded('projectCostHead')
-            ? $item->projectCostHead?->code
-            : null;
-        $data['wbs_category'] = $item->relationLoaded('projectCostHead')
-            ? $item->projectCostHead?->name
-            : null;
+        $head = $item->relationLoaded('projectCostHead') ? $item->projectCostHead : null;
+        $data['wbs_code'] = $head?->code;
+        $data['wbs_category'] = $head?->name;
+        $data['wbs_label'] = $head !== null
+            ? $head->label()
+            : (ProjectCostHead::formatLabel($data['wbs_code'] ?? null, $data['wbs_category'] ?? null) ?: null);
         $snapshot = $item->concrete_mix_profile_snapshot;
         $data['concrete_mix_profile_name'] = is_array($snapshot) ? ($snapshot['name'] ?? null) : null;
         $data['measurement_mode'] = $item->measurement_mode?->value ?? $data['measurement_mode'] ?? null;

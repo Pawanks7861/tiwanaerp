@@ -102,8 +102,9 @@ class BoqImportService
                 }
 
                 $item = new BoqItem(['line_uid' => (string) Str::uuid()]);
-                $this->boqs->fillLine($item, $row, $canEditCosts, collect());
+                $item->boq()->associate($boq);
                 $item->boq_section_id = $section->id;
+                $this->boqs->fillLine($item, $row, $canEditCosts, collect());
                 $item->sort_order = ++$nextSort;
                 if (array_key_exists('gst_rate', $row)) {
                     $item->gst_rate = $row['gst_rate'];
@@ -114,7 +115,6 @@ class BoqImportService
                     $item->source_sheet = $row['source_sheet'] ?? null;
                     $item->source_row = $row['source_row'] ?? null;
                 }
-                $item->boq()->associate($boq);
                 $item->save();
             }
 

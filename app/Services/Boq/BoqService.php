@@ -5,6 +5,7 @@ namespace App\Services\Boq;
 use App\Enums\Boq\BoqStatus;
 use App\Enums\Boq\QuantitySource;
 use App\Enums\Boq\RateAnalysisStatus;
+use App\Enums\Boq\SimpleBoqMeasurementFormula;
 use App\Enums\Documents\DrawingRevisionStatus;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
@@ -18,6 +19,7 @@ use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Approval\ApprovalService;
 use App\Services\Numbering\DocumentNumberService;
+use App\Services\Projects\ProjectWbsService;
 use App\Support\Boq\BoqCompanySettings;
 use App\Support\Math\Decimal;
 use Illuminate\Database\Eloquent\Builder;
@@ -186,7 +188,7 @@ class BoqService
 
         $section ??= new BoqSection;
         $section->boq()->associate($boq);
-        $section->fill([
+        $fill = [
             'parent_id' => $parentId,
             'code' => $data['code'] ?? null,
             'name' => $data['name'],
@@ -194,7 +196,14 @@ class BoqService
             'sort_order' => $data['sort_order'] ?? ($section->exists
                 ? $section->sort_order
                 : (int) $boq->sections()->where('parent_id', $parentId)->max('sort_order') + 1),
-        ])->save();
+        ];
+        if (array_key_exists('default_project_cost_head_id', $data)) {
+            $rawDefault = $data['default_project_cost_head_id'];
+            $fill['default_project_cost_head_id'] = ($rawDefault === null || $rawDefault === '')
+                ? null
+                : (int) $rawDefault;
+        }
+        $section->fill($fill)->save();
 
         return $section;
     }
@@ -243,10 +252,10 @@ class BoqService
                     throw ValidationException::withMessages(["rows.{$i}.boq_section_id" => 'Choose a section of this BOQ.']);
                 }
 
-                $this->fillLine($item, $row, $canEditCosts, $analyses, "rows.{$i}");
-                $item->boq_section_id = (int) $row['boq_section_id'];
-                $item->sort_order = (int) ($row['sort_order'] ?? $i);
                 $item->boq()->associate($boq);
+                $item->boq_section_id = (int) $row['boq_section_id'];
+                $this->fillLine($item, $row, $canEditCosts, $analyses, "rows.{$i}");
+                $item->sort_order = (int) ($row['sort_order'] ?? $i);
                 $item->save();
 
                 if ($canEditCosts) {
@@ -339,6 +348,33 @@ class BoqService
                     : Unit::query()->whereKey($item->unit_id)->value('symbol');
             }
 
+            $modeRaw = $row['measurement_mode'] ?? null;
+            $modeBlank = ! array_key_exists('measurement_mode', $row)
+                || $modeRaw === null
+                || $modeRaw === '';
+            // New Simplified lines only (never rewrite historical null mode on existing rows).
+            // Import / API with blank mode + dimensional fields → Auto.
+            // Qty-only imports (no dims) keep null mode and use submitted quantity.
+            // The BOQ editor always sends measurement_mode=auto for new UI rows.
+            if (! $item->exists && $modeBlank) {
+                $inferred = SimpleBoqMeasurementFormula::tryFromUnitSymbol(
+                    is_string($unitSymbol) ? $unitSymbol : null
+                );
+                $hasDims = filled($row['measurement_nos'] ?? null)
+                    || filled($row['measurement_length'] ?? null)
+                    || filled($row['measurement_width'] ?? null)
+                    || filled($row['measurement_height'] ?? null);
+                if ($inferred !== null && $hasDims) {
+                    $row['measurement_mode'] = 'auto';
+                    if (empty($row['measurement_formula'] ?? null)) {
+                        $row['measurement_formula'] = $inferred->value;
+                    }
+                    if (! array_key_exists('measurement_nob', $row) || $row['measurement_nob'] === null || $row['measurement_nob'] === '') {
+                        $row['measurement_nob'] = 1;
+                    }
+                }
+            }
+
             $measurementInput = [
                 'measurement_mode' => $row['measurement_mode'] ?? $item->getAttribute('measurement_mode')?->value ?? $item->getAttribute('measurement_mode'),
                 'measurement_formula' => $row['measurement_formula'] ?? $item->getAttribute('measurement_formula')?->value ?? $item->getAttribute('measurement_formula'),
@@ -428,15 +464,37 @@ class BoqService
         $item->fill([...$calc, 'rate_analysis_id' => $analysisId]);
 
         // WBS: explicit → section default → leave null (Unallocated). Never invent WBS-06.
+        $wbs = app(ProjectWbsService::class);
+        $project = $this->projectForItem($item);
         if (array_key_exists('project_cost_head_id', $row)) {
             $rawHead = $row['project_cost_head_id'];
-            $item->project_cost_head_id = ($rawHead === null || $rawHead === '') ? null : (int) $rawHead;
+            $headId = ($rawHead === null || $rawHead === '') ? null : (int) $rawHead;
+            if ($project !== null) {
+                $headId = $wbs->assertBelongsToProject($project, $headId, "{$errorKey}.project_cost_head_id");
+            }
+            $item->project_cost_head_id = $headId;
         } elseif (! $item->project_cost_head_id && $item->boq_section_id) {
             $sectionDefault = BoqSection::query()->whereKey($item->boq_section_id)->value('default_project_cost_head_id');
             if ($sectionDefault) {
-                $item->project_cost_head_id = (int) $sectionDefault;
+                $headId = (int) $sectionDefault;
+                if ($project !== null) {
+                    $headId = $wbs->assertBelongsToProject($project, $headId, "{$errorKey}.project_cost_head_id") ?? $headId;
+                }
+                $item->project_cost_head_id = $headId;
             }
         }
+    }
+
+    private function projectForItem(BoqItem $item): ?Project
+    {
+        $boq = $item->relationLoaded('boq') ? $item->boq : ($item->boq_id ? $item->boq()->first() : null);
+        if ($boq === null) {
+            return null;
+        }
+
+        return $boq->relationLoaded('project')
+            ? $boq->project
+            : ($boq->project_id ? Project::query()->find($boq->project_id) : null);
     }
 
     /**

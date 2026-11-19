@@ -21,6 +21,7 @@ import ProjectLayout from '@/Layouts/ProjectLayout.vue';
 import { boqLine, inferSimpleFormula, simpleBoqQty, sum } from '@/lib/boqCalc';
 import Decimal from 'decimal.js';
 import { formatDate, formatDateTime, formatMoney, formatPercent, formatQty, formatRate } from '@/lib/format';
+import { formatWbsLabel } from '@/lib/wbsLabel';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -255,6 +256,9 @@ function toRow(item) {
         concrete_mix_profile_id: item.concrete_mix_profile_id ?? null,
         concrete_mix_profile_name: item.concrete_mix_profile_name ?? null,
         project_cost_head_id: item.project_cost_head_id ?? null,
+        wbs_code: item.wbs_code ?? null,
+        wbs_category: item.wbs_category ?? null,
+        wbs_label: item.wbs_label ?? null,
         simple_materials_initialized: !!item.simple_materials_initialized,
         simple_materials_dirty: false,
         simple_materials: costs.value ? mapSimpleMaterials(item) : [],
@@ -420,7 +424,19 @@ const isDesktop = ref(true);
 const updateViewport = () => (isDesktop.value = window.matchMedia('(min-width: 768px)').matches);
 
 function addRow(sectionId) {
-    const row = toRow({ boq_section_id: sectionId, quantity: null, unit_id: null });
+    const section = props.sections.find((s) => s.id === sectionId);
+    const seed = {
+        boq_section_id: sectionId,
+        quantity: null,
+        unit_id: null,
+        project_cost_head_id: section?.default_project_cost_head_id ?? null,
+    };
+    if (showSimpleMeasurements.value) {
+        seed.measurement_mode = 'auto';
+        seed.measurement_nob = 1;
+        seed.measurement_nos = '1';
+    }
+    const row = toRow(seed);
     rows.value.push(row);
     if (!isDesktop.value) {
         editingRow.value = row;
@@ -761,8 +777,79 @@ const colCount = computed(() => {
 
     return n;
 });
-const wbsLabel = (id) => props.cost_heads.find((h) => h.value === id)?.label ?? '—';
-const wbsTitle = (id) => props.cost_heads.find((h) => h.value === id)?.description ?? 'Unallocated';
+function wbsHead(id) {
+    return props.cost_heads.find((h) => h.value === id) ?? null;
+}
+
+function wbsLabel(rowOrId) {
+    if (rowOrId && typeof rowOrId === 'object') {
+        const head = wbsHead(rowOrId.project_cost_head_id);
+        if (head?.label) {
+            return head.label;
+        }
+        if (rowOrId.wbs_label) {
+            return rowOrId.wbs_label;
+        }
+        const built = formatWbsLabel(rowOrId.wbs_code, rowOrId.wbs_category);
+        return built || '—';
+    }
+    const head = wbsHead(rowOrId);
+    return head?.label ?? '—';
+}
+
+function wbsCompact(row) {
+    const head = wbsHead(row?.project_cost_head_id);
+    if (head?.code) {
+        return head.code;
+    }
+    if (row?.wbs_code) {
+        return row.wbs_code;
+    }
+
+    return wbsLabel(row);
+}
+
+function wbsTitle(rowOrId) {
+    if (rowOrId && typeof rowOrId === 'object') {
+        const head = wbsHead(rowOrId.project_cost_head_id);
+        return head?.description || rowOrId.wbs_category || head?.label || rowOrId.wbs_label || 'Unallocated';
+    }
+    const head = wbsHead(rowOrId);
+
+    return head?.description || head?.label || 'Unallocated';
+}
+
+/** Active WBS options plus historical inactive head already on the row. */
+function wbsOptionsFor(row) {
+    const opts = props.cost_heads.map((h) => ({
+        value: h.value,
+        label: h.label,
+        description: h.description,
+        code: h.code,
+    }));
+    if (row?.project_cost_head_id && !opts.some((h) => h.value === row.project_cost_head_id)) {
+        opts.unshift({
+            value: row.project_cost_head_id,
+            label: row.wbs_label || formatWbsLabel(row.wbs_code, row.wbs_category) || `WBS #${row.project_cost_head_id}`,
+            description: row.wbs_category || 'Historical',
+            code: row.wbs_code,
+        });
+    }
+
+    return opts;
+}
+
+function measurementModeOptions(row) {
+    const opts = [
+        { value: 'manual', label: 'Manual quantity' },
+        { value: 'auto', label: 'Auto measurement' },
+    ];
+    if (row?.id && (row.measurement_mode === null || row.measurement_mode === undefined || row.measurement_mode === '')) {
+        opts.unshift({ value: null, label: '— (historical / unset)' });
+    }
+
+    return opts;
+}
 
 function unitSymbol(unitId) {
     return props.units.find((u) => u.value === unitId)?.label?.split('—')[0]?.trim()
@@ -788,10 +875,39 @@ function onMeasurementModeChange(row) {
         if (row.measurement_nos == null || row.measurement_nos === '') {
             row.measurement_nos = '1';
         }
-        if (!row.measurement_formula) {
-            row.measurement_formula = inferSimpleFormula(unitSymbol(row.unit_id));
+        const formula = inferSimpleFormula(unitSymbol(row.unit_id));
+        if (formula) {
+            row.measurement_formula = formula;
+            applyMeasurementPreview(row);
+        } else if (row.unit_id) {
+            // Unit does not support dimensional Auto — fall back to Manual.
+            row.measurement_mode = 'manual';
+            row.measurement_formula = null;
         }
-        applyMeasurementPreview(row);
+    }
+}
+
+function onUnitChange(row) {
+    if (!showSimpleMeasurements.value) {
+        return;
+    }
+    const formula = inferSimpleFormula(unitSymbol(row.unit_id));
+    if (row.measurement_mode === 'auto') {
+        if (formula) {
+            row.measurement_formula = formula;
+            onMeasurementModeChange(row);
+        } else if (row.unit_id) {
+            row.measurement_mode = 'manual';
+            row.measurement_formula = null;
+        }
+
+        return;
+    }
+    // New Auto-default rows that still have no mode yet.
+    if (!row.id && formula && (row.measurement_mode === null || row.measurement_mode === '')) {
+        row.measurement_mode = 'auto';
+        row.measurement_formula = formula;
+        onMeasurementModeChange(row);
     }
 }
 
@@ -1312,15 +1428,15 @@ function heightDepthLabel(row) {
                                                 <div v-if="row.rate_analysis_id" class="mt-0.5 text-[10px] text-brand-700">From rate analysis {{ analyses.find((a) => a.id === row.rate_analysis_id)?.code ?? '' }}</div>
                                             </td>
                                             <td class="px-1 py-1">
-                                                <select v-model="row.unit_id" class="w-20 rounded py-1 pr-6 pl-1.5 text-xs" :class="cellError(row, 'unit_id') ? 'border-red-400 bg-red-50' : 'border-slate-200'" @change="onMeasurementModeChange(row)">
+                                                <select v-model="row.unit_id" class="w-20 rounded py-1 pr-6 pl-1.5 text-xs" :class="cellError(row, 'unit_id') ? 'border-red-400 bg-red-50' : 'border-slate-200'" @change="onUnitChange(row)">
                                                     <option :value="null">—</option>
                                                     <option v-for="u in units" :key="u.value" :value="u.value">{{ u.label }}</option>
                                                 </select>
                                             </td>
                                             <td class="px-1 py-1">
-                                                <select v-model="row.project_cost_head_id" class="w-24 rounded py-1 pr-6 pl-1.5 text-xs border-slate-200" :title="wbsTitle(row.project_cost_head_id)">
+                                                <select v-model="row.project_cost_head_id" class="w-36 max-w-[9.5rem] rounded py-1 pr-6 pl-1.5 text-xs border-slate-200" :title="wbsTitle(row)">
                                                     <option :value="null">—</option>
-                                                    <option v-for="h in cost_heads" :key="h.value" :value="h.value" :title="h.description">{{ h.label }}</option>
+                                                    <option v-for="h in wbsOptionsFor(row)" :key="h.value" :value="h.value" :title="h.description">{{ h.label }}</option>
                                                 </select>
                                             </td>
                                             <template v-if="showSimpleMeasurements">
@@ -1365,7 +1481,10 @@ function heightDepthLabel(row) {
                                                 <div v-if="row.description" class="text-[11px] text-slate-500">{{ row.description }}</div>
                                             </td>
                                             <td class="px-2 py-1.5">{{ unitLabel(row.unit_id) }}</td>
-                                            <td class="px-2 py-1.5 font-mono text-slate-600" :title="wbsTitle(row.project_cost_head_id)">{{ wbsLabel(row.project_cost_head_id) }}</td>
+                                            <td class="px-2 py-1.5 font-mono text-slate-600" :title="wbsTitle(row)">
+                                                <span class="hidden lg:inline">{{ wbsLabel(row) }}</span>
+                                                <span class="lg:hidden">{{ wbsCompact(row) }}</span>
+                                            </td>
                                             <template v-if="showSimpleMeasurements">
                                                 <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_nob != null && row.measurement_nob !== '' ? row.measurement_nob : 1 }}</td>
                                                 <td class="px-2 py-1.5 text-right tabular">{{ row.measurement_nos != null ? formatQty(row.measurement_nos) : '—' }}</td>
@@ -1491,13 +1610,14 @@ function heightDepthLabel(row) {
             <div v-if="editingRow" class="space-y-4">
                 <template v-if="editable">
                     <FormSelect v-model="editingRow.boq_section_id" label="Section" :options="sectionOptions" required />
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Basic information</p>
                     <div class="grid grid-cols-3 gap-3">
                         <FormInput v-model="editingRow.item_code" label="Code" maxlength="30" :error="cellError(editingRow, 'item_code')" />
                         <FormInput v-model="editingRow.hsn_sac" label="HSN/SAC" maxlength="10" class="col-span-2" :error="cellError(editingRow, 'hsn_sac')" />
                     </div>
                     <FormInput
                         v-model="editingRow.name"
-                        label="Item"
+                        label="Item / description"
                         required
                         maxlength="255"
                         :error="cellError(editingRow, 'name')"
@@ -1512,55 +1632,71 @@ function heightDepthLabel(row) {
                         @update:model-value="refreshMaterialsForNameChange(editingRow)"
                     />
                     <div class="grid grid-cols-2 gap-3">
-                        <SearchSelect v-model="editingRow.unit_id" label="Unit" required :options="unitOptions" :error="cellError(editingRow, 'unit_id')" @update:model-value="onMeasurementModeChange(editingRow)" />
+                        <SearchSelect v-model="editingRow.unit_id" label="Unit" required :options="unitOptions" :error="cellError(editingRow, 'unit_id')" @update:model-value="onUnitChange(editingRow)" />
                         <FormSelect
-                            v-if="showSimpleMeasurements"
-                            v-model="editingRow.measurement_mode"
-                            label="Measurement mode"
-                            :options="[
-                                { value: null, label: '— (historical / unset)' },
-                                { value: 'manual', label: 'Manual quantity' },
-                                { value: 'auto', label: 'Auto measurement' },
-                            ]"
-                            :error="cellError(editingRow, 'measurement_mode')"
-                            @update:model-value="onMeasurementModeChange(editingRow)"
+                            v-model="editingRow.project_cost_head_id"
+                            label="WBS"
+                            placeholder="Select WBS"
+                            :options="wbsOptionsFor(editingRow)"
+                            :error="cellError(editingRow, 'project_cost_head_id')"
                         />
-                        <div v-if="editingRow.measurement_mode === 'auto'">
-                            <p class="text-xs font-medium text-slate-600">Quantity (calculated)</p>
-                            <p class="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm tabular text-slate-900">{{ formatQty(editingRow.quantity) }}</p>
-                            <p class="mt-1 text-xs text-slate-500">From NOB × Nos × dimensions. Server recalculates on save.</p>
+                    </div>
+                    <template v-if="showSimpleMeasurements">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Measurement</p>
+                        <div class="grid grid-cols-2 gap-3">
+                            <FormSelect
+                                v-model="editingRow.measurement_mode"
+                                label="Measurement mode"
+                                :options="measurementModeOptions(editingRow)"
+                                :error="cellError(editingRow, 'measurement_mode')"
+                                @update:model-value="onMeasurementModeChange(editingRow)"
+                            />
+                            <div v-if="editingRow.measurement_mode === 'auto'">
+                                <p class="text-xs font-medium text-slate-600">Calculated qty</p>
+                                <p class="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm tabular text-slate-900">{{ formatQty(editingRow.quantity) }}</p>
+                                <p class="mt-1 text-xs text-slate-500">From NOB × Nos × dimensions. Server recalculates on save.</p>
+                            </div>
+                            <DecimalInput
+                                v-else
+                                v-model="editingRow.quantity"
+                                label="Quantity"
+                                required
+                                :decimals="4"
+                                :error="cellError(editingRow, 'quantity')"
+                            />
                         </div>
+                        <div v-if="editingRow.measurement_mode === 'auto'" class="grid grid-cols-2 gap-3 rounded-lg border border-line bg-slate-50 p-3">
+                            <FormSelect
+                                v-model="editingRow.measurement_formula"
+                                label="Formula"
+                                :options="[
+                                    { value: 'volume', label: 'Cum (NOB × Nos × L × W × H)' },
+                                    { value: 'area', label: 'Sqm (NOB × Nos × L × W)' },
+                                    { value: 'length', label: 'RMT (NOB × Nos × L)' },
+                                    { value: 'number', label: 'Nos (NOB × Nos)' },
+                                ]"
+                                :error="cellError(editingRow, 'measurement_formula')"
+                                @update:model-value="applyMeasurementPreview(editingRow)"
+                            />
+                            <DecimalInput v-model="editingRow.measurement_nob" label="NOB (Number of Buildings)" :decimals="0" :error="cellError(editingRow, 'measurement_nob')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                            <DecimalInput v-model="editingRow.measurement_nos" label="Nos" :decimals="4" :error="cellError(editingRow, 'measurement_nos')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                            <DecimalInput v-if="showsLength(editingRow)" v-model="editingRow.measurement_length" label="Length" :decimals="4" :error="cellError(editingRow, 'measurement_length')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                            <DecimalInput v-if="showsWidth(editingRow)" v-model="editingRow.measurement_width" label="Width" :decimals="4" :error="cellError(editingRow, 'measurement_width')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                            <DecimalInput v-if="showsHeight(editingRow)" v-model="editingRow.measurement_height" :label="heightDepthLabel(editingRow)" :decimals="4" :error="cellError(editingRow, 'measurement_height')" @update:model-value="applyMeasurementPreview(editingRow)" />
+                        </div>
+                        <div v-else class="grid grid-cols-2 gap-3">
+                            <DecimalInput v-model="editingRow.measurement_nob" label="NOB (optional)" :decimals="0" :error="cellError(editingRow, 'measurement_nob')" />
+                            <DecimalInput v-model="editingRow.measurement_nos" label="Nos (optional)" :decimals="4" :error="cellError(editingRow, 'measurement_nos')" />
+                        </div>
+                    </template>
+                    <div v-else class="grid grid-cols-2 gap-3">
                         <DecimalInput
-                            v-else
                             v-model="editingRow.quantity"
                             label="Quantity"
                             required
                             :decimals="4"
                             :error="cellError(editingRow, 'quantity')"
                         />
-                    </div>
-                    <div v-if="showSimpleMeasurements && editingRow.measurement_mode === 'auto'" class="grid grid-cols-2 gap-3 rounded-lg border border-line bg-slate-50 p-3">
-                        <FormSelect
-                            v-model="editingRow.measurement_formula"
-                            label="Formula"
-                            :options="[
-                                { value: 'volume', label: 'Cum (NOB × Nos × L × W × H)' },
-                                { value: 'area', label: 'Sqm (NOB × Nos × L × W)' },
-                                { value: 'length', label: 'RMT (NOB × Nos × L)' },
-                                { value: 'number', label: 'Nos (NOB × Nos)' },
-                            ]"
-                            :error="cellError(editingRow, 'measurement_formula')"
-                            @update:model-value="applyMeasurementPreview(editingRow)"
-                        />
-                        <DecimalInput v-model="editingRow.measurement_nob" label="NOB (Number of Buildings)" :decimals="0" :error="cellError(editingRow, 'measurement_nob')" @update:model-value="applyMeasurementPreview(editingRow)" />
-                        <DecimalInput v-model="editingRow.measurement_nos" label="Nos" :decimals="4" :error="cellError(editingRow, 'measurement_nos')" @update:model-value="applyMeasurementPreview(editingRow)" />
-                        <DecimalInput v-if="showsLength(editingRow)" v-model="editingRow.measurement_length" label="Length" :decimals="4" :error="cellError(editingRow, 'measurement_length')" @update:model-value="applyMeasurementPreview(editingRow)" />
-                        <DecimalInput v-if="showsWidth(editingRow)" v-model="editingRow.measurement_width" label="Width" :decimals="4" :error="cellError(editingRow, 'measurement_width')" @update:model-value="applyMeasurementPreview(editingRow)" />
-                        <DecimalInput v-if="showsHeight(editingRow)" v-model="editingRow.measurement_height" :label="heightDepthLabel(editingRow)" :decimals="4" :error="cellError(editingRow, 'measurement_height')" @update:model-value="applyMeasurementPreview(editingRow)" />
-                    </div>
-                    <div v-else-if="showSimpleMeasurements" class="grid grid-cols-2 gap-3">
-                        <DecimalInput v-model="editingRow.measurement_nob" label="NOB (optional)" :decimals="0" :error="cellError(editingRow, 'measurement_nob')" />
-                        <DecimalInput v-model="editingRow.measurement_nos" label="Nos (optional)" :decimals="4" :error="cellError(editingRow, 'measurement_nos')" />
                     </div>
                     <FormSelect
                         v-if="!advanced && concrete_mix_profiles.length"
@@ -1571,6 +1707,7 @@ function heightDepthLabel(row) {
                         :error="cellError(editingRow, 'concrete_mix_profile_id')"
                         help="Optional PCC/RCC mix factors (e.g. PCC — M-10). Snapshot is stored on the BOQ line."
                     />
+                    <p v-if="costs && !advanced" class="text-xs font-semibold uppercase tracking-wide text-slate-500">Rate</p>
                     <template v-if="detailedCosts">
                         <SearchSelect
                             v-if="analyses.length"
@@ -1608,6 +1745,7 @@ function heightDepthLabel(row) {
                     <template v-if="!editable">
                         <dt class="text-slate-500">Code</dt><dd class="text-right font-mono">{{ editingRow.item_code || '—' }}</dd>
                         <dt class="text-slate-500">HSN/SAC</dt><dd class="text-right">{{ editingRow.hsn_sac || '—' }}</dd>
+                        <dt class="text-slate-500">WBS</dt><dd class="text-right font-mono">{{ wbsLabel(editingRow) }}</dd>
                         <dt class="text-slate-500">Quantity</dt><dd class="text-right tabular">{{ formatQty(editingRow.quantity) }} {{ unitLabel(editingRow.unit_id) }}</dd>
                     </template>
                     <template v-if="detailedCosts">

@@ -222,7 +222,7 @@ class ProjectWbsService
             'id' => $head->id,
             'code' => $head->code,
             'name' => $head->name,
-            'label' => $head->code.' — '.$head->name,
+            'label' => $head->label(),
         ];
     }
 
