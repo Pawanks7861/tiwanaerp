@@ -109,6 +109,14 @@ class PlanningBoqMappingService
             if ($availableNos->isNegative()) {
                 $availableNos = Decimal::zero();
             }
+            // Absorb conversion rounding dust once Nos or BOQ are fully consumed.
+            if ($availableNos->isZero() && $availableBoq->isPositive()) {
+                $availableBoq = Decimal::zero();
+                $mappedBoq = $boqQty;
+            } elseif ($availableBoq->isZero() && $availableNos->isPositive()) {
+                $availableNos = Decimal::zero();
+                $mappedNos = $boqNos;
+            }
         }
 
         return [
@@ -139,6 +147,8 @@ class PlanningBoqMappingService
 
             $kept = [];
             $resolvedRows = [];
+            $batchClaimedNos = Decimal::zero();
+            $batchClaimedBoq = Decimal::zero();
             foreach (array_values($rows) as $i => $row) {
                 $taskId = (int) ($row['project_task_id'] ?? 0);
                 $task = ProjectTask::query()
@@ -155,7 +165,17 @@ class PlanningBoqMappingService
                 }
 
                 $model = $this->findMapModel($lockedItem, $task, $row);
-                $resolved = $this->resolveManualAllocation($lockedItem, $task, $row, $model, "maps.$i");
+                $resolved = $this->resolveManualAllocation(
+                    $lockedItem,
+                    $task,
+                    $row,
+                    $model,
+                    "maps.$i",
+                    $batchClaimedNos,
+                    $batchClaimedBoq,
+                );
+                $batchClaimedNos = $batchClaimedNos->plus($this->resolvedMappedNos($resolved));
+                $batchClaimedBoq = $batchClaimedBoq->plus(Decimal::of($resolved['allocated_boq_qty']));
                 $resolvedRows[] = ['task' => $task, 'model' => $model, 'resolved' => $resolved, 'row' => $row, 'index' => $i];
             }
 
@@ -387,6 +407,8 @@ class PlanningBoqMappingService
         array $row,
         ?BoqPlanningMap $existing,
         string $errorKey,
+        ?Decimal $batchClaimedNos = null,
+        ?Decimal $batchClaimedBoq = null,
     ): array {
         $basis = PlanningTrackingBasis::tryFrom((string) ($row['tracking_basis'] ?? ''))
             ?? throw ValidationException::withMessages(["{$errorKey}.tracking_basis" => 'Choose Nos or BOQ Quantity.']);
@@ -398,6 +420,12 @@ class PlanningBoqMappingService
         $boqNos = $this->boqNos($item);
         $boqUnit = (string) ($item->unit?->symbol ?? $row['boq_unit_symbol'] ?? '');
         $factor = $this->conversionFactor($item);
+        $remaining = $this->remainingCapacity(
+            $item,
+            $existing?->id,
+            $batchClaimedNos ?? Decimal::zero(),
+            $batchClaimedBoq ?? Decimal::zero(),
+        );
 
         if ($basis === PlanningTrackingBasis::Nos) {
             if ($boqNos === null || ! $boqNos->isPositive()) {
@@ -412,7 +440,12 @@ class PlanningBoqMappingService
             }
 
             $allocatedNos = $this->requirePositiveQty($row['planning_qty'] ?? $row['allocated_planning_qty'] ?? null, "{$errorKey}.planning_qty", 'Enter allocated Nos for this activity.');
-            $allocatedBoq = $allocatedNos->times($factor)->round(Decimal::QTY_SCALE);
+            // Full remaining Nos → exact remaining Cum (avoids conversion rounding dust).
+            if ($remaining['nos'] !== null && $allocatedNos->equals($remaining['nos'])) {
+                $allocatedBoq = $remaining['boq'];
+            } else {
+                $allocatedBoq = $allocatedNos->times($factor)->round(Decimal::QTY_SCALE);
+            }
             $planUnit = 'Nos';
             // Conversion is always derived — ignore client overrides for ordinary conversion_based maps.
             $storedFactor = $factor->toQuantity();
@@ -424,7 +457,12 @@ class PlanningBoqMappingService
             );
             $allocatedNos = null;
             if ($factor !== null && $factor->isPositive()) {
-                $allocatedNos = $allocatedBoq->dividedBy($factor, Decimal::QTY_SCALE)->round(Decimal::QTY_SCALE);
+                // Full remaining Cum → exact remaining Nos.
+                if ($allocatedBoq->equals($remaining['boq']) && $remaining['nos'] !== null) {
+                    $allocatedNos = $remaining['nos'];
+                } else {
+                    $allocatedNos = $allocatedBoq->dividedBy($factor, Decimal::QTY_SCALE)->round(Decimal::QTY_SCALE);
+                }
             }
             $planUnit = $boqUnit !== '' ? $boqUnit : (string) ($task->unit?->symbol ?? '');
             $storedFactor = $factor?->toQuantity();
@@ -656,8 +694,13 @@ class PlanningBoqMappingService
 
     private function equivalentBoqQty(BoqPlanningMap $map, BoqItem $item): Decimal
     {
+        // Stored allocated_boq_qty is authoritative (includes full-Nos / full-Cum snaps).
+        if ($map->allocated_boq_qty !== null && $map->allocated_boq_qty !== '') {
+            return Decimal::of($map->allocated_boq_qty);
+        }
+
         if ($map->tracking_basis === PlanningTrackingBasis::BoqQuantity) {
-            return Decimal::of($map->allocated_boq_qty ?? '0');
+            return Decimal::zero();
         }
 
         $factor = $map->conversion_factor !== null
@@ -665,10 +708,57 @@ class PlanningBoqMappingService
             : $this->conversionFactor($item);
 
         if ($factor === null || ! $factor->isPositive()) {
-            return Decimal::of($map->allocated_boq_qty ?? '0');
+            return Decimal::zero();
         }
 
         return Decimal::of($map->planning_qty ?? '0')->times($factor)->round(Decimal::QTY_SCALE);
+    }
+
+    /**
+     * Remaining Nos / BOQ qty for a map, excluding an existing map and prior rows in the same save batch.
+     *
+     * @return array{nos: ?Decimal, boq: Decimal}
+     */
+    private function remainingCapacity(
+        BoqItem $item,
+        ?int $exceptMapId,
+        Decimal $batchClaimedNos,
+        Decimal $batchClaimedBoq,
+    ): array {
+        $summary = $this->allocationSummary($item, $exceptMapId);
+        $remainingBoq = Decimal::of($summary['available_boq_qty'])->minus($batchClaimedBoq);
+        if ($remainingBoq->isNegative()) {
+            $remainingBoq = Decimal::zero();
+        }
+
+        $remainingNos = null;
+        if ($summary['available_nos'] !== null) {
+            $remainingNos = Decimal::of($summary['available_nos'])->minus($batchClaimedNos);
+            if ($remainingNos->isNegative()) {
+                $remainingNos = Decimal::zero();
+            }
+        }
+
+        return [
+            'nos' => $remainingNos,
+            'boq' => $remainingBoq,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $resolved
+     */
+    private function resolvedMappedNos(array $resolved): Decimal
+    {
+        if (($resolved['tracking_basis'] ?? '') === PlanningTrackingBasis::Nos->value) {
+            return Decimal::of($resolved['planning_qty'] ?? '0');
+        }
+
+        if (($resolved['equivalent_nos'] ?? null) !== null && $resolved['equivalent_nos'] !== '') {
+            return Decimal::of($resolved['equivalent_nos']);
+        }
+
+        return Decimal::zero();
     }
 
     private function conversionFactor(BoqItem $item): ?Decimal
@@ -740,10 +830,20 @@ class PlanningBoqMappingService
         if ($map->tracking_basis === PlanningTrackingBasis::BoqQuantity
             && $map->conversion_factor !== null
             && Decimal::of($map->conversion_factor)->isPositive()) {
-            $equivNos = Decimal::of($map->allocated_boq_qty ?? '0')
-                ->dividedBy($map->conversion_factor, Decimal::QTY_SCALE)
-                ->round(Decimal::QTY_SCALE)
-                ->toQuantity();
+            $allocated = Decimal::of($map->allocated_boq_qty ?? '0');
+            $item = $map->relationLoaded('item') ? $map->item : $map->item()->first();
+            if ($item !== null) {
+                $remaining = $this->remainingCapacity($item, (int) $map->id, Decimal::zero(), Decimal::zero());
+                if ($remaining['nos'] !== null && $allocated->equals($remaining['boq'])) {
+                    $equivNos = $remaining['nos']->toQuantity();
+                }
+            }
+            if ($equivNos === null) {
+                $equivNos = $allocated
+                    ->dividedBy($map->conversion_factor, Decimal::QTY_SCALE)
+                    ->round(Decimal::QTY_SCALE)
+                    ->toQuantity();
+            }
         }
 
         return [

@@ -80,7 +80,7 @@ export function inferSimpleFormula(unitSymbol) {
  * @param {Record<string, unknown>} row
  * @param {{ simplifiedCommercial?: boolean }} [options]
  *   simplifiedCommercial: Material Rate (client_rate) never falls back to cost+labour selling rate.
- *   Labour Rate stays separate from commercial Amount (Qty × Material Rate).
+ *   Amount = Qty × (Material Rate + Labour Rate). Material and Labour stay separately stored.
  */
 export function boqLine(row, options = {}) {
     const qty = round(d(row.quantity), 4);
@@ -96,13 +96,18 @@ export function boqLine(row, options = {}) {
     const clientRate = hasOverride
         ? round(d(override), 4)
         : (options.simplifiedCommercial ? round(d(0), 4) : sellingRate);
+    const labourRate = round(d(row.labour_rate), 4);
+    const totalRate = options.simplifiedCommercial
+        ? round(clientRate.plus(labourRate), 4)
+        : clientRate;
 
     return {
         cost_rate: costRate.toFixed(4),
         cost_amount: round(qty.times(costRate), 2).toFixed(2),
         selling_rate: sellingRate.toFixed(4),
         client_rate: clientRate.toFixed(4),
-        client_amount: round(qty.times(clientRate), 2).toFixed(2),
+        total_rate: totalRate.toFixed(4),
+        client_amount: round(qty.times(totalRate), 2).toFixed(2),
     };
 }
 

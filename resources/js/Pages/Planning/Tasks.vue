@@ -167,11 +167,14 @@ function save() {
             payload.unit_id = null;
             payload.planned_qty = null;
             payload.daily_target_qty = null;
-            payload.hold_quantity = null;
+            payload.hold_quantity = '0';
             payload.planned_start = null;
             payload.planned_finish = null;
             delete payload.maps;
         } else {
+            // Cleared DecimalInput is null — persist as 0 so the server does not keep the old hold.
+            payload.hold_quantity =
+                payload.hold_quantity === null || payload.hold_quantity === '' ? '0' : payload.hold_quantity;
             // Same-step Activity + optional BOQ mapping (no prior Activity id required).
             payload.maps = (mapForm.maps || [])
                 .filter((m) => m.boq_item_id)
@@ -240,6 +243,9 @@ function loadMapsFromTask(t) {
             mapping_method: m.mapping_method || 'conversion_based',
             planning_qty: m.planning_qty || '',
             allocated_boq_qty: m.allocated_boq_qty || '',
+            // Snapshots of the saved allocation so preview can restore remaining capacity while editing.
+            _saved_planning_qty: m.tracking_basis === 'nos' ? Number(m.planning_qty || 0) : Number(m.equivalent_nos || 0),
+            _saved_allocated_boq_qty: Number(m.allocated_boq_qty || 0),
             is_primary: !!m.is_primary,
             remarks: m.remarks || '',
         }))
@@ -268,8 +274,25 @@ function previewEquivalent(row) {
     const factor = Number(item.allocation.conversion_factor);
     const qty = Number(row.planning_qty);
     if (!Number.isFinite(factor) || !Number.isFinite(qty) || factor <= 0) return null;
+
+    const alloc = item.allocation;
+    // available_* deducts all saved maps; restore this row's saved claim while editing.
+    const remNos = Number(alloc.available_nos ?? 0) + (row.id ? Number(row._saved_planning_qty || 0) : 0);
+    const remBoq = Number(alloc.available_boq_qty ?? 0) + (row.id ? Number(row._saved_allocated_boq_qty || 0) : 0);
+
+    const sameQty = (a, b) => Number.isFinite(a) && Number.isFinite(b) && a.toFixed(4) === b.toFixed(4);
+
     if (row.tracking_basis === 'nos') {
+        // Full remaining Nos → exact remaining Cum (matches server snap).
+        if (alloc.available_nos != null && sameQty(qty, remNos)) {
+            return `${remBoq.toFixed(4)} ${item.unit || 'Cum'}`;
+        }
         return `${(qty * factor).toFixed(4)} ${item.unit || 'Cum'}`;
+    }
+
+    // Full remaining Cum → exact remaining Nos.
+    if (alloc.available_nos != null && sameQty(qty, remBoq)) {
+        return `${remNos.toFixed(4)} Nos`;
     }
     return `${(qty / factor).toFixed(4)} Nos`;
 }
@@ -518,7 +541,7 @@ const summaryCards = computed(() => [
                     </div>
                     <p class="text-[11px] text-slate-500">
                         Link BOQ while creating or editing this activity. One Save creates the activity and mapping together.
-                        Total Nos = NOB × Nos / Building. Partial allocation and split across activities are supported.
+                        Total Nos = NOB × Nos / Building. Enter Total Nos (or remaining Available Nos) to allocate the full BOQ quantity; partial and split allocations are supported.
                     </p>
                     <p v-if="mapForm.errors.maps || form.errors.maps" class="text-xs text-red-600">{{ mapForm.errors.maps || form.errors.maps }}</p>
                     <div v-for="(row, index) in mapForm.maps" :key="index" class="space-y-2 rounded-md border border-slate-100 bg-slate-50/70 p-3">

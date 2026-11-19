@@ -8,6 +8,7 @@ use App\Enums\Boq\VariationStatus;
 use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqVariationItem;
 use App\Models\Projects\Project;
+use App\Support\Boq\BoqCompanySettings;
 use App\Support\Math\Decimal;
 use App\Support\Reports\Num;
 use Illuminate\Support\Facades\DB;
@@ -62,6 +63,7 @@ class EffectiveBoqQuantityService
             $uid = (string) $item->line_uid;
             if ($item->is_variation_originated) {
                 $out[$uid] = Num::qty($item->quantity);
+
                 continue;
             }
             $effective = Decimal::of((string) $item->quantity)->plus($deltas[$uid] ?? '0');
@@ -105,11 +107,14 @@ class EffectiveBoqQuantityService
     /**
      * Effective selling rate for future billing (rate_change variations apply prospectively).
      * Historical certified invoices keep their snapshotted rates.
+     *
+     * Simplified/Normal BOQ: Total Rate = Material Rate (client_rate) + Labour Rate.
+     * Advanced BOQ: client_rate, falling back to selling_rate when unset.
      */
     public function effectiveSellingRate(BoqItem $item): string
     {
         if ($item->is_variation_originated) {
-            return Num::rate($item->client_rate ?: $item->selling_rate);
+            return $this->commercialRate($item);
         }
 
         $latest = BoqVariationItem::query()
@@ -125,6 +130,20 @@ class EffectiveBoqQuantityService
 
         if ($latest) {
             return Num::rate($latest->proposed_selling_rate);
+        }
+
+        return $this->commercialRate($item);
+    }
+
+    private function commercialRate(BoqItem $item): string
+    {
+        // Use current company (avoid lazy-loading item→boq under PreventLazyLoading).
+        if (! BoqCompanySettings::enabled()) {
+            return Num::rate(
+                Decimal::of((string) ($item->client_rate ?? '0'))
+                    ->plus((string) ($item->labour_rate ?? '0'))
+                    ->toRate()
+            );
         }
 
         return Num::rate($item->client_rate ?: $item->selling_rate);

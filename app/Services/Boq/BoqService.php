@@ -413,8 +413,9 @@ class BoqService
 
         $clientRateInput = $row['client_rate'] ?? null;
         // Simplified/Normal BOQ: empty Material Rate must not fall back to cost+labour selling rate
-        // (Labour Rate is separate; Auto measurement often leaves Material Rate blank).
-        if (! BoqCompanySettings::enabled() && ($clientRateInput === null || $clientRateInput === '')) {
+        // (Labour Rate is stored separately; commercial Amount adds it via combine flag below).
+        $simplified = ! BoqCompanySettings::enabled();
+        if ($simplified && ($clientRateInput === null || $clientRateInput === '')) {
             $clientRateInput = '0';
         }
 
@@ -422,7 +423,7 @@ class BoqService
             ...$costs,
             'quantity' => $quantity,
             'client_rate' => $clientRateInput,
-        ]);
+        ], $simplified);
 
         $item->fill([...$calc, 'rate_analysis_id' => $analysisId]);
 
@@ -463,7 +464,7 @@ class BoqService
             'subcontract_rate' => (string) ($item->subcontract_rate ?? '0'),
             'margin_percent' => (string) ($item->margin_percent ?? '0'),
             'client_rate' => $perUnit,
-        ]);
+        ], true);
         $item->fill($calc)->save();
     }
 

@@ -5,7 +5,9 @@ namespace App\Exports;
 use App\Models\Boq\Boq;
 use App\Models\Boq\BoqItem;
 use App\Models\Boq\BoqSection;
+use App\Support\Boq\BoqCompanySettings;
 use App\Support\Exports\SpreadsheetText;
+use App\Support\Math\Decimal;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
@@ -36,7 +38,7 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
         return [
             'Section', 'WBS', 'Code', 'Name', 'Description', 'HSN/SAC', 'Unit',
             'NOB', 'Nos', 'Length', 'Width', 'Height', 'Quantity',
-            ...$costs, 'Client Rate', 'Client Amount',
+            ...$costs, 'Client Rate', 'Total Rate', 'Client Amount',
         ];
     }
 
@@ -82,6 +84,13 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
             ? trim(($item->projectCostHead->code ? $item->projectCostHead->code.' ' : '').($item->projectCostHead->name ?? ''))
             : null;
 
+        // Simplified/Normal: Total Rate = Material Rate (client_rate) + Labour Rate. Advanced: same as client_rate.
+        $totalRate = ! BoqCompanySettings::enabled($this->boq->company)
+            ? Decimal::of((string) ($item->client_rate ?? '0'))
+                ->plus((string) ($item->labour_rate ?? '0'))
+                ->toRate()
+            : (string) ($item->client_rate ?? '0');
+
         return [
             SpreadsheetText::cell($section),
             SpreadsheetText::cell($wbs !== '' ? $wbs : null),
@@ -95,7 +104,7 @@ class BoqExport implements FromArray, ShouldAutoSize, WithHeadings, WithTitle
             $item->measurement_length,
             $item->measurement_width,
             $item->measurement_height,
-            $item->quantity, ...$costs, $item->client_rate, $item->client_amount,
+            $item->quantity, ...$costs, $item->client_rate, $totalRate, $item->client_amount,
         ];
     }
 

@@ -141,6 +141,12 @@ final class BoqPresenter
                 ->times($labourRate)
                 ->toMoney();
             $data['is_pcc_work'] = $materialService->isPccWork($item);
+            // Simplified/Normal: derived Total Rate = Material Rate + Labour Rate (not a DB column).
+            if (! BoqCompanySettings::enabled()) {
+                $data['total_rate'] = Decimal::of((string) ($item->client_rate ?? '0'))
+                    ->plus($labourRate)
+                    ->toRate();
+            }
         }
 
         return $data;

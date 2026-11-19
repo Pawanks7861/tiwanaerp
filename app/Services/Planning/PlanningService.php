@@ -109,7 +109,10 @@ class PlanningService
             }
 
             $plannedQty = Decimal::of((string) ($data['planned_qty'] ?? ($task?->planned_qty ?? '0')));
-            $holdQty = Decimal::of((string) ($data['hold_quantity'] ?? ($task?->hold_quantity ?? '0')));
+            // Empty / null hold from the form must clear to 0 — do not fall back to the previous value.
+            $holdQty = array_key_exists('hold_quantity', $data)
+                ? Decimal::of((string) (filled($data['hold_quantity']) ? $data['hold_quantity'] : '0'))
+                : Decimal::of((string) ($task?->hold_quantity ?? '0'));
             if ($holdQty->isNegative()) {
                 throw ValidationException::withMessages(['hold_quantity' => 'Hold quantity cannot be negative.']);
             }

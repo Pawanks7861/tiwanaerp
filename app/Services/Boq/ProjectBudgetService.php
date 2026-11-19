@@ -212,14 +212,23 @@ class ProjectBudgetService
     {
         $qty = Decimal::of($item->quantity);
         $amounts = [];
+        $simplified = ! BoqCompanySettings::enabled();
+
         foreach (self::BOQ_HEADS as $field => $head) {
-            $amount = $qty->times($item->getAttribute($field))->round();
+            // Simplified: Material Estimate uses commercial Material Rate (client_rate), not internal cost material_rate.
+            // Labour Estimate stays Qty × labour_rate (often supplied via BoqBudgetMaterialSyncService instead).
+            $rate = ($simplified && $field === 'material_rate')
+                ? Decimal::of((string) ($item->client_rate ?? '0'))
+                : Decimal::of((string) ($item->getAttribute($field) ?? '0'));
+            $amount = $qty->times($rate)->round();
             if (! $amount->isZero()) {
                 $amounts[$head->value] = $amount;
             }
         }
 
-        if ($amounts !== []) {
+        // Advanced/detailed: reconcile residual to cost_amount. Simplified commercial heads must not
+        // be warped by internal cost_amount (which also includes labour in cost_rate).
+        if ($amounts !== [] && ! $simplified) {
             $difference = Decimal::of($item->cost_amount)->minus(Decimal::sum($amounts));
             $last = array_key_last($amounts);
             $amounts[$last] = $amounts[$last]->plus($difference);

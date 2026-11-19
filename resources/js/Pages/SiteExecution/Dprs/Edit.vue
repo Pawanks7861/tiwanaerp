@@ -174,34 +174,27 @@ function save() {
             </AppCard>
 
             <AppCard title="Materials" subtitle="Opening / received / issued / closing (informational)" :padded="false">
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-line text-xs">
-                        <thead class="bg-slate-50 font-semibold uppercase text-slate-500">
-                            <tr>
-                                <th class="px-3 py-2 text-left">Item</th>
-                                <th class="px-3 py-2 text-right">Opening</th>
-                                <th class="px-3 py-2 text-right">Received</th>
-                                <th class="px-3 py-2 text-right">Issued</th>
-                                <th class="px-3 py-2 text-right">Closing</th>
-                                <th class="w-8" />
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-line">
-                            <tr v-for="(line, i) in form.materials" :key="line._key">
-                                <td class="px-3 py-2">
-                                    <SearchSelect v-model="line.material_id" required :options="options.materials" :error="err('materials', i, 'material_id')" />
-                                </td>
-                                <td class="px-3 py-2"><DecimalInput v-model="line.opening_qty" :decimals="4" :error="err('materials', i, 'opening_qty')" /></td>
-                                <td class="px-3 py-2"><DecimalInput v-model="line.received_qty" :decimals="4" :error="err('materials', i, 'received_qty')" /></td>
-                                <td class="px-3 py-2"><DecimalInput v-model="line.issued_qty" :decimals="4" :error="err('materials', i, 'issued_qty')" /></td>
-                                <td class="px-3 py-2"><DecimalInput v-model="line.closing_qty" :decimals="4" :error="err('materials', i, 'closing_qty')" /></td>
-                                <td class="px-3 py-2">
-                                    <button type="button" class="text-slate-400 hover:text-red-600" @click="form.materials.splice(i, 1)"><Icon name="trash" :size="14" /></button>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <ol class="divide-y divide-line">
+                    <li v-for="(line, i) in form.materials" :key="line._key" class="grid gap-3 p-4 sm:grid-cols-6 lg:grid-cols-12">
+                        <SearchSelect
+                            v-model="line.material_id"
+                            label="Item"
+                            required
+                            :options="options.materials"
+                            class="sm:col-span-6 lg:col-span-4"
+                            :error="err('materials', i, 'material_id')"
+                        />
+                        <DecimalInput v-model="line.opening_qty" label="Opening" :decimals="4" class="sm:col-span-3 lg:col-span-2" :error="err('materials', i, 'opening_qty')" />
+                        <DecimalInput v-model="line.received_qty" label="Received" :decimals="4" class="sm:col-span-3 lg:col-span-2" :error="err('materials', i, 'received_qty')" />
+                        <DecimalInput v-model="line.issued_qty" label="Issued" :decimals="4" class="sm:col-span-3 lg:col-span-2" :error="err('materials', i, 'issued_qty')" />
+                        <DecimalInput v-model="line.closing_qty" label="Closing" :decimals="4" class="sm:col-span-3 lg:col-span-1" :error="err('materials', i, 'closing_qty')" />
+                        <div class="flex items-end sm:col-span-6 lg:col-span-1">
+                            <button type="button" class="flex size-11 items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-600" :aria-label="`Remove material line ${i + 1}`" @click="form.materials.splice(i, 1)">
+                                <Icon name="trash" :size="16" />
+                            </button>
+                        </div>
+                    </li>
+                </ol>
                 <div class="border-t border-line p-3"><AppButton size="sm" variant="secondary" icon="plus" @click="add('materials', blankMaterial)">Add material</AppButton></div>
             </AppCard>
 

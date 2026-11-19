@@ -11,7 +11,14 @@ use App\Support\Math\Decimal;
  *   cost_amount   = round2(quantity × cost_rate)
  *   selling_rate  = round4(cost_rate × (1 + margin% / 100))
  *   client_rate   = explicit override, otherwise selling_rate             (4 dp)
+ *     (UI "Material Rate" on Simplified/Normal BOQ)
  *   client_amount = round2(quantity × client_rate)
+ *                 or, when $combineLabourIntoCommercialAmount (Simplified/Normal):
+ *                   round2(quantity × (client_rate + labour_rate))
+ *                   where client_rate is UI "Material Rate" and labour_rate stays separate.
+ *
+ * Advanced BOQ must call with $combineLabourIntoCommercialAmount = false so
+ * commercial amount stays Qty × client_rate (workbook/internal labour separate).
  *
  * BOQ totals are the sum of the rounded line amounts, so the header always equals the lines.
  */
@@ -23,7 +30,7 @@ class BoqCalculator
      * @param  array{quantity?: string|null, material_rate?: string|null, labour_rate?: string|null, equipment_rate?: string|null, subcontract_rate?: string|null, margin_percent?: string|null, client_rate?: string|null}  $input
      * @return array{quantity: string, material_rate: string, labour_rate: string, equipment_rate: string, subcontract_rate: string, cost_rate: string, cost_amount: string, margin_percent: string, selling_rate: string, client_rate: string, client_amount: string}
      */
-    public static function line(array $input): array
+    public static function line(array $input, bool $combineLabourIntoCommercialAmount = false): array
     {
         $quantity = Decimal::of($input['quantity'] ?? '0')->round(Decimal::QTY_SCALE);
 
@@ -41,6 +48,12 @@ class BoqCalculator
             ? $sellingRate
             : Decimal::of($override)->round(Decimal::RATE_SCALE);
 
+        // Simplified/Normal commercial: Amount = Qty × (Material Rate + Labour Rate).
+        // Do not add labour again on top of this amount elsewhere.
+        $commercialRate = $combineLabourIntoCommercialAmount
+            ? $clientRate->plus($rates['labour_rate'])->round(Decimal::RATE_SCALE)
+            : $clientRate;
+
         return [
             'quantity' => $quantity->toString(),
             'material_rate' => $rates['material_rate']->toString(),
@@ -52,7 +65,7 @@ class BoqCalculator
             'margin_percent' => $margin->toString(),
             'selling_rate' => $sellingRate->toString(),
             'client_rate' => $clientRate->toString(),
-            'client_amount' => $quantity->times($clientRate)->toMoney(),
+            'client_amount' => $quantity->times($commercialRate)->toMoney(),
         ];
     }
 

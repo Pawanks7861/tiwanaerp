@@ -263,10 +263,12 @@ class BoqImportService
             }
 
             if (($values['amount'] ?? null) !== null && ($values['client_rate'] ?? null) !== null) {
-                $expected = (float) $values['quantity'] * (float) $values['client_rate'];
+                $labour = (float) ($values['labour_rate'] ?? 0);
+                // Simplified/Normal commercial: Amount = Qty × (Material Rate + Labour Rate).
+                $expected = (float) $values['quantity'] * ((float) $values['client_rate'] + $labour);
                 $imported = (float) $values['amount'];
                 if (abs($expected - $imported) > 0.05) {
-                    $rowWarnings[] = 'Imported Amount does not match Quantity × Rate; ERP will use Quantity × Rate.';
+                    $rowWarnings[] = 'Imported Amount does not match Quantity × (Material Rate + Labour Rate); ERP will recalculate.';
                 }
             }
 

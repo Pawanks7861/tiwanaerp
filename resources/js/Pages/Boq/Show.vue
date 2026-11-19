@@ -329,11 +329,24 @@ watch(() => JSON.stringify(props.items), () => {
 }, { immediate: true });
 
 const dirty = computed(() => deletedIds.value.length > 0 || serialise() !== baseline.value);
-const calc = computed(() => Object.fromEntries(rows.value.map((r) => [
-    r._key,
-    // Simplified/Normal: Material Rate never inherits Labour Rate via cost+margin selling fallback.
-    boqLine(r, { simplifiedCommercial: !advanced.value && !detailedCosts.value }),
-])));
+const useSimplifiedCombinedRate = computed(() => !advanced.value && !detailedCosts.value);
+const calc = computed(() => Object.fromEntries(rows.value.map((r) => {
+    // Simplified/Normal: Amount = Qty × (Material Rate + Labour Rate); rates stay separate.
+    const live = boqLine(r, { simplifiedCommercial: useSimplifiedCombinedRate.value });
+    // Approved/historical: preserve persisted Amount on open (do not rewrite display with new formula).
+    if (!editable.value && r.id != null && r.client_amount != null && r.client_amount !== '') {
+        return [r._key, {
+            ...live,
+            client_rate: r.client_rate != null && r.client_rate !== '' ? String(r.client_rate) : live.client_rate,
+            total_rate: useSimplifiedCombinedRate.value
+                ? (live.total_rate ?? live.client_rate)
+                : live.client_rate,
+            client_amount: String(r.client_amount),
+        }];
+    }
+
+    return [r._key, live];
+})));
 const totals = computed(() => ({
     cost: sum(rows.value.map((r) => calc.value[r._key].cost_amount)),
     client: sum(rows.value.map((r) => calc.value[r._key].client_amount)),
@@ -1259,7 +1272,7 @@ function heightDepthLabel(row) {
                                 <th
                                     v-if="showLegacyLabourRateColumn"
                                     class="px-2 py-2 text-right whitespace-nowrap"
-                                    title="Internal labour rate per BOQ unit. It does not change the Material Rate."
+                                    title="Labour rate per BOQ unit. Amount = Qty × (Material Rate + Labour Rate)."
                                 >Labour Rate</th>
                                 <th class="px-2 py-2 text-right">Amount</th>
                                 <th class="px-2 py-2"><span class="sr-only">Actions</span></th>
@@ -1337,7 +1350,7 @@ function heightDepthLabel(row) {
                                             <td
                                                 v-if="showLegacyLabourRateColumn"
                                                 class="px-1 py-1"
-                                                title="Internal labour rate per BOQ unit. It does not change the Material Rate."
+                                                title="Labour rate per BOQ unit. Amount = Qty × (Material Rate + Labour Rate)."
                                             >
                                                 <CellDecimal
                                                     v-model="row.labour_rate"
@@ -1374,7 +1387,7 @@ function heightDepthLabel(row) {
                                             <td
                                                 v-if="showLegacyLabourRateColumn"
                                                 class="px-2 py-1.5 text-right tabular text-slate-700"
-                                                title="Internal labour rate per BOQ unit. It does not change the Material Rate."
+                                                title="Labour rate per BOQ unit. Amount = Qty × (Material Rate + Labour Rate)."
                                             >{{ formatMoney(row.labour_rate || 0) }}</td>
                                         </template>
                                         <td class="px-2 py-1.5 text-right font-medium text-slate-900 tabular">{{ formatMoney(calc[row._key].client_amount) }}</td>
@@ -1607,6 +1620,12 @@ function heightDepthLabel(row) {
                         {{ formatMoney(calc[editingRow._key].client_rate) }}
                         <span v-if="materialAutoActive(editingRow)" class="mt-0.5 block text-[11px] font-normal text-slate-500">Auto-calculated from materials</span>
                     </dd>
+                    <template v-if="showLegacyLabourRateColumn">
+                        <dt class="text-slate-500">Labour Rate</dt>
+                        <dd class="text-right tabular">{{ formatMoney(editingRow.labour_rate || 0) }}</dd>
+                        <dt class="font-medium text-slate-700">Total Rate</dt>
+                        <dd class="text-right font-semibold tabular">{{ formatMoney(calc[editingRow._key].total_rate ?? calc[editingRow._key].client_rate) }}</dd>
+                    </template>
                     <dt class="font-medium text-slate-700">Amount</dt><dd class="text-right font-semibold tabular">{{ formatMoney(calc[editingRow._key].client_amount) }}</dd>
                 </dl>
 
@@ -1730,7 +1749,7 @@ function heightDepthLabel(row) {
                             :label="`Labour Rate / ${unitLabel(editingRow.unit_id) || 'unit'}`"
                             :decimals="4"
                             prefix="₹"
-                            help="Internal labour rate per BOQ unit. It does not change the Material Rate."
+                            help="Kept separate from Material Rate. Amount = Qty × (Material Rate + Labour Rate)."
                             :error="cellError(editingRow, 'labour_rate')"
                         />
                         <div v-else>
