@@ -26,6 +26,11 @@ class ProjectBudgetPolicy
 
     public function approve(User $user, ProjectBudget $budget): bool
     {
+        // BOQ Estimate has no separate approval — it inherits final BOQ approval.
+        if ($budget->isBoqEstimate()) {
+            return false;
+        }
+
         return $budget->status === BudgetStatus::Draft && $this->allowed($user, 'budget.approve', $budget->project);
     }
 

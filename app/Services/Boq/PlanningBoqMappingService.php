@@ -222,6 +222,9 @@ class PlanningBoqMappingService
             $lockedTask = ProjectTask::query()->whereKey($task->id)->lockForUpdate()->with('unit:id,symbol')->firstOrFail();
             $kept = [];
             $payloads = [];
+            $resolvedEntries = [];
+            /** @var array<int, array{nos: Decimal, boq: Decimal}> $batchClaimed */
+            $batchClaimed = [];
 
             foreach (array_values($rows) as $i => $row) {
                 $itemId = (int) ($row['boq_item_id'] ?? 0);
@@ -235,34 +238,61 @@ class PlanningBoqMappingService
                     throw ValidationException::withMessages(["maps.$i.boq_item_id" => 'Choose a BOQ item from this project.']);
                 }
 
+                $this->assertMappingUnitCompatible($lockedTask, $item, "maps.$i.boq_item_id");
+
                 Boq::query()->whereKey($item->boq_id)->lockForUpdate()->firstOrFail();
 
+                $claimed = $batchClaimed[$itemId] ?? ['nos' => Decimal::zero(), 'boq' => Decimal::zero()];
                 $row['project_task_id'] = $lockedTask->id;
                 $model = $this->findMapModel($item, $lockedTask, $row);
-                $resolved = $this->resolveManualAllocation($item, $lockedTask, $row, $model, "maps.$i");
+                $resolved = $this->resolveManualAllocation(
+                    $item,
+                    $lockedTask,
+                    $row,
+                    $model,
+                    "maps.$i",
+                    $claimed['nos'],
+                    $claimed['boq'],
+                );
 
-                // Per-item over-allocation check including this candidate.
-                $this->assertNoOverAllocation($item, [[
+                $entry = [
                     'task' => $lockedTask,
                     'model' => $model,
                     'resolved' => $resolved,
                     'row' => $row,
                     'index' => $i,
-                ]]);
+                ];
+                $resolvedEntries[] = $entry;
+
+                // Per-item over-allocation including prior rows in this same save.
+                $this->assertNoOverAllocation(
+                    $item,
+                    array_values(array_filter(
+                        $resolvedEntries,
+                        fn (array $e) => (int) ($e['row']['boq_item_id'] ?? 0) === $itemId
+                    )),
+                );
 
                 $isPrimary = (bool) ($row['is_primary'] ?? ($i === 0));
                 $resolved['is_primary'] = $isPrimary;
 
                 $saved = $this->persistMap($item->boq, $item, $lockedTask, $model, $resolved, $row, $user, $i);
                 if ($isPrimary) {
-                    $this->syncTaskFromMap($lockedTask, $saved, $resolved);
-                    // Clear other primaries for this task.
                     BoqPlanningMap::query()
                         ->where('project_task_id', $lockedTask->id)
                         ->where('is_active', true)
                         ->whereKeyNot($saved->id)
                         ->update(['is_primary' => false]);
+
+                    if ($item->project_cost_head_id) {
+                        app(ProjectWbsService::class)->inheritFromBoqOntoTask($lockedTask->fresh(), $item);
+                    }
                 }
+
+                $batchClaimed[$itemId] = [
+                    'nos' => $claimed['nos']->plus($this->resolvedMappedNos($resolved)),
+                    'boq' => $claimed['boq']->plus(Decimal::of($resolved['allocated_boq_qty'])),
+                ];
                 $kept[] = $saved->id;
                 $payloads[] = $this->mapPayload($saved->fresh(['task.unit']));
             }
@@ -280,6 +310,10 @@ class PlanningBoqMappingService
                     }
                     $map->forceFill(['is_active' => false, 'is_primary' => false, 'updated_by' => $user->id])->save();
                 });
+
+            if ($kept !== []) {
+                $this->syncActivityTotalsFromMaps($lockedTask->fresh());
+            }
 
             return $payloads;
         });
@@ -338,16 +372,20 @@ class PlanningBoqMappingService
             $summary = $this->allocationSummary($item);
             $nos = SimpleBoqMeasurementCalculator::nosBreakdown($item);
 
+            $baseLabel = trim(($item->item_code ? $item->item_code.' — ' : '').$item->name);
+            $unit = $item->unit?->symbol;
+
             return [
                 'value' => $item->id,
                 'boq_id' => $item->boq_id,
-                'label' => trim(($item->item_code ? $item->item_code.' — ' : '').$item->name),
+                'label' => $baseLabel,
                 'boq_label' => $item->boq
                     ? ($item->boq->boq_number.' / R'.$item->boq->version.($item->boq->is_current ? '' : ' (draft)'))
                     : null,
                 'name' => $item->name,
                 'item_code' => $item->item_code,
-                'unit' => $item->unit?->symbol,
+                'unit' => $unit,
+                'unit_id' => $item->unit_id,
                 'quantity' => Decimal::of($item->quantity ?? '0')->toQuantity(),
                 'measurement_nob' => $nos['measurement_nob'],
                 'nos_per_building' => $nos['nos_per_building'],
@@ -659,20 +697,7 @@ class PlanningBoqMappingService
             $map->forceFill(['is_primary' => true])->save();
         }
 
-        $unitId = $task->unit_id;
-        $planUnit = (string) ($resolved['planning_unit_symbol'] ?? '');
-        if ($planUnit !== '') {
-            $found = Unit::query()->where('symbol', $planUnit)->value('id');
-            if ($found) {
-                $unitId = (int) $found;
-            }
-        }
-
-        $task->forceFill([
-            'planned_qty' => $resolved['planning_qty'],
-            'unit_id' => $unitId,
-            'boq_item_id' => $map->boq_item_id,
-        ])->save();
+        $this->syncActivityTotalsFromMaps($task->fresh());
 
         // Cost WBS inherits from BOQ item when present (Planning schedule wbs_code is separate).
         if ($map->boq_item_id) {
@@ -681,6 +706,123 @@ class PlanningBoqMappingService
                 app(ProjectWbsService::class)->inheritFromBoqOntoTask($task->fresh(), $boqItem);
             }
         }
+    }
+
+    /**
+     * Authoritative Activity Total Qty from active mappings.
+     * Quantity-based activities (unit matches BOQ): Σ equivalent BOQ qty.
+     * Nos activities with quantity BOQ: Σ allocated Nos (legacy Nos planning).
+     */
+    private function syncActivityTotalsFromMaps(ProjectTask $task): void
+    {
+        $maps = BoqPlanningMap::query()
+            ->where('project_task_id', $task->id)
+            ->where('is_active', true)
+            ->with(['item:id,unit_id,project_cost_head_id,quantity,measurement_nob,measurement_nos', 'item.unit:id,symbol'])
+            ->orderByDesc('is_primary')
+            ->orderBy('sequence')
+            ->orderBy('id')
+            ->get();
+
+        if ($maps->isEmpty()) {
+            return;
+        }
+
+        $symbols = $maps
+            ->map(fn (BoqPlanningMap $m) => $m->item?->unit?->symbol ?: $m->boq_unit_symbol)
+            ->filter(fn ($s) => is_string($s) && $s !== '')
+            ->unique()
+            ->values();
+
+        if ($symbols->count() > 1) {
+            throw ValidationException::withMessages([
+                'maps' => 'BOQ items mapped to one activity must use a compatible unit. Mixed units: '.$symbols->implode(', ').'.',
+            ]);
+        }
+
+        $boqUnit = (string) ($symbols->first() ?? '');
+        $task->loadMissing('unit:id,symbol');
+        $taskUnit = $task->unit?->symbol;
+        $sameUnit = $taskUnit === null || $taskUnit === '' || ($boqUnit !== '' && strcasecmp((string) $taskUnit, $boqUnit) === 0);
+        $nosPlanning = $taskUnit !== null && $taskUnit !== '' && strcasecmp((string) $taskUnit, 'Nos') === 0
+            && $boqUnit !== '' && strcasecmp($boqUnit, 'Nos') !== 0;
+        $allMapsByNos = $maps->every(
+            fn (BoqPlanningMap $m) => $m->tracking_basis === PlanningTrackingBasis::Nos
+        );
+
+        if (! $sameUnit && ! $nosPlanning) {
+            throw ValidationException::withMessages([
+                'unit_id' => 'This BOQ item uses '.$boqUnit.' while this Planning Activity uses '.($taskUnit ?: 'a different unit')
+                    .'. BOQ items mapped to one activity must use a compatible unit.',
+            ]);
+        }
+
+        $primary = $maps->firstWhere('is_primary', true) ?? $maps->first();
+
+        // Pure Nos mapping: keep Activity Total Qty as submitted (UI seeds once from Allocated Nos).
+        // Do not overwrite with equivalent BOQ qty; Total Qty stays planning-owned and editable.
+        if ($allMapsByNos) {
+            $task->forceFill([
+                'boq_item_id' => $primary?->boq_item_id,
+            ])->save();
+
+            return;
+        }
+
+        $unitId = $task->unit_id;
+        if ($sameUnit && $boqUnit !== '') {
+            $found = Unit::query()->where('symbol', $boqUnit)->value('id');
+            if ($found) {
+                $unitId = (int) $found;
+            }
+        }
+
+        $total = Decimal::zero();
+        foreach ($maps as $map) {
+            $total = $total->plus(Decimal::of($map->allocated_boq_qty ?? '0'));
+        }
+        $total = $total->round(Decimal::QTY_SCALE);
+
+        $executed = Decimal::of($task->completed_qty ?? '0');
+        if ($total->lessThan($executed)) {
+            throw ValidationException::withMessages([
+                'planned_qty' => 'Cannot reduce mapped total quantity below executed quantity ('.$executed->toQuantity().').',
+            ]);
+        }
+
+        $task->forceFill([
+            'planned_qty' => $total->toQuantity(),
+            'unit_id' => $unitId,
+            'boq_item_id' => $primary?->boq_item_id,
+        ])->save();
+    }
+
+    private function assertMappingUnitCompatible(ProjectTask $task, BoqItem $item, string $errorKey): void
+    {
+        $boqUnit = $item->unit?->symbol;
+        if ($boqUnit === null || $boqUnit === '') {
+            return;
+        }
+
+        $task->loadMissing('unit:id,symbol');
+        $taskUnit = $task->unit?->symbol;
+        if ($taskUnit === null || $taskUnit === '') {
+            return;
+        }
+
+        if (strcasecmp($taskUnit, $boqUnit) === 0) {
+            return;
+        }
+
+        // Legacy Nos planning with quantity BOQ (conversion path) remains allowed.
+        if (strcasecmp($taskUnit, 'Nos') === 0 && strcasecmp($boqUnit, 'Nos') !== 0) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            $errorKey => 'This BOQ item uses '.$boqUnit.' while this Planning Activity uses '.$taskUnit
+                .'. BOQ items mapped to one activity must use a compatible unit.',
+        ]);
     }
 
     /**
@@ -850,6 +992,16 @@ class PlanningBoqMappingService
     }
 
     /**
+     * Public map payload for Planning / API responses.
+     *
+     * @return array<string, mixed>
+     */
+    public function publicMapPayload(BoqPlanningMap $map): array
+    {
+        return $this->mapPayload($map);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function mapPayload(BoqPlanningMap $map): array
@@ -874,17 +1026,42 @@ class PlanningBoqMappingService
             }
         }
 
+        $item = $map->relationLoaded('item') ? $map->item : $map->item()->first();
+        $nos = $item ? SimpleBoqMeasurementCalculator::nosBreakdown($item) : null;
+        $summary = $item ? $this->allocationSummary($item, (int) $map->id) : null;
+
         return [
             'id' => $map->id,
+            'boq_item_id' => $map->boq_item_id,
+            'boq_revision_id' => $map->boq_id,
             'project_task_id' => $map->project_task_id,
-            'task_label' => trim(($map->task?->wbs_code ? $map->task->wbs_code.' — ' : '').($map->task?->name ?? '')),
+            'task_label' => $map->relationLoaded('task')
+                ? trim(($map->task?->wbs_code ? $map->task->wbs_code.' — ' : '').($map->task?->name ?? ''))
+                : null,
+            'map_basis' => $map->tracking_basis?->value ?? PlanningTrackingBasis::BoqQuantity->value,
             'mapping_method' => $map->mapping_method?->value ?? PlanningBoqMappingMethod::ConversionBased->value,
             'tracking_basis' => $map->tracking_basis?->value ?? PlanningTrackingBasis::BoqQuantity->value,
+            'nob' => $nos['measurement_nob'] ?? null,
+            'nos_per_building' => $nos['nos_per_building'] ?? null,
+            'total_nos' => $nos['effective_nos'] ?? null,
+            'boq_qty' => $summary['boq_total_qty'] ?? ($map->snapshot_boq_qty !== null
+                ? Decimal::of($map->snapshot_boq_qty)->toQuantity()
+                : null),
+            'available_nos' => $summary['available_nos'] ?? null,
+            'available_qty' => $summary['available_boq_qty'] ?? null,
+            'allocated_nos' => $map->tracking_basis === PlanningTrackingBasis::Nos
+                ? Decimal::of($map->planning_qty)->toQuantity()
+                : $equivNos,
             'allocated_boq_qty' => Decimal::of($map->allocated_boq_qty)->toQuantity(),
             'allocated_planning_qty' => Decimal::of($map->planning_qty)->toQuantity(),
+            'equivalent_boq_qty' => Decimal::of($map->allocated_boq_qty)->toQuantity(),
+            'unit' => $map->boq_unit_symbol,
             'boq_unit_symbol' => $map->boq_unit_symbol,
             'planning_qty' => Decimal::of($map->planning_qty)->toQuantity(),
             'planning_unit_symbol' => $map->planning_unit_symbol,
+            'conversion' => $map->conversion_factor !== null
+                ? Decimal::of($map->conversion_factor)->toQuantity()
+                : null,
             'conversion_factor' => $map->conversion_factor !== null
                 ? Decimal::of($map->conversion_factor)->toQuantity()
                 : null,

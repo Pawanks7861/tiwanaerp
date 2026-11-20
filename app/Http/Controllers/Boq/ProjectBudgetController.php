@@ -17,7 +17,6 @@ use App\Services\Boq\BoqBudgetMaterialSyncService;
 use App\Services\Boq\ProjectBudgetService;
 use App\Services\Projects\ProjectCostHeadService;
 use App\Support\Math\Decimal;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -93,6 +92,8 @@ class ProjectBudgetController extends Controller
         $mainApproved = $this->budgets->approvedOfType($project, BudgetType::MainProject);
         $boqApproved = $this->budgets->approvedOfType($project, BudgetType::BoqEstimate);
 
+        $currentEstimateId = $boqApproved?->id;
+
         return Inertia::render('Budget/Index', [
             'project' => ProjectHeader::for($project),
             'budget_type' => $type->value,
@@ -100,29 +101,49 @@ class ProjectBudgetController extends Controller
             'budget_types' => BudgetType::options(),
             'main_project_budget_total' => $mainApproved?->total_amount,
             'boq_estimate_total' => $boqApproved?->total_amount,
-            'versions' => $versions->map(fn (ProjectBudget $b) => [
-                ...$b->only(['id', 'version', 'total_amount', 'boq_id', 'materials_sync_pending']),
-                'budget_type' => $b->budget_type->value,
-                'status' => $b->status->value,
-                'status_label' => $b->status->label(),
-                'source' => $b->source->value,
-                'source_label' => $b->source->label(),
-                'approved_by' => $b->approver?->name,
-                'approved_at' => $b->approved_at?->toIso8601String(),
-                'materials_synced_at' => $b->materials_synced_at?->toIso8601String(),
-                'boq_label' => $b->boq ? "{$b->boq->boq_number} v{$b->boq->version}" : null,
-            ])->all(),
+            'versions' => $versions->map(function (ProjectBudget $b) use ($currentEstimateId) {
+                $isEstimate = $b->budget_type === BudgetType::BoqEstimate;
+                $isCurrent = $isEstimate
+                    ? ($currentEstimateId !== null && (int) $b->id === (int) $currentEstimateId)
+                    : $b->status === BudgetStatus::Approved;
+
+                return [
+                    ...$b->only(['id', 'version', 'total_amount', 'boq_id', 'materials_sync_pending']),
+                    'budget_type' => $b->budget_type->value,
+                    'status' => $b->status->value,
+                    'status_label' => $b->status->label(),
+                    'is_current' => $isCurrent,
+                    'source' => $b->source->value,
+                    'source_label' => $b->source->label(),
+                    'approved_by' => $b->approver?->name,
+                    'approved_at' => $b->approved_at?->toIso8601String(),
+                    'materials_synced_at' => $b->materials_synced_at?->toIso8601String(),
+                    'boq_label' => $b->boq ? "{$b->boq->boq_number} / R{$b->boq->version}" : null,
+                    'source_revision' => $b->boq ? 'R'.$b->boq->version : null,
+                ];
+            })->all(),
             'budget' => $budget ? [
                 ...$budget->only(['id', 'version', 'total_amount', 'boq_id']),
                 'budget_type' => $budget->budget_type->value,
                 'status' => $budget->status->value,
-                'editable' => $budget->status === BudgetStatus::Draft,
-                'can_approve' => $budget->status === BudgetStatus::Draft && $user->can('approve', $budget),
+                'status_label' => $budget->status->label(),
+                'editable' => $budget->budget_type === BudgetType::MainProject && $budget->status === BudgetStatus::Draft,
+                // Main Project Budget only — BOQ Estimate has no separate approve action.
+                'can_approve' => $budget->budget_type === BudgetType::MainProject
+                    && $budget->status === BudgetStatus::Draft
+                    && $user->can('approve', $budget),
+                'is_current' => $budget->budget_type === BudgetType::BoqEstimate
+                    ? ($currentEstimateId !== null && (int) $budget->id === (int) $currentEstimateId)
+                    : $budget->status === BudgetStatus::Approved,
                 'materials_synced_at' => $budget->materials_synced_at?->toIso8601String(),
                 'materials_sync_pending' => (bool) $budget->materials_sync_pending,
                 'boq_label' => $budget->boq
-                    ? "{$budget->boq->boq_number} v{$budget->boq->version}"
+                    ? "{$budget->boq->boq_number} / R{$budget->boq->version}"
                     : null,
+                'source_boq_id' => $budget->boq_id,
+                'source_revision' => $budget->boq ? 'R'.$budget->boq->version : null,
+                'approved_by' => $budget->approver?->name,
+                'approved_at' => $budget->approved_at?->toIso8601String(),
             ] : null,
             'wbsHeads' => $wbsHeads,
             'heads' => $byHead,
@@ -202,78 +223,6 @@ class ProjectBudgetController extends Controller
         ])->with('success', 'Main Project Budget WBS allocations saved.');
     }
 
-    public function generate(Request $request, Project $project): RedirectResponse
-    {
-        Gate::authorize('update', [ProjectBudget::class, $project]);
-
-        $data = $request->validate(['boq_id' => ['required', 'integer']]);
-        $boq = $project->boqs()->findOrFail($data['boq_id']);
-        $budget = $this->budgets->generateFromBoq($project, $boq);
-
-        return redirect()->route('projects.budget.index', [
-            $project,
-            'budget_type' => BudgetType::BoqEstimate->value,
-            'version_id' => $budget->id,
-        ])->with('success', "BOQ Estimate v{$budget->version} generated from {$boq->boq_number} v{$boq->version}. Main Project Budget was not changed.");
-    }
-
-    public function syncPreview(Request $request, Project $project): JsonResponse
-    {
-        Gate::authorize('update', [ProjectBudget::class, $project]);
-
-        $data = $request->validate(['boq_id' => ['nullable', 'integer']]);
-        $draft = $project->budgets()->boqEstimate()->where('status', BudgetStatus::Draft)->orderByDesc('version')->first();
-        $boqId = $data['boq_id'] ?? $draft?->boq_id
-            ?? $project->boqs()->where('status', BoqStatus::Approved)->where('is_current', true)->value('id');
-        $boq = $project->boqs()->findOrFail($boqId);
-
-        return response()->json($this->materialSync->preview($project, $boq, $draft));
-    }
-
-    public function syncMaterials(Request $request, Project $project): RedirectResponse
-    {
-        Gate::authorize('update', [ProjectBudget::class, $project]);
-
-        $data = $request->validate([
-            'boq_id' => ['nullable', 'integer'],
-            'confirm' => ['sometimes', 'boolean'],
-        ]);
-
-        $draft = $project->budgets()->boqEstimate()->where('status', BudgetStatus::Draft)->orderByDesc('version')->first();
-        $boqId = $data['boq_id'] ?? $draft?->boq_id;
-        if ($boqId === null) {
-            $boqId = $project->boqs()->where('status', BoqStatus::Approved)->where('is_current', true)->value('id');
-        }
-
-        $boq = $project->boqs()->findOrFail($boqId);
-
-        if ($draft === null) {
-            $approved = $project->budgets()->boqEstimate()->where('status', BudgetStatus::Approved)->first();
-            if ($approved !== null) {
-                $approved->forceFill(['materials_sync_pending' => true])->save();
-
-                return redirect()->route('projects.budget.index', [
-                    $project,
-                    'budget_type' => BudgetType::BoqEstimate->value,
-                    'version_id' => $approved->id,
-                ])->with('error', 'Approved BOQ Estimate cannot be modified. Create a new BOQ Estimate version, then Sync BOQ Estimate.');
-            }
-        }
-
-        $preview = $this->materialSync->preview($project, $boq, $draft);
-        if (! ($data['confirm'] ?? false) && ($preview['creates'] + $preview['updates'] + $preview['removes']) > 0) {
-            // Soft confirm via flash for non-AJAX callers; UI should pass confirm=1 after preview.
-        }
-
-        $budget = $this->materialSync->syncDraftFromBoq($project, $boq);
-
-        return redirect()->route('projects.budget.index', [
-            $project,
-            'budget_type' => BudgetType::BoqEstimate->value,
-            'version_id' => $budget->id,
-        ])->with('success', "BOQ Estimate synced from {$boq->boq_number} v{$boq->version}. Main Project Budget was not changed.");
-    }
-
     public function newVersion(Request $request, Project $project): RedirectResponse
     {
         Gate::authorize('update', [ProjectBudget::class, $project]);
@@ -322,6 +271,10 @@ class ProjectBudgetController extends Controller
 
     public function approve(Request $request, Project $project, ProjectBudget $budget): RedirectResponse
     {
+        if ($budget->budget_type === BudgetType::BoqEstimate) {
+            abort(403, 'BOQ Estimate inherits approval from the finally approved BOQ and cannot be approved separately.');
+        }
+
         Gate::authorize('approve', $budget);
 
         $this->budgets->approve($budget, $request->user());

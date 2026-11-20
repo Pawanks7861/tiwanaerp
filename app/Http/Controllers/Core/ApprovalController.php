@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Core;
 
 use App\Contracts\Approvable;
 use App\Enums\Approval\ApprovalStatus;
+use App\Enums\Boq\BoqStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Approval\ApprovalRequest;
 use App\Models\Boq\Boq;
@@ -55,6 +56,14 @@ class ApprovalController extends Controller
         ]);
         $this->assertNotStale($approvalRequest, $data['expected_updated_at'] ?? null);
         $this->approvals->approve($approvalRequest, $request->user(), $data['comments'] ?? null);
+
+        $approvalRequest->refresh();
+        $document = $approvalRequest->approvable;
+        if ($document instanceof Boq
+            && $document->status === BoqStatus::Approved
+            && $document->is_current) {
+            return back()->with('success', 'BOQ approved and BOQ Estimate updated successfully. Main Project Budget was not changed.');
+        }
 
         return back()->with('success', 'Approved.');
     }

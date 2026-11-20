@@ -317,7 +317,7 @@ class AdvancedBoqWorkbookImportService
                     'rate_comparison_quotes' => $quoteCount,
                     'planning_activities' => $planningCount,
                     'ignored_sheets' => ['Job Respons'],
-                    'budget_sync' => 'Budget Sync Required',
+                    'budget_sync' => 'Pending BOQ Approval',
                 ];
             });
         } catch (\Throwable $e) {

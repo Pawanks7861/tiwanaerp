@@ -42,15 +42,19 @@ const financeHome = computed(() => {
     return null;
 });
 
-const tabs = computed(() =>
-    buildProjectTabs({
+const tabs = computed(() => {
+    // Recompute child active flags whenever the URL changes.
+    void page.url;
+
+    return buildProjectTabs({
         projectId: props.project.id,
         can,
         procurementHome: procurementHome.value,
         financeHome: financeHome.value,
         advancedBoq: advancedBoq.value,
-    }),
-);
+        rfqEnabled: rfqEnabled.value,
+    });
+});
 </script>
 
 <template>

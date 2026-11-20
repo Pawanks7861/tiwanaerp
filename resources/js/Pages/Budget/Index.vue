@@ -43,6 +43,19 @@ const props = defineProps({
 const isBoqEstimate = computed(() => props.budget_type === 'boq_estimate');
 const isMainBudget = computed(() => !isBoqEstimate.value);
 
+function estimateVersionBadgeLabel(version) {
+    if (!isBoqEstimate.value) {
+        return version.status_label;
+    }
+    if (version.status === 'approved') {
+        return 'Approved';
+    }
+    if (version.status === 'superseded') {
+        return 'Superseded';
+    }
+    return version.status_label;
+}
+
 const headFilter = ref('all');
 const visibleLines = computed(() => (headFilter.value === 'all' ? props.lines : props.lines.filter((l) => l.cost_head === headFilter.value)));
 const headLabel = (value) => props.costHeads.find((h) => h.value === value)?.label ?? value;
@@ -136,49 +149,6 @@ function saveWbsAllocations(options = {}) {
     });
 }
 
-const showGenerate = ref(false);
-const generateForm = useForm({ boq_id: props.boqs[0]?.value ?? null });
-function generate() {
-    generateForm.post(route('projects.budget.generate', props.project.id), { onSuccess: () => (showGenerate.value = false) });
-}
-
-const syncing = ref(false);
-const syncPreview = ref(null);
-async function openSyncPreview() {
-    syncing.value = true;
-    try {
-        const boqId = props.budget?.boq_id ?? props.boqs[0]?.value ?? null;
-        const url = route('projects.budget.sync-preview', props.project.id) + (boqId ? `?boq_id=${boqId}` : '');
-        const res = await fetch(url, { headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' });
-        if (!res.ok) {
-            throw new Error('Preview failed');
-        }
-        syncPreview.value = await res.json();
-    } catch {
-        syncPreview.value = null;
-        confirming.value = { action: 'sync' };
-    } finally {
-        syncing.value = false;
-    }
-}
-function confirmSync() {
-    syncing.value = true;
-    router.post(
-        route('projects.budget.sync-materials', props.project.id),
-        {
-            boq_id: props.budget?.boq_id ?? props.boqs[0]?.value ?? null,
-            confirm: 1,
-        },
-        {
-            preserveScroll: true,
-            onFinish: () => {
-                syncing.value = false;
-                syncPreview.value = null;
-            },
-        },
-    );
-}
-
 const lineModal = ref(null);
 const lineForm = useForm({ cost_head: 'other', description: '', amount: null, budget_type: 'main_project' });
 function openLine(line = null) {
@@ -216,11 +186,7 @@ async function confirmAction() {
         }
         router.post(route('projects.budget.approve', [props.project.id, props.budget.id]), {}, done);
     } else if (action === 'new') {
-        router.post(route('projects.budget.new-version', props.project.id), { budget_type: props.budget_type }, done);
-    } else if (action === 'sync') {
-        confirming.value = null;
-        processing.value = false;
-        confirmSync();
+        router.post(route('projects.budget.new-version', props.project.id), { budget_type: 'main_project' }, done);
     } else {
         router.delete(route('projects.budget.lines.destroy', [props.project.id, line.id]), done);
     }
@@ -256,19 +222,23 @@ async function confirmAction() {
                             Management-approved project ceiling by WBS. Not generated from BOQ. Approved versions are never overwritten.
                         </p>
                         <p v-else class="mt-0.5 text-xs text-slate-500">
-                            Technical estimate from BOQ costing. Sync updates BOQ Estimate only — Main Project Budget stays unchanged.
+                            Technical estimate published automatically when a BOQ receives final approval. Main Project Budget is never updated by BOQ approval.
                         </p>
                     </div>
                 </template>
                 <template v-if="can.update" #actions>
-                    <AppButton v-if="isBoqEstimate && boqs.length" size="sm" @click="showGenerate = true">Generate BOQ Estimate</AppButton>
-                    <AppButton v-if="isBoqEstimate && budget?.editable" size="sm" variant="secondary" :loading="syncing" @click="openSyncPreview">Sync BOQ Estimate</AppButton>
-                    <AppButton v-if="budget && !budget.editable" size="sm" variant="secondary" @click="confirming = { action: 'new' }">New version</AppButton>
+                    <AppButton v-if="isMainBudget && budget && !budget.editable" size="sm" variant="secondary" @click="confirming = { action: 'new' }">New version</AppButton>
                     <AppButton v-if="isMainBudget && editable" size="sm" :loading="wbsForm.processing" @click="saveWbsAllocations">Save WBS allocations</AppButton>
                 </template>
 
-                <div v-if="isBoqEstimate && (pendingRevision || budget?.materials_sync_pending || sync_status?.status === 'sync_required')" class="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-5">
-                    {{ sync_status?.label || 'BOQ Estimate Sync Required' }} — BOQ costing changed. Approved BOQ Estimates are never overwritten; create a new version then Sync BOQ Estimate. Main Project Budget is not updated automatically.
+                <div v-if="isBoqEstimate && sync_status?.status === 'current'" class="border-b border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 sm:px-5">
+                    BOQ Estimate published automatically from approved BOQ revision. No separate estimate approval is required.
+                </div>
+                <div v-else-if="isBoqEstimate && sync_status?.status === 'pending_approval'" class="border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:px-5">
+                    {{ sync_status?.label || 'Pending BOQ Approval' }} — BOQ Estimate appears here after final BOQ approval.
+                </div>
+                <div v-else-if="isBoqEstimate && sync_status?.status === 'superseded'" class="border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:px-5">
+                    Historical BOQ Estimate — superseded by a later approved BOQ revision.
                 </div>
 
                 <div v-if="versions.length" class="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 sm:px-5">
@@ -281,7 +251,9 @@ async function confirmAction() {
                         :class="budget?.id === v.id ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-line text-slate-600 hover:bg-slate-50'"
                         preserve-scroll
                     >
-                        v{{ v.version }} <StatusBadge :status="v.status" :label="v.status_label" />
+                        v{{ v.version }}
+                        <StatusBadge :status="v.status" :label="estimateVersionBadgeLabel(v)" />
+                        <span v-if="isBoqEstimate && v.is_current && v.status === 'approved'" class="text-[10px] font-medium uppercase tracking-wide text-emerald-700">Current</span>
                     </Link>
                 </div>
 
@@ -298,10 +270,8 @@ async function confirmAction() {
                     v-else-if="!budget && isBoqEstimate"
                     icon="banknotes"
                     title="No BOQ Estimate yet"
-                    :description="boqs.length ? 'Generate or Sync BOQ Estimate from the approved BOQ costing.' : 'Approve a BOQ first; BOQ Estimate is derived from BOQ costing.'"
-                >
-                    <AppButton v-if="can.update && boqs.length" size="sm" variant="secondary" class="mt-3" @click="showGenerate = true">Generate BOQ Estimate</AppButton>
-                </EmptyState>
+                    description="BOQ Estimate is created automatically when a BOQ receives final approval. Main Project Budget remains separate."
+                />
 
                 <div v-else-if="budget && isMainBudget" class="space-y-4 p-4 sm:p-5">
                     <div class="flex flex-wrap items-center justify-between gap-3">
@@ -316,7 +286,7 @@ async function confirmAction() {
                             </p>
                         </div>
                         <div class="flex gap-2">
-                            <AppButton v-if="budget.can_approve" size="sm" @click="confirming = { action: 'approve' }">Approve</AppButton>
+                            <AppButton v-if="isMainBudget && budget.can_approve" size="sm" @click="confirming = { action: 'approve' }">Approve</AppButton>
                         </div>
                     </div>
 
@@ -358,17 +328,16 @@ async function confirmAction() {
                         <div>
                             <p class="text-xs text-slate-500 uppercase">{{ budget_type_label }} v{{ budget.version }} total</p>
                             <p class="text-2xl font-semibold text-slate-900 tabular">{{ formatMoney(budget.total_amount) }}</p>
-                            <p class="text-xs text-slate-500">
-                                <template v-for="v in versions.filter((x) => x.id === budget.id)" :key="v.id">
-                                    {{ v.source_label }}
-                                    <template v-if="v.boq_label"> · {{ v.boq_label }}</template>
-                                    <template v-if="v.materials_synced_at"> · synced {{ formatDate(v.materials_synced_at) }}</template>
-                                    <template v-if="v.approved_at"> · approved {{ formatDate(v.approved_at) }}<template v-if="v.approved_by"> by {{ v.approved_by }}</template></template>
-                                </template>
+                            <p class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                                <StatusBadge :status="budget.status" :label="budget.status_label || 'Approved'" />
+                                <span v-if="budget.is_current && budget.status === 'approved'" class="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-800">Current</span>
+                                <span v-if="budget.boq_label">· From {{ budget.boq_label }}</span>
                             </p>
-                        </div>
-                        <div class="flex gap-2">
-                            <AppButton v-if="budget.can_approve" size="sm" @click="confirming = { action: 'approve' }">Approve</AppButton>
+                            <p class="mt-0.5 text-xs text-slate-500">
+                                Approved automatically from final BOQ approval
+                                <template v-if="budget.approved_at"> · {{ formatDate(budget.approved_at) }}</template>
+                                <template v-if="budget.approved_by"> by {{ budget.approved_by }}</template>
+                            </p>
                         </div>
                     </div>
 
@@ -461,19 +430,6 @@ async function confirmAction() {
             </AppCard>
         </div>
 
-        <AppModal :show="showGenerate" title="Generate BOQ Estimate from BOQ" @close="showGenerate = false">
-            <form id="generate-form" class="space-y-3" @submit.prevent="generate">
-                <FormSelect v-model="generateForm.boq_id" label="Approved BOQ" required :options="boqs" :error="generateForm.errors.boq_id" />
-                <p class="text-xs text-slate-500">
-                    Syncs into BOQ Estimate only. Main Project Budget is not changed.
-                </p>
-            </form>
-            <template #footer>
-                <AppButton variant="secondary" @click="showGenerate = false">Cancel</AppButton>
-                <AppButton type="submit" form="generate-form" :loading="generateForm.processing">Generate</AppButton>
-            </template>
-        </AppModal>
-
         <AppModal :show="!!lineModal" :title="lineModal?.line ? 'Edit budget line' : 'Add budget line'" @close="lineModal = null">
             <form id="line-form" class="grid gap-4 sm:grid-cols-2" @submit.prevent="saveLine">
                 <FormSelect v-model="lineForm.cost_head" label="Cost head" required :options="costHeads" :error="lineForm.errors.cost_head" />
@@ -527,39 +483,11 @@ async function confirmAction() {
             </template>
         </AppModal>
 
-        <AppModal :show="!!syncPreview" title="Sync BOQ Estimate — preview" max-width="lg" @close="syncPreview = null">
-            <div v-if="syncPreview" class="space-y-3 text-sm">
-                <p class="text-slate-600">
-                    Source: <span class="font-medium text-slate-900">{{ syncPreview.boq_label }}</span>
-                    <span v-if="syncPreview.blocked_by_approved" class="mt-1 block text-amber-800">Approved budget blocks sync — create a new version first.</span>
-                </p>
-                <dl class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <div><dt class="text-xs text-slate-500">Create</dt><dd class="font-semibold tabular">{{ syncPreview.creates }}</dd></div>
-                    <div><dt class="text-xs text-slate-500">Update</dt><dd class="font-semibold tabular">{{ syncPreview.updates }}</dd></div>
-                    <div><dt class="text-xs text-slate-500">Unchanged</dt><dd class="font-semibold tabular">{{ syncPreview.unchanged }}</dd></div>
-                    <div><dt class="text-xs text-slate-500">Remove</dt><dd class="font-semibold tabular">{{ syncPreview.removes }}</dd></div>
-                </dl>
-                <dl class="grid grid-cols-2 gap-2">
-                    <div><dt class="text-xs text-slate-500">Total before</dt><dd class="font-medium tabular">{{ formatMoney(syncPreview.total_before) }}</dd></div>
-                    <div><dt class="text-xs text-slate-500">Total after</dt><dd class="font-medium tabular">{{ formatMoney(syncPreview.total_after) }}</dd></div>
-                </dl>
-                <p class="text-xs text-slate-500">
-                    Material A {{ formatMoney(syncPreview.reconciliation?.material) }}
-                    · Labour B {{ formatMoney(syncPreview.reconciliation?.labour) }}
-                    · Grand {{ formatMoney(syncPreview.reconciliation?.grand) }}
-                </p>
-            </div>
-            <template #footer>
-                <AppButton variant="secondary" @click="syncPreview = null">Cancel</AppButton>
-                <AppButton :disabled="!!syncPreview?.blocked_by_approved" :loading="syncing" @click="confirmSync">Confirm sync</AppButton>
-            </template>
-        </AppModal>
-
         <ConfirmDialog
             :show="!!confirming"
-            :title="{ approve: 'Approve this budget?', new: 'Start a new budget version?', delete: 'Delete this line?', sync: 'Sync BOQ Estimate?' }[confirming?.action] ?? ''"
-            :message="{ approve: 'WBS amounts are saved first, then this version is locked. Dashboard Cost Control uses the approved Main Project Budget.', new: 'A draft copy of the approved budget is created for editing. Enter WBS amounts and Approve again.', delete: null, sync: 'Generated Material / Labour / BBS / Equipment rows will be replaced. Main Project Budget is not changed.' }[confirming?.action] ?? null"
-            :confirm-label="{ approve: 'Approve', new: 'Create draft', delete: 'Delete', sync: 'Sync' }[confirming?.action] ?? 'Confirm'"
+            :title="{ approve: 'Approve this budget?', new: 'Start a new budget version?', delete: 'Delete this line?' }[confirming?.action] ?? ''"
+            :message="{ approve: 'WBS amounts are saved first, then this version is locked. Dashboard Cost Control uses the approved Main Project Budget.', new: 'A draft copy of the approved Main Project Budget is created for editing. Enter WBS amounts and Approve again.', delete: null }[confirming?.action] ?? null"
+            :confirm-label="{ approve: 'Approve', new: 'Create draft', delete: 'Delete' }[confirming?.action] ?? 'Confirm'"
             :danger="confirming?.action === 'delete'"
             :processing="processing"
             @close="confirming = null"

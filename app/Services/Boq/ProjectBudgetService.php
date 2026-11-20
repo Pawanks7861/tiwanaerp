@@ -153,6 +153,8 @@ class ProjectBudgetService
     /**
      * Build / refresh BOQ Estimate draft from the current approved BOQ.
      * Never writes Main Project Budget.
+     *
+     * @deprecated Manual Generate is removed — use publishEstimateFromApprovedBoq() on final BOQ approval.
      */
     public function generateFromBoq(Project $project, Boq $boq): ProjectBudget
     {
@@ -161,48 +163,231 @@ class ProjectBudgetService
         }
 
         return DB::transaction(function () use ($project, $boq) {
-            $budget = $this->draftFor($project, BudgetType::BoqEstimate);
-            $budget->forceFill([
-                'budget_type' => BudgetType::BoqEstimate,
-                'source' => BudgetSource::Boq,
-                'boq_id' => $boq->id,
-                'materials_sync_pending' => false,
-            ])->save();
-
-            $budget->lines()->get()->each->delete();
-
-            // Advanced BOQ: workbook cost components + BBS are the only estimate source.
-            if (! BoqCompanySettings::enabled($project->company)) {
-                $materials = app(SimpleBoqMaterialCostService::class);
-                $boq->items()->with('simpleMaterialCosts')->orderBy('sort_order')->orderBy('id')->get()
-                    ->each(function (BoqItem $item) use ($budget, $materials) {
-                        $skipMaterialHead = $materials->drivesItemRate($item->simpleMaterialCosts);
-                        $skipLabourHead = Decimal::of((string) ($item->labour_rate ?? '0'))->isPositive();
-                        foreach ($this->headAmounts($item) as $head => $amount) {
-                            if ($skipMaterialHead && $head === CostHead::Material->value) {
-                                continue;
-                            }
-                            if ($skipLabourHead && $head === CostHead::Labour->value) {
-                                continue;
-                            }
-                            $line = new ProjectBudgetLine([
-                                'cost_head' => $head,
-                                'project_cost_head_id' => $item->project_cost_head_id,
-                                'boq_item_id' => $item->id,
-                                'source_type' => BudgetLineSource::BoqCostHead->value,
-                                'description' => mb_substr(trim(($item->item_code ? $item->item_code.' ' : '').$item->name), 0, 255),
-                                'amount' => $amount,
-                            ]);
-                            $line->budget()->associate($budget);
-                            $line->save();
-                        }
-                    });
-
-                $budget = $this->recalculate($budget);
-            }
+            $budget = $this->openFreshEstimateDraft($project, $boq);
+            $this->seedSimplifiedCostHeadLines($budget, $boq);
 
             return app(BoqBudgetMaterialSyncService::class)->applyToDraft($budget, $boq);
         });
+    }
+
+    /**
+     * After final BOQ approval: create an immutable approved BOQ Estimate snapshot.
+     * Aggregates all current approved BOQs for the project. Never touches Main Project Budget.
+     * Idempotent per boq_id (same approved revision → one estimate).
+     * Approval is inherited from the source BOQ — no separate estimate approval step.
+     */
+    public function publishEstimateFromApprovedBoq(Boq $boq, ?User $approver = null): ProjectBudget
+    {
+        if ($boq->status !== BoqStatus::Approved || ! $boq->is_current) {
+            throw ValidationException::withMessages([
+                'boq' => 'BOQ Estimate publishes only after final BOQ approval.',
+            ]);
+        }
+
+        $project = $boq->project ?? Project::query()->findOrFail($boq->project_id);
+
+        $existing = ProjectBudget::query()
+            ->where('project_id', $project->id)
+            ->boqEstimate()
+            ->where('status', BudgetStatus::Approved)
+            ->where('boq_id', $boq->id)
+            ->first();
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $approverId = $approver?->id ?? $boq->approved_by;
+        if ($approverId === null) {
+            throw ValidationException::withMessages([
+                'boq' => 'Cannot publish BOQ Estimate without a source BOQ approver.',
+            ]);
+        }
+
+        $approvedAt = $boq->approved_at ?? now();
+
+        return DB::transaction(function () use ($project, $boq, $approverId, $approvedAt) {
+            $boqs = Boq::query()
+                ->where('project_id', $project->id)
+                ->where('status', BoqStatus::Approved)
+                ->where('is_current', true)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            if ($boqs->isEmpty()) {
+                throw ValidationException::withMessages([
+                    'boq' => 'No current approved BOQ found to publish as BOQ Estimate.',
+                ]);
+            }
+
+            // Re-check idempotency under lock (double final-approval event).
+            $lockedExisting = ProjectBudget::query()
+                ->where('project_id', $project->id)
+                ->boqEstimate()
+                ->where('status', BudgetStatus::Approved)
+                ->where('boq_id', $boq->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedExisting !== null) {
+                return $lockedExisting;
+            }
+
+            $draft = $this->openFreshEstimateDraft($project, $boq);
+
+            foreach ($boqs as $sourceBoq) {
+                $this->seedSimplifiedCostHeadLines($draft, $sourceBoq);
+                app(BoqBudgetMaterialSyncService::class)->appendBoqToDraft($draft, $sourceBoq);
+            }
+
+            $draft = $this->recalculate($draft->fresh());
+
+            if (! $draft->lines()->exists()) {
+                throw ValidationException::withMessages([
+                    'boq' => 'Cannot publish an empty BOQ Estimate — BOQ has no costing lines.',
+                ]);
+            }
+
+            return $this->finalizeEstimateInheritedApproval($draft, $boq, (int) $approverId, $approvedAt);
+        });
+    }
+
+    /**
+     * Mark a BOQ Estimate approved by inheriting the source BOQ final approval.
+     * Not a human approval step — do not call from the budget Approve action.
+     */
+    private function finalizeEstimateInheritedApproval(
+        ProjectBudget $budget,
+        Boq $sourceBoq,
+        int $approverId,
+        mixed $approvedAt,
+    ): ProjectBudget {
+        $locked = ProjectBudget::query()->whereKey($budget->id)->lockForUpdate()->firstOrFail();
+
+        if ($locked->budget_type !== BudgetType::BoqEstimate) {
+            throw ValidationException::withMessages([
+                'budget' => 'Only BOQ Estimate can inherit approval from a BOQ.',
+            ]);
+        }
+
+        $locked->assertEditable();
+
+        if (! $locked->lines()->exists()) {
+            throw ValidationException::withMessages(['budget' => 'The budget has no lines.']);
+        }
+
+        ProjectBudget::query()
+            ->where('project_id', $locked->project_id)
+            ->where('budget_type', BudgetType::BoqEstimate)
+            ->where('status', BudgetStatus::Approved)
+            ->get()
+            ->each(fn (ProjectBudget $old) => $old->forceFill(['status' => BudgetStatus::Superseded])->save());
+
+        $locked->forceFill([
+            'status' => BudgetStatus::Approved,
+            'approved_by' => $approverId,
+            'approved_at' => $approvedAt,
+            'boq_id' => $sourceBoq->id,
+            'source' => BudgetSource::Boq,
+            'materials_sync_pending' => false,
+            'materials_synced_at' => $approvedAt,
+        ])->save();
+
+        $revision = 'R'.$sourceBoq->version;
+        $locked->writeAudit('boq_estimate_published', null, [
+            'source_boq_id' => $sourceBoq->id,
+            'source_boq_number' => $sourceBoq->boq_number,
+            'source_revision' => $revision,
+            'inherited_from' => "BOQ {$sourceBoq->boq_number} / {$revision}",
+            'message' => "BOQ Estimate inherited approval from BOQ {$revision}",
+        ]);
+
+        return $locked->fresh();
+    }
+
+    /**
+     * Blank BOQ Estimate draft for automatic publish (does not copy prior approved lines).
+     */
+    public function openFreshEstimateDraft(Project $project, Boq $triggerBoq): ProjectBudget
+    {
+        $draft = ProjectBudget::query()
+            ->where('project_id', $project->id)
+            ->boqEstimate()
+            ->where('status', BudgetStatus::Draft)
+            ->lockForUpdate()
+            ->first();
+
+        if ($draft !== null) {
+            $draft->lines()->get()->each->delete();
+            $draft->forceFill([
+                'budget_type' => BudgetType::BoqEstimate,
+                'source' => BudgetSource::Boq,
+                'boq_id' => $triggerBoq->id,
+                'total_amount' => '0.00',
+                'materials_sync_pending' => false,
+                'materials_synced_at' => null,
+            ])->save();
+
+            return $draft->fresh();
+        }
+
+        $latestVersion = (int) (ProjectBudget::query()->withTrashed()
+            ->where('project_id', $project->id)
+            ->boqEstimate()
+            ->orderByDesc('version')
+            ->value('version') ?? 0);
+
+        $budget = new ProjectBudget;
+        $budget->forceFill([
+            'project_id' => $project->id,
+            'budget_type' => BudgetType::BoqEstimate,
+            'version' => $latestVersion + 1,
+            'source' => BudgetSource::Boq,
+            'boq_id' => $triggerBoq->id,
+            'status' => BudgetStatus::Draft,
+            'total_amount' => '0.00',
+            'materials_sync_pending' => false,
+        ])->save();
+
+        return $budget;
+    }
+
+    /**
+     * Simplified BOQ: seed Qty×rate cost-head lines when detailed material rows do not drive the rate.
+     */
+    private function seedSimplifiedCostHeadLines(ProjectBudget $budget, Boq $boq): void
+    {
+        $project = $budget->project ?? Project::query()->findOrFail($budget->project_id);
+        if (BoqCompanySettings::enabled($project->company)) {
+            return;
+        }
+
+        $materials = app(SimpleBoqMaterialCostService::class);
+        $boq->items()->with('simpleMaterialCosts')->orderBy('sort_order')->orderBy('id')->get()
+            ->each(function (BoqItem $item) use ($budget, $boq, $materials) {
+                $skipMaterialHead = $materials->drivesItemRate($item->simpleMaterialCosts);
+                $skipLabourHead = Decimal::of((string) ($item->labour_rate ?? '0'))->isPositive();
+                foreach ($this->headAmounts($item) as $head => $amount) {
+                    if ($skipMaterialHead && $head === CostHead::Material->value) {
+                        continue;
+                    }
+                    if ($skipLabourHead && $head === CostHead::Labour->value) {
+                        continue;
+                    }
+                    $line = new ProjectBudgetLine([
+                        'cost_head' => $head,
+                        'project_cost_head_id' => $item->project_cost_head_id,
+                        'boq_item_id' => $item->id,
+                        'source_type' => BudgetLineSource::BoqCostHead->value,
+                        'source_key' => 'boq_cost_head:'.$boq->id.':'.$item->id.':'.$head,
+                        'description' => mb_substr(trim(($item->item_code ? $item->item_code.' ' : '').$item->name), 0, 255),
+                        'amount' => $amount,
+                    ]);
+                    $line->budget()->associate($budget);
+                    $line->save();
+                }
+            });
     }
 
     /**
@@ -251,12 +436,12 @@ class ProjectBudgetService
             if ($line->exists && $line->source_type instanceof BudgetLineSource
                 && in_array($line->source_type->value, BudgetLineSource::syncOwnedValues(), true)) {
                 throw ValidationException::withMessages([
-                    'line' => 'BOQ-generated estimate lines are updated by Sync BOQ Estimate, not manual edit.',
+                    'line' => 'BOQ-generated estimate lines are updated automatically on final BOQ approval, not by manual edit.',
                 ]);
             }
             if ($budget->budget_type === BudgetType::BoqEstimate && ! $line->exists) {
                 throw ValidationException::withMessages([
-                    'line' => 'BOQ Estimate lines come from BOQ costing. Sync BOQ Estimate instead of adding manual lines.',
+                    'line' => 'BOQ Estimate lines come from final BOQ approval. Create a new BOQ revision to change them.',
                 ]);
             }
 
@@ -282,7 +467,7 @@ class ProjectBudgetService
             if ($line->source_type instanceof BudgetLineSource
                 && in_array($line->source_type->value, BudgetLineSource::syncOwnedValues(), true)) {
                 throw ValidationException::withMessages([
-                    'line' => 'BOQ-generated estimate lines are removed by Sync BOQ Estimate.',
+                    'line' => 'BOQ-generated estimate lines are removed by publishing a new BOQ Estimate on final BOQ approval.',
                 ]);
             }
             $line->delete();
@@ -291,8 +476,17 @@ class ProjectBudgetService
         });
     }
 
+    /**
+     * Approve Main Project Budget only. BOQ Estimate inherits approval from final BOQ approval.
+     */
     public function approve(ProjectBudget $budget, User $user): ProjectBudget
     {
+        if ($budget->budget_type === BudgetType::BoqEstimate) {
+            throw ValidationException::withMessages([
+                'budget' => 'BOQ Estimate inherits approval from the finally approved BOQ revision and cannot be approved separately.',
+            ]);
+        }
+
         return DB::transaction(function () use ($budget, $user) {
             $locked = ProjectBudget::query()->whereKey($budget->id)->lockForUpdate()->firstOrFail();
             $locked->assertEditable();
@@ -371,27 +565,13 @@ class ProjectBudgetService
 
     public function newVersion(Project $project, BudgetType $type = BudgetType::MainProject): ProjectBudget
     {
-        return DB::transaction(function () use ($project, $type) {
-            $budget = $this->draftFor($project, $type);
+        if ($type === BudgetType::BoqEstimate) {
+            throw ValidationException::withMessages([
+                'budget_type' => 'BOQ Estimate versions are created automatically on final BOQ approval. Create a BOQ revision instead.',
+            ]);
+        }
 
-            if ($type === BudgetType::BoqEstimate) {
-                $approvedPending = ProjectBudget::query()
-                    ->where('project_id', $project->id)
-                    ->where('budget_type', BudgetType::BoqEstimate)
-                    ->where('status', BudgetStatus::Approved)
-                    ->where('materials_sync_pending', true)
-                    ->exists();
-
-                if ($approvedPending && $budget->boq_id) {
-                    $boq = Boq::query()->find($budget->boq_id);
-                    if ($boq !== null) {
-                        return app(BoqBudgetMaterialSyncService::class)->applyToDraft($budget, $boq);
-                    }
-                }
-            }
-
-            return $budget;
-        });
+        return DB::transaction(fn () => $this->draftFor($project, $type));
     }
 
     public function ensureDraft(Project $project, BudgetType $type = BudgetType::MainProject): ProjectBudget

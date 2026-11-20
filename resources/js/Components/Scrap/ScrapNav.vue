@@ -2,6 +2,10 @@
 import { Link } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
+/**
+ * Company-scoped scrap hub still uses this bar.
+ * Project-scoped scrap children live in the project top-nav dropdown.
+ */
 const props = defineProps({
     active: { type: String, required: true },
     projectId: { type: Number, default: null },
@@ -9,15 +13,8 @@ const props = defineProps({
 });
 
 const items = computed(() => {
-    if (props.scope === 'project' && props.projectId) {
-        const pid = props.projectId;
-
-        return [
-            { key: 'generations', label: 'Generations', route: 'projects.scrap.generations.index', params: [pid] },
-            { key: 'balances', label: 'Balances', route: 'projects.scrap.balances.index', params: [pid] },
-            { key: 'ledger', label: 'Ledger', route: 'projects.scrap.ledger.index', params: [pid] },
-            { key: 'adjustments', label: 'Adjustments', route: 'projects.scrap.adjustments.index', params: [pid] },
-        ];
+    if (props.scope === 'project') {
+        return [];
     }
 
     return [
@@ -31,7 +28,11 @@ const items = computed(() => {
 </script>
 
 <template>
-    <nav class="mb-4 flex max-w-full overflow-x-auto rounded-lg border border-line bg-white p-0.5 shadow-sm sm:inline-flex" aria-label="Scrap">
+    <nav
+        v-if="items.length"
+        class="mb-4 flex max-w-full overflow-x-auto rounded-lg border border-line bg-white p-0.5 shadow-sm sm:inline-flex"
+        aria-label="Scrap"
+    >
         <Link
             v-for="item in items"
             :key="item.key"
@@ -43,4 +44,5 @@ const items = computed(() => {
             {{ item.label }}
         </Link>
     </nav>
+    <span v-else class="hidden" aria-hidden="true" />
 </template>

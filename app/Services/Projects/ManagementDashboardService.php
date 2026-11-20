@@ -92,8 +92,9 @@ class ManagementDashboardService
             $executive = $this->dashboard->executive($company, $user, $projectIds, $period);
 
             $pendingMainBudget = $this->pendingBudgetDrafts($cid, $projectIds, BudgetType::MainProject);
-            $pendingBoqEstimate = $this->pendingBudgetDrafts($cid, $projectIds, BudgetType::BoqEstimate);
-            $pendingBudget = $pendingMainBudget + $pendingBoqEstimate;
+            // BOQ Estimate has no separate approval queue — it inherits final BOQ approval.
+            $pendingBoqEstimate = 0;
+            $pendingBudget = $pendingMainBudget;
 
             $pendingGrn = DB::table('grns')
                 ->where('company_id', $cid)
@@ -149,9 +150,10 @@ class ManagementDashboardService
             $portfolio = $this->costPayload($user, $company, $projectIds, $period['as_of']);
 
             $pendingMainBudget = $this->pendingBudgetDrafts($cid, $projectIds, BudgetType::MainProject);
-            $pendingBoqEstimate = $this->pendingBudgetDrafts($cid, $projectIds, BudgetType::BoqEstimate);
+            // BOQ Estimate has no separate approval queue — it inherits final BOQ approval.
+            $pendingBoqEstimate = 0;
             $budgetChanges = [
-                'pending_revisions' => $pendingMainBudget + $pendingBoqEstimate,
+                'pending_revisions' => $pendingMainBudget,
                 'pending_main_budget_revisions' => $pendingMainBudget,
                 'pending_boq_estimate_revisions' => $pendingBoqEstimate,
                 'approved_boq_variations' => DB::table('boq_revision_change_orders')

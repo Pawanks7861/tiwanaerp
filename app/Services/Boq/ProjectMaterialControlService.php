@@ -905,10 +905,10 @@ class ProjectMaterialControlService
         ?string $budgetSource,
     ): string {
         if ($syncRequired && $hasEstimate && Decimal::of($budgetQty)->isZero()) {
-            return 'Budget Sync Required';
+            return 'BOQ Estimate Outdated';
         }
         if ($syncRequired && $hasEstimate) {
-            return 'Budget Sync Required';
+            return 'BOQ Estimate Outdated';
         }
         if (! $hasEstimate && Decimal::of($net)->isPositive()) {
             return 'Unestimated Material';

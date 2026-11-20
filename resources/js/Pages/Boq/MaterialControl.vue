@@ -51,7 +51,7 @@ function statusClass(status) {
     if (status === 'Over Consumption') return 'bg-rose-100 text-rose-800';
     if (status === 'Near Limit') return 'bg-amber-100 text-amber-800';
     if (status === 'Unestimated Material') return 'bg-violet-100 text-violet-800';
-    if (status === 'Budget Sync Required') return 'bg-orange-100 text-orange-800';
+    if (status === 'Budget Sync Required' || status === 'BOQ Estimate Outdated') return 'bg-orange-100 text-orange-800';
     if (status === 'On Track') return 'bg-emerald-100 text-emerald-800';
     return 'bg-slate-100 text-slate-700';
 }

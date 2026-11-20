@@ -79,10 +79,12 @@ class PlanningService
                 $this->milestoneOf($project, (int) $data['milestone_id']);
             }
             // BOQ is optional/historical only — never required for Planning.
+            // Validate only when the client explicitly sets boq_item_id. Values written by
+            // PlanningBoqMappingService (including draft BOQ maps) must not fail later updates.
             $boqItemId = array_key_exists('boq_item_id', $data)
                 ? (blank($data['boq_item_id'] ?? null) ? null : (int) $data['boq_item_id'])
                 : ($task?->boq_item_id);
-            if ($boqItemId !== null) {
+            if ($boqItemId !== null && array_key_exists('boq_item_id', $data)) {
                 $this->linkableBoqItem($project, $boqItemId);
             }
 

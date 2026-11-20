@@ -11,6 +11,7 @@ import AppButton from '@/Components/UI/AppButton.vue';
 import AppCard from '@/Components/UI/AppCard.vue';
 import AppDrawer from '@/Components/UI/AppDrawer.vue';
 import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
+import CopyValueButton from '@/Components/UI/CopyValueButton.vue';
 import EmptyState from '@/Components/UI/EmptyState.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
@@ -134,6 +135,8 @@ function openActivity(t = null, headId = null) {
     form.daily_target_qty = source.daily_target_qty ?? null;
     form.hold_quantity = source.hold_quantity ?? '0';
     form.milestone_id = source.milestone_id ?? null;
+    // Edit: do not overwrite an existing Total Qty. New activity: allow one Nos seed.
+    plannedQtyNosSeeded.value = !! t;
     drawer.value = { task: t, mode: 'activity' };
     loadMapsFromTask(t);
     if (!t) {
@@ -221,11 +224,50 @@ const selectedBoqItem = computed(() => {
     const id = mapForm.maps[0]?.boq_item_id;
     return (props.options.boq_items || []).find((i) => i.value === id) || null;
 });
+const activeMapRows = computed(() => (mapForm.maps || []).filter((m) => m.boq_item_id));
+const hasBoqMappings = computed(() => activeMapRows.value.length > 0);
+const hasNosMapping = computed(() => activeMapRows.value.some((row) => row.tracking_basis === 'nos'));
+/** Total Qty locked only for BOQ-qty mappings; Nos seeds once then stays manually editable. */
+const totalQtyDerivedFromBoqQty = computed(() => hasBoqMappings.value && ! hasNosMapping.value);
+/** Prevents re-writing Total Qty after the first Nos seed in this drawer session. */
+const plannedQtyNosSeeded = ref(false);
+const activityUnitLabel = computed(() => {
+    const selected = (props.options.units || []).find((u) => u.value === form.unit_id);
+
+    return selected?.label || null;
+});
+const totalQtyFromMappings = computed(() => {
+    if (! hasBoqMappings.value) {
+        return null;
+    }
+    let total = 0;
+    for (const row of activeMapRows.value) {
+        const eq = hasNosMapping.value ? mappingEquivalentNos(row) : mappingEquivalentBoqQty(row);
+        if (eq == null || ! Number.isFinite(eq)) {
+            return null;
+        }
+        total += eq;
+    }
+
+    return Number(total.toFixed(4));
+});
+const mappingTotalBreakdown = computed(() => activeMapRows.value.map((row) => {
+    const item = boqItemFor(row);
+    const eq = hasNosMapping.value ? mappingEquivalentNos(row) : mappingEquivalentBoqQty(row);
+    const unit = hasNosMapping.value ? 'Nos' : (item?.unit || '');
+
+    return {
+        label: item?.name || item?.label || 'BOQ item',
+        qty: eq != null && Number.isFinite(eq) ? eq.toFixed(4) : '—',
+        unit,
+    };
+}));
+
 function blankMap() {
     return {
         id: null,
         boq_item_id: null,
-        tracking_basis: 'nos',
+        tracking_basis: 'boq_quantity',
         mapping_method: 'conversion_based',
         planning_qty: '',
         allocated_boq_qty: '',
@@ -250,19 +292,323 @@ function loadMapsFromTask(t) {
             remarks: m.remarks || '',
         }))
         : []);
-}
-function onMapBasisChange(row) {
-    const item = (props.options.boq_items || []).find((i) => i.value === row.boq_item_id);
-    if (!item) return;
-    if (row.tracking_basis === 'nos' && !item.effective_nos && !item.measurement_nos) {
-        row.tracking_basis = 'boq_quantity';
-    }
-    row.planning_qty = '';
-    row.allocated_boq_qty = '';
+    syncPlannedQtyFromMaps();
 }
 
 function boqItemFor(row) {
     return (props.options.boq_items || []).find((i) => i.value === row.boq_item_id) || null;
+}
+
+function editableAvailableQty(row) {
+    const item = boqItemFor(row);
+    if (! item?.allocation) {
+        return null;
+    }
+    const base = Number(item.allocation.available_boq_qty ?? 0);
+    const saved = row.id ? Number(row._saved_allocated_boq_qty || 0) : 0;
+    const value = base + saved;
+
+    return Number.isFinite(value) ? Number(value.toFixed(4)) : null;
+}
+
+function editableAvailableNos(row) {
+    const item = boqItemFor(row);
+    if (! item?.allocation || item.allocation.available_nos == null) {
+        return null;
+    }
+    const base = Number(item.allocation.available_nos ?? 0);
+    const saved = row.id ? Number(row._saved_planning_qty || 0) : 0;
+    const value = base + saved;
+
+    return Number.isFinite(value) ? Number(value.toFixed(4)) : null;
+}
+
+function displayAvailableQty(row) {
+    const qty = editableAvailableQty(row);
+    const item = boqItemFor(row);
+    if (qty == null) {
+        return item?.allocation?.available_boq_qty ?? '—';
+    }
+
+    return qty.toFixed(4);
+}
+
+function displayAvailableNos(row) {
+    const nos = editableAvailableNos(row);
+    if (nos == null) {
+        return boqItemFor(row)?.allocation?.available_nos ?? '—';
+    }
+
+    return nos.toFixed(4);
+}
+
+function mappingEquivalentBoqQty(row) {
+    const item = boqItemFor(row);
+    if (! item || ! row.planning_qty) {
+        return null;
+    }
+    const qty = Number(row.planning_qty);
+    if (! Number.isFinite(qty) || qty <= 0) {
+        return null;
+    }
+
+    if (row.tracking_basis === 'boq_quantity') {
+        return Number(qty.toFixed(4));
+    }
+
+    const factor = Number(item.allocation?.conversion_factor ?? 0);
+    if (! Number.isFinite(factor) || factor <= 0) {
+        return null;
+    }
+    const remNos = editableAvailableNos(row);
+    const remBoq = editableAvailableQty(row);
+    const sameQty = (a, b) => Number.isFinite(a) && Number.isFinite(b) && a.toFixed(4) === b.toFixed(4);
+    if (remNos != null && remBoq != null && sameQty(qty, remNos)) {
+        return Number(remBoq.toFixed(4));
+    }
+
+    return Number((qty * factor).toFixed(4));
+}
+
+function mappingEquivalentNos(row) {
+    const item = boqItemFor(row);
+    if (! item || ! row.planning_qty) {
+        return null;
+    }
+    const qty = Number(row.planning_qty);
+    if (! Number.isFinite(qty) || qty <= 0) {
+        return null;
+    }
+    if (row.tracking_basis === 'nos') {
+        return Number(qty.toFixed(4));
+    }
+    const factor = Number(item.allocation?.conversion_factor ?? 0);
+    if (! Number.isFinite(factor) || factor <= 0) {
+        return null;
+    }
+    const remNos = editableAvailableNos(row);
+    const remBoq = editableAvailableQty(row);
+    const sameQty = (a, b) => Number.isFinite(a) && Number.isFinite(b) && a.toFixed(4) === b.toFixed(4);
+    if (remNos != null && remBoq != null && sameQty(qty, remBoq)) {
+        return Number(remNos.toFixed(4));
+    }
+
+    return Number((qty / factor).toFixed(4));
+}
+
+function autofillAllocation(row) {
+    const item = boqItemFor(row);
+    if (! item) {
+        return;
+    }
+    if (row.tracking_basis === 'nos' && ! nosMappingAvailable(item)) {
+        row.tracking_basis = 'boq_quantity';
+    }
+
+    if (row.tracking_basis === 'nos') {
+        const available = editableAvailableNos(row);
+        row.planning_qty = available != null && available > 0 ? available.toFixed(4) : '';
+        row.allocated_boq_qty = '';
+    } else {
+        const available = editableAvailableQty(row);
+        row.planning_qty = available != null && available > 0 ? available.toFixed(4) : '';
+        row.allocated_boq_qty = row.planning_qty;
+    }
+}
+
+function applyActivityUnitFromBoq(item) {
+    if (! item?.unit_id) {
+        return true;
+    }
+    if (! form.unit_id) {
+        form.unit_id = item.unit_id;
+
+        return true;
+    }
+    const selected = (props.options.units || []).find((u) => u.value === form.unit_id);
+    const activityUnit = selected?.label || null;
+    if (! activityUnit || ! item.unit) {
+        return true;
+    }
+    const same = String(activityUnit).toLowerCase() === String(item.unit).toLowerCase();
+    const nosPlanning = String(activityUnit).toLowerCase() === 'nos' && String(item.unit).toLowerCase() !== 'nos';
+    if (! same && ! nosPlanning) {
+        mapForm.setError(
+            'maps',
+            `This BOQ item uses ${item.unit} while this Planning Activity uses ${activityUnit}. BOQ items mapped to one activity must use a compatible unit.`,
+        );
+
+        return false;
+    }
+
+    return true;
+}
+
+function onBoqItemSelected(row) {
+    mapForm.clearErrors('maps');
+    const item = boqItemFor(row);
+    if (! item) {
+        row.planning_qty = '';
+        row.allocated_boq_qty = '';
+        syncPlannedQtyFromMaps();
+
+        return;
+    }
+    if (! applyActivityUnitFromBoq(item)) {
+        row.boq_item_id = null;
+        row.planning_qty = '';
+        row.allocated_boq_qty = '';
+        syncPlannedQtyFromMaps();
+
+        return;
+    }
+    const availableQty = editableAvailableQty(row);
+    const availableNos = editableAvailableNos(row);
+    if ((row.tracking_basis === 'nos' && (availableNos == null || availableNos <= 0))
+        || (row.tracking_basis !== 'nos' && (availableQty == null || availableQty <= 0))) {
+        mapForm.setError('maps', 'This BOQ item is fully allocated.');
+    }
+    autofillAllocation(row);
+    syncPlannedQtyFromMaps();
+}
+
+function onMapBasisChange(row) {
+    const item = boqItemFor(row);
+    if (! item) {
+        return;
+    }
+    if (row.tracking_basis === 'nos' && ! nosMappingAvailable(item)) {
+        row.tracking_basis = 'boq_quantity';
+    }
+    // Selecting Nos allows one fresh Total Qty seed from Allocated Nos.
+    if (row.tracking_basis === 'nos') {
+        plannedQtyNosSeeded.value = false;
+    }
+    autofillAllocation(row);
+    syncPlannedQtyFromMaps();
+}
+
+function removeMapRow(index) {
+    mapForm.maps.splice(index, 1);
+    if (! hasNosMapping.value) {
+        plannedQtyNosSeeded.value = false;
+    }
+    syncPlannedQtyFromMaps();
+}
+
+function nosUnitId() {
+    return (props.options.units || []).find((u) => String(u.label || '').toLowerCase() === 'nos')?.value ?? null;
+}
+
+/**
+ * Map by Nos: seed Total Qty with Allocated Nos once, switch Unit to Nos, then leave Total Qty alone.
+ * Editing Total Qty must not affect BOQ allocation rows.
+ */
+function seedTotalQtyFromNosOnce() {
+    if (plannedQtyNosSeeded.value) {
+        return;
+    }
+    const nosRows = activeMapRows.value.filter((row) => row.tracking_basis === 'nos');
+    if (! nosRows.length) {
+        return;
+    }
+    let total = 0;
+    for (const row of nosRows) {
+        const n = Number(row.planning_qty);
+        if (Number.isFinite(n) && n > 0) {
+            total += n;
+        }
+    }
+    if (total <= 0) {
+        return;
+    }
+    form.planned_qty = total.toFixed(4);
+    const nosId = nosUnitId();
+    if (nosId) {
+        form.unit_id = nosId;
+    }
+    plannedQtyNosSeeded.value = true;
+}
+
+function syncPlannedQtyFromMaps() {
+    if (! hasBoqMappings.value) {
+        return;
+    }
+    // Nos: one-time Total Qty = Allocated Nos; stay editable; no further coupling.
+    if (hasNosMapping.value) {
+        seedTotalQtyFromNosOnce();
+
+        return;
+    }
+    // BOQ Quantity mappings: keep derived Activity Total Qty preview.
+    const total = totalQtyFromMappings.value;
+    if (total != null) {
+        form.planned_qty = total.toFixed(4);
+    }
+}
+
+watch(
+    () => (mapForm.maps || []).map((m) => `${m.boq_item_id}|${m.tracking_basis}|${m.planning_qty}`).join(';'),
+    () => syncPlannedQtyFromMaps(),
+);
+
+/** Authoritative item text as shown in the BOQ item selector (label), else name. */
+function boqItemCopyText(item) {
+    if (!item) {
+        return '';
+    }
+
+    return String(item.label || item.name || '').trim();
+}
+
+function qtyWithUnit(qty, unit) {
+    if (qty == null || qty === '') {
+        return '';
+    }
+    const q = String(qty).trim();
+    const u = unit ? String(unit).trim() : '';
+
+    return u ? `${q} ${u}` : q;
+}
+
+function boqQtyCopyText(item) {
+    return qtyWithUnit(item?.quantity, item?.unit);
+}
+
+function availableQtyCopyText(item) {
+    return qtyWithUnit(item?.allocation?.available_boq_qty, item?.unit);
+}
+
+function availableNosCopyText(item) {
+    const nos = item?.allocation?.available_nos;
+    if (nos == null || nos === '') {
+        return '';
+    }
+
+    return String(nos).trim();
+}
+
+function itemPlusQtyCopyText(item) {
+    const name = boqItemCopyText(item);
+    const qty = boqQtyCopyText(item);
+    if (!name || !qty) {
+        return name || qty;
+    }
+
+    return `${name} — ${qty}`;
+}
+
+function boqDetailsCopyText(item) {
+    if (!item) {
+        return '';
+    }
+    const lines = [
+        `BOQ Item: ${boqItemCopyText(item)}`,
+        `BOQ: ${item.boq_label || '—'}`,
+        `Qty: ${boqQtyCopyText(item) || '—'}`,
+    ];
+
+    return lines.join('\n');
 }
 
 function nosMappingAvailable(item) {
@@ -498,7 +844,34 @@ const summaryCards = computed(() => [
                         </div>
                         <div class="grid grid-cols-2 gap-3">
                             <FormSelect v-model="form.unit_id" label="Unit" required :options="options.units" :error="form.errors.unit_id" />
-                            <DecimalInput v-model="form.planned_qty" label="Total qty" :decimals="4" :error="form.errors.planned_qty" />
+                            <div>
+                                <DecimalInput
+                                    v-model="form.planned_qty"
+                                    label="Total qty"
+                                    :decimals="4"
+                                    :disabled="totalQtyDerivedFromBoqQty"
+                                    :error="form.errors.planned_qty"
+                                    :help="totalQtyDerivedFromBoqQty
+                                        ? 'Calculated from linked BOQ allocations.'
+                                        : (hasNosMapping ? 'Seeded once from Allocated Nos — editable; does not change BOQ allocation.' : undefined)"
+                                />
+                                <details v-if="hasBoqMappings" class="mt-1">
+                                    <summary class="cursor-pointer text-[11px] text-slate-500">
+                                        {{ hasNosMapping ? 'BOQ equivalents' : 'Calculated from' }}
+                                        {{ activeMapRows.length }} BOQ mapping{{ activeMapRows.length === 1 ? '' : 's' }}
+                                    </summary>
+                                    <ul class="mt-1 space-y-0.5 text-[11px] text-slate-600">
+                                        <li v-for="(line, i) in mappingTotalBreakdown" :key="i" class="flex justify-between gap-2 tabular">
+                                            <span class="truncate">{{ line.label }}</span>
+                                            <span>{{ line.qty }} {{ line.unit }}</span>
+                                        </li>
+                                        <li class="flex justify-between gap-2 border-t border-slate-200 pt-0.5 font-medium tabular text-slate-800">
+                                            <span>Total</span>
+                                            <span>{{ totalQtyFromMappings != null ? totalQtyFromMappings.toFixed(4) : '—' }}</span>
+                                        </li>
+                                    </ul>
+                                </details>
+                            </div>
                             <DecimalInput v-model="form.daily_target_qty" label="Daily target qty" :decimals="4" :error="form.errors.daily_target_qty" help="Used as read-only Planned Target on DPR" />
                             <FormInput v-model="form.planned_start" type="date" label="Start date" required :error="form.errors.planned_start" />
                             <FormInput v-model="form.planned_finish" type="date" label="End date" required :error="form.errors.planned_finish" />
@@ -540,11 +913,21 @@ const summaryCards = computed(() => [
                         <AppButton size="sm" variant="secondary" @click="mapForm.maps.push(blankMap())">Add BOQ link</AppButton>
                     </div>
                     <p class="text-[11px] text-slate-500">
-                        Link BOQ while creating or editing this activity. One Save creates the activity and mapping together.
-                        Total Nos = NOB × Nos / Building. Enter Total Nos (or remaining Available Nos) to allocate the full BOQ quantity; partial and split allocations are supported.
+                        Select a BOQ item to auto-fill remaining Available Qty or Available Nos (by Map by).
+                        Total Nos = NOB × Nos / Building. Partial and split allocations are supported. Activity Total Qty updates from all linked mappings.
                     </p>
                     <p v-if="mapForm.errors.maps || form.errors.maps" class="text-xs text-red-600">{{ mapForm.errors.maps || form.errors.maps }}</p>
                     <div v-for="(row, index) in mapForm.maps" :key="index" class="space-y-2 rounded-md border border-slate-100 bg-slate-50/70 p-3">
+                        <div class="flex flex-wrap items-center justify-end gap-1">
+                            <CopyValueButton
+                                v-if="boqItemFor(row)"
+                                :value="boqDetailsCopyText(boqItemFor(row))"
+                                title="Copy BOQ details"
+                                label="Copy BOQ Details"
+                                success-message="BOQ details copied"
+                            />
+                            <button type="button" class="text-xs text-rose-600" @click="removeMapRow(index)">Remove</button>
+                        </div>
                         <div class="flex items-start justify-between gap-2">
                             <SearchSelect
                                 v-model="row.boq_item_id"
@@ -553,9 +936,22 @@ const summaryCards = computed(() => [
                                 :options="options.boq_items || []"
                                 class="flex-1"
                                 :error="mapForm.errors[`maps.${index}.boq_item_id`] || form.errors[`maps.${index}.boq_item_id`]"
-                                @update:model-value="onMapBasisChange(row)"
+                                @update:model-value="onBoqItemSelected(row)"
                             />
-                            <button type="button" class="mt-6 text-xs text-rose-600" @click="mapForm.maps.splice(index, 1)">Remove</button>
+                        </div>
+                        <div v-if="boqItemFor(row)" class="flex flex-wrap items-center gap-1">
+                            <CopyValueButton
+                                :value="boqItemCopyText(boqItemFor(row))"
+                                title="Copy BOQ item"
+                                label="Copy Item"
+                                success-message="BOQ item copied"
+                            />
+                            <CopyValueButton
+                                :value="itemPlusQtyCopyText(boqItemFor(row))"
+                                title="Copy BOQ item and quantity"
+                                label="Copy Item + Qty"
+                                success-message="BOQ item and quantity copied"
+                            />
                         </div>
                         <template v-if="boqItemFor(row)">
                             <dl class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-600">
@@ -563,9 +959,33 @@ const summaryCards = computed(() => [
                                 <dt title="Number of Buildings">NOB</dt><dd class="text-right tabular">{{ boqItemFor(row)?.measurement_nob ?? 1 }}</dd>
                                 <dt>Nos / Building</dt><dd class="text-right tabular">{{ boqItemFor(row)?.nos_per_building ?? '—' }}</dd>
                                 <dt title="NOB × Nos / Building">Total Nos</dt><dd class="text-right tabular font-medium text-slate-800">{{ boqItemFor(row)?.effective_nos ?? boqItemFor(row)?.measurement_nos ?? '—' }}</dd>
-                                <dt>BOQ Qty</dt><dd class="text-right tabular">{{ boqItemFor(row)?.quantity }} {{ boqItemFor(row)?.unit }}</dd>
-                                <dt>Available Nos</dt><dd class="text-right tabular">{{ boqItemFor(row)?.allocation?.available_nos ?? '—' }}</dd>
-                                <dt>Available Qty</dt><dd class="text-right tabular">{{ boqItemFor(row)?.allocation?.available_boq_qty }} {{ boqItemFor(row)?.unit }}</dd>
+                                <dt>BOQ Qty</dt>
+                                <dd class="flex items-center justify-end gap-1 tabular">
+                                    <span>{{ boqItemFor(row)?.quantity }} {{ boqItemFor(row)?.unit }}</span>
+                                    <CopyValueButton
+                                        :value="boqQtyCopyText(boqItemFor(row))"
+                                        title="Copy BOQ quantity"
+                                        success-message="BOQ quantity copied"
+                                    />
+                                </dd>
+                                <dt>Available Nos</dt>
+                                <dd class="flex items-center justify-end gap-1 tabular">
+                                    <span>{{ displayAvailableNos(row) }}</span>
+                                    <CopyValueButton
+                                        :value="String(displayAvailableNos(row))"
+                                        title="Copy available Nos"
+                                        success-message="Available Nos copied"
+                                    />
+                                </dd>
+                                <dt>Available Qty</dt>
+                                <dd class="flex items-center justify-end gap-1 tabular">
+                                    <span>{{ displayAvailableQty(row) }} {{ boqItemFor(row)?.unit }}</span>
+                                    <CopyValueButton
+                                        :value="String(displayAvailableQty(row))"
+                                        title="Copy available quantity"
+                                        success-message="Available quantity copied"
+                                    />
+                                </dd>
                                 <dt>Conversion</dt><dd class="text-right tabular">{{ boqItemFor(row)?.allocation?.conversion_factor || '—' }} {{ boqItemFor(row)?.unit ? `${boqItemFor(row).unit}/No` : '' }}</dd>
                             </dl>
                             <div class="grid grid-cols-2 gap-2">
@@ -587,7 +1007,7 @@ const summaryCards = computed(() => [
                             <FormInput v-model="row.remarks" label="Remarks" maxlength="500" :error="mapForm.errors[`maps.${index}.remarks`] || form.errors[`maps.${index}.remarks`]" />
                         </template>
                     </div>
-                    <div v-if="!mapForm.maps.length" class="text-xs text-slate-500">No BOQ linked — activity can be saved without a mapping.</div>
+                    <div v-if="!mapForm.maps.length" class="text-xs text-slate-500">No BOQ linked — Total Qty stays manual.</div>
                 </section>
             </template>
 

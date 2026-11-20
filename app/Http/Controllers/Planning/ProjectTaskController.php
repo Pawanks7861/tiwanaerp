@@ -240,21 +240,10 @@ class ProjectTaskController extends Controller
         if (! $t->isPlanningHead()) {
             $boqMaps = $maps !== null
                 ? $maps->map(fn (BoqPlanningMap $m) => [
-                    'id' => $m->id,
-                    'boq_item_id' => $m->boq_item_id,
-                    'boq_id' => $m->boq_id,
+                    ...$this->boqMaps->publicMapPayload($m),
                     'boq_label' => $m->boq ? ($m->boq->boq_number.' / R'.$m->boq->version) : null,
                     'item_name' => $m->item?->name,
                     'item_code' => $m->item?->item_code,
-                    'tracking_basis' => $m->tracking_basis?->value,
-                    'mapping_method' => $m->mapping_method?->value,
-                    'planning_qty' => (string) $m->planning_qty,
-                    'allocated_boq_qty' => (string) $m->allocated_boq_qty,
-                    'planning_unit_symbol' => $m->planning_unit_symbol,
-                    'boq_unit_symbol' => $m->boq_unit_symbol,
-                    'conversion_factor' => $m->conversion_factor !== null ? (string) $m->conversion_factor : null,
-                    'is_primary' => (bool) $m->is_primary,
-                    'remarks' => $m->remarks,
                 ])->values()->all()
                 : $this->boqMaps->mapsForTask($t);
         }
@@ -292,6 +281,8 @@ class ProjectTaskController extends Controller
             ])->values()->all(),
             'boq_maps' => $boqMaps,
             'boq_map_summary' => null,
+            'total_qty' => $t->planned_qty,
+            'total_qty_source' => $boqMaps !== [] ? 'boq_mappings' : 'manual',
         ];
 
         if ($boqMaps !== []) {

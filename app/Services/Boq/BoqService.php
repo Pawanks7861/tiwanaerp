@@ -641,6 +641,11 @@ class BoqService
                 'approved_by' => $approverId,
                 'approved_at' => now(),
             ])->save();
+
+            // Final approval → immutable BOQ Estimate snapshot (never Main Project Budget).
+            // Runs inside this transaction so estimate failure rolls back approval.
+            $approver = $approverId ? User::query()->find($approverId) : null;
+            app(ProjectBudgetService::class)->publishEstimateFromApprovedBoq($boq->fresh(), $approver);
         });
     }
 

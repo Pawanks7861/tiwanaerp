@@ -1107,12 +1107,12 @@ function heightDepthLabel(row) {
 
             <AppCard
                 v-if="advanced && budget_sync && can.view_costs"
-                title="Budget Sync"
-                subtitle="Workbook-driven Material Cost (A) + Labour Cost (B) + BBS/equipment → BOQ Estimate. Commercial Rate is not the estimate source. Main Project Budget is separate."
+                title="BOQ Estimate"
+                subtitle="Published automatically on final (commercial) approval from workbook Material (A) + Labour (B) + BBS/equipment. Main Project Budget is never changed."
             >
                 <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
                     <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
-                        <p class="text-[11px] uppercase text-slate-500">Sync status</p>
+                        <p class="text-[11px] uppercase text-slate-500">Estimate status</p>
                         <p class="mt-0.5 font-semibold text-slate-900">{{ budget_sync.label }}</p>
                     </div>
                     <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
@@ -1121,10 +1121,10 @@ function heightDepthLabel(row) {
                         <p class="text-[11px] text-slate-500">A {{ formatMoney(budget_sync.material_cost_a) }} · B {{ formatMoney(budget_sync.labour_cost_b) }}</p>
                     </div>
                     <div class="rounded-lg border border-line bg-slate-50 px-3 py-2">
-                        <p class="text-[11px] uppercase text-slate-500">Budget version</p>
+                        <p class="text-[11px] uppercase text-slate-500">Estimate version</p>
                         <p class="mt-0.5 font-semibold">{{ budget_sync.budget_version != null ? `v${budget_sync.budget_version}` : '—' }}</p>
                         <p v-if="budget_sync.last_synced_at" class="text-[11px] text-slate-500">
-                            Last synced {{ formatDateTime(budget_sync.last_synced_at) }}
+                            Published {{ formatDateTime(budget_sync.last_synced_at) }}
                             <span v-if="budget_sync.last_synced_by"> · {{ budget_sync.last_synced_by.name }}</span>
                         </p>
                     </div>
@@ -1133,9 +1133,12 @@ function heightDepthLabel(row) {
                         <p class="mt-0.5 font-semibold tabular">{{ budget_sync.variance != null ? formatMoney(budget_sync.variance) : '—' }}</p>
                     </div>
                 </div>
+                <p v-if="approval?.is_commercial_level" class="mt-3 text-xs text-slate-600">
+                    After commercial approval, BOQ Estimate will be updated automatically.
+                </p>
                 <div class="mt-3">
                     <Link :href="budget_sync.budget_index_url" class="text-sm font-medium text-brand-700 hover:underline">
-                        Open BOQ Estimate → Sync BOQ Estimate
+                        Open BOQ Estimate
                     </Link>
                 </div>
             </AppCard>
