@@ -8,6 +8,8 @@ import { inputClasses } from './inputClasses';
  * Searchable single select for longer lists (users, clients, items).
  * options: [{ value, label, description? }]
  * Dropdown is teleported to body so overflow parents (tables, drawers) do not clip it.
+ * Panel flips above the trigger when there is not enough space below, and list height
+ * is capped to the viewport so options remain scrollable.
  */
 const props = defineProps({
     label: { type: String, default: null },
@@ -29,6 +31,7 @@ const open = ref(false);
 const query = ref('');
 const highlighted = ref(0);
 const panelStyle = ref({});
+const listStyle = ref({});
 
 // Loose equality: Inertia often sends numeric ids while v-model may coerce to string.
 const selected = computed(() => props.options.find((o) => o.value == model.value) ?? null);
@@ -49,13 +52,40 @@ function positionPanel() {
     const rect = el.getBoundingClientRect();
     const width = Math.max(rect.width, 220);
     const left = Math.min(rect.left, window.innerWidth - width - 8);
-    panelStyle.value = {
-        position: 'fixed',
-        top: `${Math.round(rect.bottom + 4)}px`,
-        left: `${Math.round(Math.max(8, left))}px`,
-        width: `${Math.round(width)}px`,
-        zIndex: 80,
-    };
+    const margin = 8;
+    const gap = 4;
+    // Search input chrome ≈ 52px; prefer up to max-h-60 (240px) for the list.
+    const searchChrome = 52;
+    const preferredList = 240;
+    const preferredTotal = searchChrome + preferredList;
+
+    const spaceBelow = window.innerHeight - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
+    const openUp = spaceBelow < Math.min(preferredTotal, 180) && spaceAbove > spaceBelow;
+    const available = Math.max(120, openUp ? spaceAbove : spaceBelow);
+    const panelMax = Math.min(preferredTotal, available);
+    const listMax = Math.max(72, panelMax - searchChrome);
+
+    panelStyle.value = openUp
+        ? {
+            position: 'fixed',
+            top: 'auto',
+            bottom: `${Math.round(window.innerHeight - rect.top + gap)}px`,
+            left: `${Math.round(Math.max(8, left))}px`,
+            width: `${Math.round(width)}px`,
+            maxHeight: `${Math.round(panelMax)}px`,
+            zIndex: 100,
+        }
+        : {
+            position: 'fixed',
+            top: `${Math.round(rect.bottom + gap)}px`,
+            bottom: 'auto',
+            left: `${Math.round(Math.max(8, left))}px`,
+            width: `${Math.round(width)}px`,
+            maxHeight: `${Math.round(panelMax)}px`,
+            zIndex: 100,
+        };
+    listStyle.value = { maxHeight: `${Math.round(listMax)}px` };
 }
 
 async function toggle() {
@@ -68,6 +98,7 @@ async function toggle() {
         highlighted.value = Math.max(0, filtered.value.findIndex((o) => o.value == model.value));
         positionPanel();
         await nextTick();
+        positionPanel();
         search.value?.focus();
     }
 }
@@ -174,7 +205,7 @@ onBeforeUnmount(() => {
                             @input="highlighted = 0"
                         />
                     </div>
-                    <ul class="max-h-60 overflow-y-auto py-1" role="listbox">
+                    <ul class="overflow-y-auto py-1" role="listbox" :style="listStyle">
                         <li
                             v-for="(option, index) in filtered"
                             :key="option.value"
