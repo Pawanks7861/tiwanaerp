@@ -9,7 +9,7 @@ import ConfirmDialog from '@/Components/UI/ConfirmDialog.vue';
 import Icon from '@/Components/UI/Icon.vue';
 import StatusBadge from '@/Components/UI/StatusBadge.vue';
 import ProjectLayout from '@/Layouts/ProjectLayout.vue';
-import { formatDate, formatDateTime, formatQty, formatRate } from '@/lib/format';
+import { formatDate, formatDateTime, formatMoney, formatQty, formatRate } from '@/lib/format';
 import { Link, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
@@ -50,6 +50,24 @@ const statusNote = computed(() => {
         rejected: 'Rejected. Edit and resubmit, or delete this receipt.',
     }[props.grn.status] ?? null;
 });
+
+const REQUIRED_DOC_CATEGORIES = ['material_gate_pass', 'weighment_slip', 'invoice'];
+
+const documentHint = computed(() => {
+    const docs = props.grn.documents;
+    if (!docs) {
+        return null;
+    }
+    if (docs.complete) {
+        return 'Required documents attached: material gate pass, weighment slip, and invoice.';
+    }
+    const missing = (docs.missing_labels || []).join(', ');
+    return missing ? `Attach before submit: ${missing}.` : null;
+});
+
+const otherAttachments = computed(() =>
+    props.attachments.filter((file) => !REQUIRED_DOC_CATEGORIES.includes((file.category || '').toLowerCase())),
+);
 </script>
 
 <template>
@@ -78,7 +96,11 @@ const statusNote = computed(() => {
                             <div><dt class="text-slate-500">Vendor invoice</dt><dd>{{ grn.vendor_invoice_no || '—' }}<template v-if="grn.vendor_invoice_date"> · {{ formatDate(grn.vendor_invoice_date) }}</template></dd></div>
                             <div v-if="grn.vendor_challan_no"><dt class="text-slate-500">Challan</dt><dd>{{ grn.vendor_challan_no }}</dd></div>
                             <div v-if="grn.vehicle_no"><dt class="text-slate-500">Vehicle</dt><dd>{{ grn.vehicle_no }}</dd></div>
+                            <div v-if="can.view_rates && grn.total_amount != null"><dt class="text-slate-500">Accepted value</dt><dd class="font-semibold tabular">{{ formatMoney(grn.total_amount) }}</dd></div>
+                            <div v-if="grn.purchase_order?.tax_type_label"><dt class="text-slate-500">PO tax</dt><dd>{{ grn.purchase_order.tax_type_label }}</dd></div>
+                            <div v-if="grn.documents"><dt class="text-slate-500">Documents</dt><dd :class="grn.documents.complete ? 'text-emerald-700' : 'text-amber-800'">{{ grn.documents.complete ? 'Complete' : 'Incomplete' }}</dd></div>
                         </dl>
+                        <p v-if="documentHint" class="mt-2 text-xs" :class="grn.documents?.complete ? 'text-slate-500' : 'text-amber-800'">{{ documentHint }}</p>
                         <p v-if="grn.approved_at" class="mt-2 text-xs text-slate-500">Approved {{ formatDateTime(grn.approved_at) }}<template v-if="grn.approved_by"> by {{ grn.approved_by }}</template></p>
                     </div>
                     <div class="flex flex-wrap gap-2 lg:justify-end">
@@ -110,6 +132,7 @@ const statusNote = computed(() => {
                                 <th class="px-4 py-2.5 text-right">Extra</th>
                                 <th class="px-4 py-2.5 text-right">Accepted</th>
                                 <th v-if="can.view_rates" class="px-4 py-2.5 text-right">Rate</th>
+                                <th v-if="can.view_rates" class="px-4 py-2.5 text-right">Amount</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-line">
@@ -125,8 +148,15 @@ const statusNote = computed(() => {
                                 <td class="px-4 py-3 text-right tabular" :class="item.extra_qty && item.extra_qty !== '0.0000' ? 'font-medium text-amber-800' : 'text-slate-400'">{{ formatQty(item.extra_qty || 0) }}</td>
                                 <td class="px-4 py-3 text-right font-semibold tabular">{{ formatQty(item.accepted_qty) }}</td>
                                 <td v-if="can.view_rates" class="px-4 py-3 text-right tabular">{{ formatRate(item.rate) }}</td>
+                                <td v-if="can.view_rates" class="px-4 py-3 text-right font-medium tabular">{{ formatMoney(item.amount) }}</td>
                             </tr>
                         </tbody>
+                        <tfoot v-if="can.view_rates && grn.total_amount != null" class="border-t border-line bg-slate-50 text-sm">
+                            <tr>
+                                <td :colspan="7" class="px-4 py-2.5 text-right font-medium text-slate-600">Accepted value</td>
+                                <td colspan="2" class="px-4 py-2.5 text-right font-semibold tabular text-slate-900">{{ formatMoney(grn.total_amount) }}</td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
                 <ul class="divide-y divide-line md:hidden">
@@ -138,11 +168,16 @@ const statusNote = computed(() => {
                             <dt class="text-slate-500">Rejected</dt><dd class="text-right tabular">{{ formatQty(item.rejected_qty) }}</dd>
                             <dt class="text-slate-500">Extra</dt><dd class="text-right tabular">{{ formatQty(item.extra_qty || 0) }}</dd>
                             <dt class="text-slate-500">Accepted</dt><dd class="text-right font-semibold tabular">{{ formatQty(item.accepted_qty) }}</dd>
+                            <template v-if="can.view_rates">
+                                <dt class="text-slate-500">Rate</dt><dd class="text-right tabular">{{ formatRate(item.rate) }}</dd>
+                                <dt class="text-slate-500">Amount</dt><dd class="text-right font-medium tabular">{{ formatMoney(item.amount) }}</dd>
+                            </template>
                             <dt v-if="item.supplier_challan_qty" class="text-slate-500">Challan</dt><dd v-if="item.supplier_challan_qty" class="text-right tabular">{{ formatQty(item.supplier_challan_qty) }}</dd>
                         </dl>
                         <p v-if="item.rejection_reason" class="mt-1 text-xs text-red-700">Rejected: {{ item.rejection_reason }}</p>
                     </li>
                 </ul>
+                <p v-if="can.view_rates && grn.total_amount != null" class="border-t border-line px-4 py-3 text-sm font-semibold tabular md:hidden">Accepted value {{ formatMoney(grn.total_amount) }}</p>
             </AppCard>
 
             <AppCard v-if="weighbridge" title="Truck scale / weighbridge">
@@ -154,24 +189,48 @@ const statusNote = computed(() => {
                     <div v-if="weighbridge.manual_reason" class="sm:col-span-2"><dt class="text-xs text-slate-500">Net source</dt><dd>{{ weighbridge.manual_reason }}</dd></div>
                 </dl>
             </AppCard>
-            <AttachmentPanel
-                v-if="weighbridge"
-                :attachments="weighbridge.attachments"
-                attachable-type="weighbridge_receipt"
-                :attachable-id="weighbridge.id"
-                :can-upload="can.attach"
-                :can-delete="can.attach"
-                title="Weighbridge slip"
-                placeholder="Photo or PDF of the weighbridge slip"
-            />
 
+            <div class="grid gap-4 lg:grid-cols-3">
+                <AttachmentPanel
+                    :attachments="attachments"
+                    attachable-type="grn"
+                    :attachable-id="grn.id"
+                    :can-upload="can.attach"
+                    :can-delete="can.attach"
+                    title="Material gate pass"
+                    fixed-category="material_gate_pass"
+                    placeholder="Material gate pass"
+                />
+                <AttachmentPanel
+                    :attachments="attachments"
+                    attachable-type="grn"
+                    :attachable-id="grn.id"
+                    :can-upload="can.attach"
+                    :can-delete="can.attach"
+                    title="Weighment slip"
+                    fixed-category="weighment_slip"
+                    placeholder="Weighment slip"
+                />
+                <AttachmentPanel
+                    :attachments="attachments"
+                    attachable-type="grn"
+                    :attachable-id="grn.id"
+                    :can-upload="can.attach"
+                    :can-delete="can.attach"
+                    title="Invoice"
+                    fixed-category="invoice"
+                    placeholder="Vendor invoice"
+                />
+            </div>
             <AttachmentPanel
-                :attachments="attachments"
+                v-if="otherAttachments.length || can.attach"
+                :attachments="otherAttachments"
                 attachable-type="grn"
                 :attachable-id="grn.id"
                 :can-upload="can.attach"
                 :can-delete="can.attach"
-                placeholder="Vendor invoice, delivery challan, photos…"
+                title="Other documents"
+                placeholder="Delivery challan, photos…"
             />
             <div class="mt-4">
                 <AuditTrail :entries="audit" title="Audit trail" />

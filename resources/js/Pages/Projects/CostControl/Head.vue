@@ -18,9 +18,7 @@ const sections = computed(() => [
     { key: 'budget_lines', label: 'Budget lines', routeName: null, rows: props.drilldown.budget_lines ?? [] },
     { key: 'purchase_orders', label: 'Purchase orders', routeName: 'projects.purchase-orders.show', rows: props.drilldown.purchase_orders ?? [] },
     { key: 'work_orders', label: 'Work orders', routeName: 'projects.work-orders.show', rows: props.drilldown.work_orders ?? [] },
-    { key: 'vendor_bills', label: 'Vendor bills', routeName: 'projects.vendor-bills.show', rows: props.drilldown.vendor_bills ?? [] },
-    { key: 'expenses', label: 'Expenses', routeName: 'projects.expenses.show', rows: props.drilldown.expenses ?? [] },
-    { key: 'payments', label: 'Payments (project-level)', routeName: 'projects.payments.show', rows: props.drilldown.payments ?? [] },
+    { key: 'grns', label: 'Goods receipts (approved)', routeName: 'projects.grns.show', rows: props.drilldown.grns ?? [] },
     { key: 'variations', label: 'BOQ variations', routeName: null, rows: props.drilldown.variations ?? [] },
 ]);
 
@@ -56,7 +54,7 @@ function rowLabel(section, row) {
             <div>
                 <Link :href="route('projects.cost-control.index', project.id)" class="text-sm font-medium text-brand-700 hover:underline">Cost Control</Link>
                 <h2 class="mt-1 text-lg font-semibold text-slate-900">{{ title }}</h2>
-                <p class="text-sm text-slate-500">Source documents for this cost head. Forecast at completion is deferred. Payments are project-level (not WBS-tagged).</p>
+                <p class="text-sm text-slate-500">Source documents for this cost head. Material actuals come from approved GRNs (accepted qty × PO rate). Forecast at completion is deferred.</p>
             </div>
 
             <AppCard v-for="section in sections" :key="section.key" :title="section.label" :padded="false">

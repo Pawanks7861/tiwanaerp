@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Finance;
 
 use App\Enums\Finance\PettyCashTxnType;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Finance\Concerns\DeniesRetiredFinanceWrites;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Integrations\Tally\TallyStatusPresenter;
 use App\Models\Finance\PettyCashAccount;
@@ -21,6 +22,8 @@ use Inertia\Response;
 
 class PettyCashController extends Controller
 {
+    use DeniesRetiredFinanceWrites;
+
     public function __construct(private readonly PettyCashService $pettyCash) {}
 
     public function index(Request $request, Project $project): Response
@@ -39,6 +42,7 @@ class PettyCashController extends Controller
 
     public function store(Request $request, Project $project): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [PettyCashAccount::class, $project]);
 
         $data = $request->validate([
@@ -97,6 +101,7 @@ class PettyCashController extends Controller
 
     public function update(Request $request, Project $project, PettyCashAccount $pettyCashAccount): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('update', $pettyCashAccount);
 
         $data = $request->validate([
@@ -111,6 +116,7 @@ class PettyCashController extends Controller
 
     public function fund(Request $request, Project $project, PettyCashAccount $pettyCashAccount): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('fund', $pettyCashAccount);
 
         $this->pettyCash->fund($pettyCashAccount, $request->user(), $this->movement($request));
@@ -120,6 +126,7 @@ class PettyCashController extends Controller
 
     public function returnCash(Request $request, Project $project, PettyCashAccount $pettyCashAccount): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('update', $pettyCashAccount);
 
         $this->pettyCash->returnCash($pettyCashAccount, $request->user(), $this->movement($request));

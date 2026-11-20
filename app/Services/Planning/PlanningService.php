@@ -11,6 +11,8 @@ use App\Models\Planning\ProjectMilestone;
 use App\Models\Planning\ProjectTask;
 use App\Models\Planning\TaskDependency;
 use App\Models\Projects\Project;
+use App\Models\User;
+use App\Services\Boq\PlanningBoqMappingService;
 use App\Support\Math\Decimal;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -24,6 +26,10 @@ use Illuminate\Validation\ValidationException;
 class PlanningService
 {
     public const WBS_PATTERN = '/^[A-Za-z0-9]+(\.[A-Za-z0-9]+)*$/';
+
+    public function __construct(
+        private readonly PlanningBoqMappingService $boqMaps,
+    ) {}
 
     /**
      * Next free WBS code: "N" at the top level, "<parent>.N" below a parent.
@@ -180,9 +186,9 @@ class PlanningService
         return $task;
     }
 
-    public function deleteTask(ProjectTask $task): void
+    public function deleteTask(ProjectTask $task, ?User $user = null): void
     {
-        DB::transaction(function () use ($task) {
+        DB::transaction(function () use ($task, $user) {
             if ($task->children()->exists()) {
                 throw ValidationException::withMessages(['task' => 'Delete or move the sub-tasks first.']);
             }
@@ -190,6 +196,9 @@ class PlanningService
             TaskDependency::query()
                 ->where(fn (Builder $q) => $q->where('predecessor_id', $task->id)->orWhere('successor_id', $task->id))
                 ->delete();
+
+            // Soft-delete does not cascade maps; release BOQ tags so qty becomes available again.
+            $this->boqMaps->releaseMapsForTask($task, $user);
 
             // Free the WBS code for reuse; the unique index also covers soft-deleted rows.
             $task->wbs_code = mb_substr($task->wbs_code, 0, 30 - strlen('~'.$task->id)).'~'.$task->id;

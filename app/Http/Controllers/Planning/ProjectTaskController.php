@@ -196,11 +196,11 @@ class ProjectTaskController extends Controller
         return back()->with('success', 'Task status updated.');
     }
 
-    public function destroy(Project $project, ProjectTask $task): RedirectResponse
+    public function destroy(Request $request, Project $project, ProjectTask $task): RedirectResponse
     {
         Gate::authorize('delete', $task);
 
-        $this->planning->deleteTask($task);
+        $this->planning->deleteTask($task, $request->user());
 
         return back()->with('success', 'Task deleted.');
     }

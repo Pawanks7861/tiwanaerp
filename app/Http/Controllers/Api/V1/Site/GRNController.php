@@ -179,6 +179,7 @@ class GRNController extends Controller
             'warehouse:id,code,name,type,project_id',
             'items.material:id,code,name',
             'items.unit:id,symbol',
+            'items.purchaseOrderItem:id,rate',
             'attachments.uploader:id,name',
             'weighbridgeReceipt.attachments.uploader:id,name',
             'latestApprovalRequest.submitter:id,name',

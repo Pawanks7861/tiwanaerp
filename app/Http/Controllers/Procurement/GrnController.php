@@ -9,14 +9,16 @@ use App\Http\Controllers\Core\AuditPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
 use App\Models\Masters\Warehouse;
 use App\Models\Procurement\Grn;
-use App\Models\Weighbridge\WeighbridgeReceipt;
 use App\Models\Procurement\GrnItem;
 use App\Models\Procurement\PurchaseOrder;
 use App\Models\Projects\Project;
 use App\Models\User;
+use App\Models\Weighbridge\WeighbridgeReceipt;
 use App\Rules\ExistsInCompany;
 use App\Services\Procurement\GrnService;
 use App\Services\Weighbridge\WeighbridgeReceiptService;
+use App\Support\Math\Decimal;
+use App\Support\Procurement\GrnValuation;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -94,9 +96,17 @@ class GrnController extends Controller
         Gate::authorize('view', $grn);
 
         $user = $request->user();
-        $grn->load(['vendor', 'purchaseOrder:id,po_number,revision_no,status', 'warehouse:id,code,name', 'approver:id,name']);
+        $grn->load([
+            'vendor',
+            'purchaseOrder:id,po_number,revision_no,status,tax_type',
+            'warehouse:id,code,name',
+            'approver:id,name',
+            'attachments',
+        ]);
         $seeRates = $user->can('purchase.view');
-        $items = $grn->items()->with(['purchaseOrderItem:id,item_code,description', 'unit:id,symbol'])->get();
+        $items = $grn->items()->with(['purchaseOrderItem:id,item_code,description,rate', 'unit:id,symbol'])->get();
+        $lineAmounts = $items->map(fn (GrnItem $i) => GrnValuation::lineAmount($i));
+        $totalAmount = Decimal::sum($lineAmounts);
 
         return Inertia::render('Procurement/Grns/Show', [
             'project' => ProjectHeader::for($project),
@@ -109,10 +119,14 @@ class GrnController extends Controller
                 'purchase_order' => $grn->purchaseOrder ? [
                     'id' => $grn->purchaseOrder->id,
                     'po_number' => $grn->purchaseOrder->po_number,
+                    'tax_type' => $grn->purchaseOrder->tax_type?->value,
+                    'tax_type_label' => $grn->purchaseOrder->tax_type?->label(),
                     'url' => $user->can('purchase.view') ? route('projects.purchase-orders.show', [$project, $grn->purchaseOrder->id]) : null,
                 ] : null,
                 'approved_by' => $grn->approver?->name,
                 'approved_at' => $grn->approved_at?->toIso8601String(),
+                'total_amount' => $seeRates ? $totalAmount->toMoney() : null,
+                'documents' => GrnValuation::documentStatus($grn),
             ],
             'items' => $items->map(fn (GrnItem $i) => [
                 'id' => $i->id,
@@ -120,7 +134,8 @@ class GrnController extends Controller
                 'description' => $i->purchaseOrderItem?->description,
                 'unit' => $i->unit?->symbol,
                 ...$i->only(['ordered_qty', 'previously_received_qty', 'po_remaining_qty', 'received_qty', 'rejected_qty', 'accepted_qty', 'extra_qty', 'extra_reason', 'extra_remarks', 'supplier_challan_qty', 'rejection_reason']),
-                'rate' => $seeRates ? $i->rate : null,
+                'rate' => $seeRates ? GrnValuation::lineRate($i)->toRate() : null,
+                'amount' => $seeRates ? GrnValuation::lineAmount($i)->toMoney() : null,
             ])->all(),
             'approval' => ProcurementPresenter::approval($grn, $user),
             'attachments' => ProcurementPresenter::attachments($grn),

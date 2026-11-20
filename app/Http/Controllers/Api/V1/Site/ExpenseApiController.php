@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Site;
 use App\Enums\Finance\ExpenseStatus;
 use App\Enums\Finance\PaymentMode;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Finance\Concerns\DeniesRetiredFinanceWrites;
 use App\Http\Resources\ExpenseResource;
 use App\Models\Finance\Expense;
 use App\Models\Projects\Project;
@@ -17,6 +18,8 @@ use Illuminate\Validation\Rule;
 
 class ExpenseApiController extends Controller
 {
+    use DeniesRetiredFinanceWrites;
+
     public function __construct(private readonly ExpenseService $expenses) {}
 
     public function index(Request $request, Project $project): AnonymousResourceCollection
@@ -45,6 +48,7 @@ class ExpenseApiController extends Controller
 
     public function store(Request $request, Project $project): JsonResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [Expense::class, $project]);
         $expense = $this->expenses->create($project, $this->validated($request), $request->user());
 
@@ -63,6 +67,7 @@ class ExpenseApiController extends Controller
 
     public function update(Request $request, Project $project, Expense $expense): ExpenseResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $expense);
         Gate::authorize('update', $expense);
         $updated = $this->expenses->update($expense, $this->validated($request), $request->user());
@@ -72,6 +77,7 @@ class ExpenseApiController extends Controller
 
     public function destroy(Project $project, Expense $expense): JsonResponse
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $expense);
         Gate::authorize('delete', $expense);
         $this->expenses->delete($expense);
@@ -81,6 +87,7 @@ class ExpenseApiController extends Controller
 
     public function submit(Request $request, Project $project, Expense $expense): ExpenseResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $expense);
         Gate::authorize('submit', $expense);
         $this->expenses->submit($expense, $request->user());
@@ -90,6 +97,7 @@ class ExpenseApiController extends Controller
 
     public function markPaid(Request $request, Project $project, Expense $expense): ExpenseResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $expense);
         Gate::authorize('markPaid', $expense);
         $data = $request->validate([
@@ -103,6 +111,7 @@ class ExpenseApiController extends Controller
 
     public function reverse(Request $request, Project $project, Expense $expense): ExpenseResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $expense);
         Gate::authorize('reverse', $expense);
         $reason = $request->validate(['reason' => ['required', 'string', 'min:5', 'max:500']])['reason'];

@@ -142,7 +142,7 @@ function percentLabel(value) {
                 <StatCard label="Main Budget Available" :value="formatMoney(totals.available_budget)" icon="check-circle" tone="green" />
                 <StatCard label="BOQ Estimate" :value="formatMoney(totals.boq_estimate)" icon="scale" />
                 <StatCard label="BOQ vs Main" :value="formatMoney(totals.boq_vs_main_budget)" icon="scale" tone="slate" />
-                <StatCard label="Actual invoiced" :value="formatMoney(totals.actual_invoiced)" icon="banknotes" tone="orange" />
+                <StatCard label="Actual (GRN / SC)" :value="formatMoney(totals.actual_invoiced)" icon="banknotes" tone="orange" />
                 <StatCard label="Open commitment" :value="formatMoney(totals.open_commitment)" icon="truck" />
                 <StatCard label="GST exposure" :value="formatMoney(totals.gst_exposure)" icon="receipt" />
                 <StatCard label="Assigned incl. GST" :value="formatMoney(totals.total_assigned_incl_gst)" icon="receipt" />
@@ -300,7 +300,7 @@ function percentLabel(value) {
                 <p v-else class="p-5 text-sm text-slate-500">No open commitments.</p>
             </AppCard>
 
-            <AppCard title="Vendor / subcontractor exposure" subtitle="Retention held applies to certified subcontract bills net of approved releases. Vendor bills have no retention field in this ERP." :padded="false">
+            <AppCard title="Vendor / subcontractor exposure" subtitle="Vendor actuals are approved GRN accepted value (qty × PO rate). Retention held applies to certified subcontract bills net of approved releases." :padded="false">
                 <div v-if="vendorRows.length" class="overflow-x-auto">
                     <table class="min-w-full text-sm">
                         <thead class="bg-slate-50 text-[11px] tracking-wide text-slate-500 uppercase">

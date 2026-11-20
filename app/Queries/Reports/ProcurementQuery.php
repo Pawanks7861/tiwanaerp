@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Purchase orders in a period (by PO date) with value ordered, received (accepted quantity on
- * approved GRNs at the PO line's taxable rate), billed (approved vendor bills against the PO)
+ * approved GRNs at the PO line rate), billed (same as received under GRN soft cutover)
  * and still open (approved-order POs only). Purchase value = taxable value excluding GST.
  */
 final class ProcurementQuery
@@ -34,10 +34,6 @@ final class ProcurementQuery
             ->selectRaw('poi.purchase_order_id, COUNT(*) as items,
                 SUM(CASE WHEN poi.quantity > 0 THEN poi.taxable_amount * (CASE WHEN COALESCE(r.accepted, 0) > poi.quantity THEN poi.quantity ELSE COALESCE(r.accepted, 0) END) / poi.quantity ELSE 0 END) as received_value');
 
-        $billed = DB::table('vendor_bills')
-            ->where('company_id', $companyId)->whereIn('status', ['approved', 'partially_paid', 'paid'])->whereNull('deleted_at')->whereNotNull('purchase_order_id')
-            ->groupBy('purchase_order_id')->selectRaw('purchase_order_id, SUM(subtotal) as billed');
-
         $search = trim((string) ($filters['search'] ?? ''));
         $open = "CASE WHEN po.status IN ('approved', 'partially_received', 'received') AND po.taxable_amount > COALESCE(ln.received_value, 0)
             THEN po.taxable_amount - COALESCE(ln.received_value, 0) ELSE 0 END";
@@ -46,7 +42,6 @@ final class ProcurementQuery
             ->join('projects as pr', 'pr.id', '=', 'po.project_id')
             ->leftJoin('vendors as v', 'v.id', '=', 'po.vendor_id')
             ->leftJoinSub($lines, 'ln', 'ln.purchase_order_id', '=', 'po.id')
-            ->leftJoinSub($billed, 'vb', 'vb.purchase_order_id', '=', 'po.id')
             ->where('po.company_id', $companyId)
             ->whereIn('po.project_id', $projectIds ?: [0])
             ->whereNull('po.deleted_at')
@@ -57,7 +52,7 @@ final class ProcurementQuery
             ->select('po.id', 'po.project_id', 'pr.code as project_code', 'po.po_number', 'v.name as vendor', 'po.po_date', 'po.delivery_date', 'po.status',
                 'po.taxable_amount')
             ->selectRaw('po.cgst_amount + po.sgst_amount + po.igst_amount as tax_amount, po.grand_total')
-            ->selectRaw('COALESCE(ln.items, 0) as items, COALESCE(ln.received_value, 0) as received_value, COALESCE(vb.billed, 0) as billed')
+            ->selectRaw('COALESCE(ln.items, 0) as items, COALESCE(ln.received_value, 0) as received_value, COALESCE(ln.received_value, 0) as billed')
             ->selectRaw("{$open} as open_value");
     }
 

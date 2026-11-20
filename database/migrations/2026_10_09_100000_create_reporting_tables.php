@@ -44,25 +44,35 @@ return new class extends Migration
             $table->unique(['task_id', 'planned_finish']);
         });
 
-        Schema::table('audit_logs', function (Blueprint $table) {
-            $table->index(['company_id', 'auditable_type', 'created_at'], 'audit_logs_company_type_created_index');
-            $table->index(['company_id', 'user_id', 'created_at'], 'audit_logs_company_user_created_index');
-        });
+        if (Schema::hasTable('audit_logs')) {
+            Schema::table('audit_logs', function (Blueprint $table) {
+                $table->index(['company_id', 'auditable_type', 'created_at'], 'audit_logs_company_type_created_index');
+                $table->index(['company_id', 'user_id', 'created_at'], 'audit_logs_company_user_created_index');
+            });
+        }
 
-        Schema::table('notifications', function (Blueprint $table) {
-            $table->index(['notifiable_type', 'notifiable_id', 'company_id', 'created_at'], 'notifications_inbox_index');
-        });
+        if (Schema::hasTable('notifications')) {
+            Schema::table('notifications', function (Blueprint $table) {
+                $table->index(['notifiable_type', 'notifiable_id', 'company_id', 'created_at'], 'notifications_inbox_index');
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('notifications', function (Blueprint $table) {
-            $table->dropIndex('notifications_inbox_index');
-        });
-        Schema::table('audit_logs', function (Blueprint $table) {
-            $table->dropIndex('audit_logs_company_user_created_index');
-            $table->dropIndex('audit_logs_company_type_created_index');
-        });
+        if (Schema::hasTable('notifications')) {
+            Schema::table('notifications', function (Blueprint $table) {
+                $table->dropIndex('notifications_inbox_index');
+            });
+        }
+
+        if (Schema::hasTable('audit_logs')) {
+            Schema::table('audit_logs', function (Blueprint $table) {
+                $table->dropIndex('audit_logs_company_user_created_index');
+                $table->dropIndex('audit_logs_company_type_created_index');
+            });
+        }
+
         Schema::dropIfExists('task_overdue_alerts');
         Schema::dropIfExists('report_exports');
     }

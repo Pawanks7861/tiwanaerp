@@ -5,10 +5,11 @@ namespace App\Http\Controllers\Finance;
 use App\Enums\Finance\ExpenseStatus;
 use App\Enums\Finance\PaymentMode;
 use App\Http\Controllers\Controller;
-use App\Integrations\Tally\TallyStatusPresenter;
 use App\Http\Controllers\Core\AuditPresenter;
+use App\Http\Controllers\Finance\Concerns\DeniesRetiredFinanceWrites;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
+use App\Integrations\Tally\TallyStatusPresenter;
 use App\Models\Finance\Expense;
 use App\Models\Finance\PettyCashAccount;
 use App\Models\Masters\ExpenseCategory;
@@ -24,6 +25,8 @@ use Inertia\Response;
 
 class ExpenseController extends Controller
 {
+    use DeniesRetiredFinanceWrites;
+
     public function __construct(private readonly ExpenseService $expenses) {}
 
     public function index(Request $request, Project $project): Response
@@ -58,6 +61,7 @@ class ExpenseController extends Controller
 
     public function create(Project $project): Response
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [Expense::class, $project]);
 
         return $this->form($project, null);
@@ -65,6 +69,7 @@ class ExpenseController extends Controller
 
     public function store(Request $request, Project $project): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [Expense::class, $project]);
 
         $expense = $this->expenses->create($project, $this->validated($request), $request->user());
@@ -106,6 +111,7 @@ class ExpenseController extends Controller
 
     public function edit(Project $project, Expense $expense): Response
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('update', $expense);
 
         return $this->form($project, $expense);
@@ -113,6 +119,7 @@ class ExpenseController extends Controller
 
     public function update(Request $request, Project $project, Expense $expense): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('update', $expense);
 
         $this->expenses->update($expense, $this->validated($request), $request->user());
@@ -122,6 +129,7 @@ class ExpenseController extends Controller
 
     public function destroy(Project $project, Expense $expense): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('delete', $expense);
 
         $this->expenses->delete($expense);
@@ -131,6 +139,7 @@ class ExpenseController extends Controller
 
     public function submit(Request $request, Project $project, Expense $expense): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('submit', $expense);
 
         $this->expenses->submit($expense, $request->user());
@@ -140,6 +149,7 @@ class ExpenseController extends Controller
 
     public function markPaid(Request $request, Project $project, Expense $expense): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('markPaid', $expense);
 
         $data = $request->validate([
@@ -153,6 +163,7 @@ class ExpenseController extends Controller
 
     public function reverse(Request $request, Project $project, Expense $expense): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('reverse', $expense);
         $reason = $request->validate(['reason' => ['required', 'string', 'min:5', 'max:500']])['reason'];
 

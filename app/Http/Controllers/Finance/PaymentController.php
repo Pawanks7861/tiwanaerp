@@ -8,10 +8,11 @@ use App\Enums\Finance\PaymentPartyType;
 use App\Enums\Finance\PaymentStatus;
 use App\Enums\Labour\LabourPaymentStatus;
 use App\Http\Controllers\Controller;
-use App\Integrations\Tally\TallyStatusPresenter;
 use App\Http\Controllers\Core\AuditPresenter;
+use App\Http\Controllers\Finance\Concerns\DeniesRetiredFinanceWrites;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
+use App\Integrations\Tally\TallyStatusPresenter;
 use App\Models\Finance\Payment;
 use App\Models\Finance\PaymentAllocation;
 use App\Models\Labour\LabourPayment;
@@ -30,6 +31,8 @@ use Inertia\Response;
 
 class PaymentController extends Controller
 {
+    use DeniesRetiredFinanceWrites;
+
     public function __construct(private readonly PaymentService $payments, private readonly PayableService $payables) {}
 
     public function index(Request $request, Project $project): Response
@@ -61,6 +64,7 @@ class PaymentController extends Controller
 
     public function create(Request $request, Project $project): Response
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [Payment::class, $project]);
 
         $party = PaymentPartyType::tryFrom($request->string('party_type')->toString());
@@ -70,6 +74,7 @@ class PaymentController extends Controller
 
     public function store(Request $request, Project $project): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [Payment::class, $project]);
 
         $payment = $this->payments->create($project, $this->validated($request, true));
@@ -116,6 +121,7 @@ class PaymentController extends Controller
 
     public function edit(Project $project, Payment $payment): Response
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('update', $payment);
 
         return $this->form($project, $payment, $payment->party_type, (int) $payment->party_id);
@@ -123,6 +129,7 @@ class PaymentController extends Controller
 
     public function update(Request $request, Project $project, Payment $payment): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('update', $payment);
 
         $this->payments->update($payment, $this->validated($request, false));
@@ -132,6 +139,7 @@ class PaymentController extends Controller
 
     public function destroy(Project $project, Payment $payment): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('delete', $payment);
 
         $this->payments->delete($payment);
@@ -141,6 +149,7 @@ class PaymentController extends Controller
 
     public function approve(Request $request, Project $project, Payment $payment): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('approve', $payment);
 
         $this->payments->approve($payment, $request->user());
@@ -150,6 +159,7 @@ class PaymentController extends Controller
 
     public function cancel(Request $request, Project $project, Payment $payment): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('cancel', $payment);
         $reason = $request->validate(['reason' => ['required', 'string', 'min:5', 'max:500']])['reason'];
 

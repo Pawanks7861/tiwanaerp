@@ -18,8 +18,13 @@ Open Approvals or the PO document → Review lines and rates → Approve (requir
 
 ## GRN
 1. Open Procurement → GRN → Create against an approved / partially received PO.
-2. Enter received quantities → Save → Submit / post per workflow.
-3. Stock posts only through the GRN lifecycle — never by editing inventory rows directly.
+2. Enter received quantities → Save draft.
+3. Before submit, attach all three required documents on the GRN:
+   - **Material gate pass** (`material_gate_pass`)
+   - **Weighment slip** (`weighment_slip`)
+   - **Invoice** (`invoice`)
+4. Submit for approval. Stock posts only through the GRN lifecycle — never by editing inventory rows directly.
+5. Approved GRN accepted value (`accepted_qty × PO rate`) is the procurement / Cost Control material actual. Vendor bills are soft-retired.
 
 ## Excel imports
-Materials, vendors, PR lines (draft), opening stock, expenses and other masters support Import + Download Template. Drawings do **not** use spreadsheet import.
+Materials, vendors, PR lines (draft), opening stock and other masters support Import + Download Template. Drawings do **not** use spreadsheet import. Expense import is retired with the Expenses module.

@@ -4,8 +4,7 @@ namespace App\Services\Projects;
 
 use App\Enums\Boq\BudgetStatus;
 use App\Enums\Boq\BudgetType;
-use App\Enums\Finance\ExpenseStatus;
-use App\Enums\Finance\VendorBillStatus;
+use App\Enums\Procurement\GrnStatus;
 use App\Enums\Subcontract\SubcontractorBillStatus;
 use App\Models\Boq\ProjectBudget;
 use App\Models\Core\Company;
@@ -320,14 +319,17 @@ class ProjectCostControlService
 
         $primaryWbsSub = $this->primaryWbsForSubcontractors($companyId, $ids);
 
-        $bills = DB::table('vendor_bills as vb')
-            ->where('vb.company_id', $companyId)
-            ->whereIn('vb.project_id', $ids)
-            ->whereIn('vb.status', array_map(fn (VendorBillStatus $s) => $s->value, VendorBillStatus::approvedStates()))
-            ->whereNull('vb.deleted_at')
-            ->when($asOf, fn ($q) => $q->whereDate('vb.vendor_invoice_date', '<=', $asOf))
-            ->groupBy('vb.vendor_id')
-            ->selectRaw('vb.vendor_id, SUM(vb.subtotal) as invoiced, SUM(vb.net_payable) as net_payable')
+        // Soft cutover: approved GRN accepted value (qty × PO/GRN rate) replaces vendor-bill "invoiced".
+        $bills = DB::table('grn_items as gi')
+            ->join('grns as g', 'g.id', '=', 'gi.grn_id')
+            ->leftJoin('purchase_order_items as poi', 'poi.id', '=', 'gi.purchase_order_item_id')
+            ->where('g.company_id', $companyId)
+            ->whereIn('g.project_id', $ids)
+            ->where('g.status', GrnStatus::Approved->value)
+            ->whereNull('g.deleted_at')
+            ->when($asOf, fn ($q) => $q->whereDate('g.receipt_date', '<=', $asOf))
+            ->groupBy('g.vendor_id')
+            ->selectRaw('g.vendor_id, SUM(gi.accepted_qty * COALESCE(poi.rate, gi.rate)) as invoiced, SUM(gi.accepted_qty * COALESCE(poi.rate, gi.rate)) as net_payable')
             ->get()
             ->keyBy('vendor_id');
 
@@ -548,12 +550,14 @@ class ProjectCostControlService
 
         $ym = fn (string $column): string => $this->yearMonthSql($column);
 
-        $invoiced = DB::table('vendor_bills')
-            ->where('company_id', $project->company_id)
-            ->where('project_id', $project->id)
-            ->whereIn('status', array_map(fn (VendorBillStatus $s) => $s->value, VendorBillStatus::approvedStates()))
-            ->whereNull('deleted_at')
-            ->selectRaw("{$ym('vendor_invoice_date')} as ym, SUM(subtotal) as total")
+        $invoiced = DB::table('grn_items as gi')
+            ->join('grns as g', 'g.id', '=', 'gi.grn_id')
+            ->leftJoin('purchase_order_items as poi', 'poi.id', '=', 'gi.purchase_order_item_id')
+            ->where('g.company_id', $project->company_id)
+            ->where('g.project_id', $project->id)
+            ->where('g.status', GrnStatus::Approved->value)
+            ->whereNull('g.deleted_at')
+            ->selectRaw("{$ym('g.receipt_date')} as ym, SUM(gi.accepted_qty * COALESCE(poi.rate, gi.rate)) as total")
             ->groupBy('ym')
             ->pluck('total', 'ym');
 
@@ -566,14 +570,7 @@ class ProjectCostControlService
             ->groupBy('ym')
             ->pluck('total', 'ym');
 
-        $expenses = DB::table('expenses')
-            ->where('company_id', $project->company_id)
-            ->where('project_id', $project->id)
-            ->whereIn('status', [ExpenseStatus::Approved->value, ExpenseStatus::Paid->value])
-            ->whereNull('deleted_at')
-            ->selectRaw("{$ym('expense_date')} as ym, SUM(amount) as total")
-            ->groupBy('ym')
-            ->pluck('total', 'ym');
+        $expenses = collect();
 
         $paid = DB::table('payments')
             ->where('company_id', $project->company_id)
@@ -708,29 +705,20 @@ class ProjectCostControlService
             ->tap(fn ($q) => $headFilter($q, 'woi.project_cost_head_id'))
             ->get(['woi.id', 'wo.id as document_id', 'wo.wo_number as document', 'wo.status', 'woi.amount', 'woi.description']);
 
-        $bills = DB::table('vendor_bill_items as vbi')
-            ->join('vendor_bills as vb', 'vb.id', '=', 'vbi.vendor_bill_id')
-            ->where('vb.company_id', $companyId)
-            ->where('vb.project_id', $projectId)
-            ->whereNull('vb.deleted_at')
-            ->tap(fn ($q) => $headFilter($q, 'vbi.project_cost_head_id'))
-            ->get(['vbi.id', 'vb.id as document_id', 'vb.bill_number as document', 'vb.status', 'vbi.taxable_amount as amount', 'vbi.description']);
+        $grns = DB::table('grn_items as gi')
+            ->join('grns as g', 'g.id', '=', 'gi.grn_id')
+            ->leftJoin('purchase_order_items as poi', 'poi.id', '=', 'gi.purchase_order_item_id')
+            ->where('g.company_id', $companyId)
+            ->where('g.project_id', $projectId)
+            ->where('g.status', GrnStatus::Approved->value)
+            ->whereNull('g.deleted_at')
+            ->tap(fn ($q) => $headFilter($q, 'poi.project_cost_head_id'))
+            ->groupBy('g.id', 'g.grn_number', 'g.status')
+            ->selectRaw('g.id, g.id as document_id, g.grn_number as document, g.status, SUM(gi.accepted_qty * COALESCE(poi.rate, gi.rate)) as amount, NULL as description')
+            ->get();
 
-        $expenses = DB::table('expenses')
-            ->where('company_id', $companyId)
-            ->where('project_id', $projectId)
-            ->whereNull('deleted_at')
-            ->tap(fn ($q) => $headFilter($q))
-            ->get(['id', 'id as document_id', 'expense_number as document', 'status', 'amount', 'description']);
-
-        // Payments are project-scoped (no cost-head FK); shown on every head drilldown for context.
-        $payments = DB::table('payments')
-            ->where('company_id', $companyId)
-            ->where('project_id', $projectId)
-            ->whereNull('deleted_at')
-            ->orderByDesc('payment_date')
-            ->limit(100)
-            ->get(['id', 'id as document_id', 'payment_number as document', 'status', 'amount', 'direction', 'party_type', 'payment_date']);
+        $expenses = collect();
+        $payments = collect();
 
         $variations = DB::table('boq_variations')
             ->where('company_id', $companyId)
@@ -753,7 +741,8 @@ class ProjectCostControlService
             'budget_lines' => $budgetLines,
             'purchase_orders' => $pos,
             'work_orders' => $wos,
-            'vendor_bills' => $bills,
+            'grns' => $grns,
+            'vendor_bills' => collect(),
             'expenses' => $expenses,
             'payments' => $payments,
             'variations' => $variations,
@@ -882,15 +871,16 @@ class ProjectCostControlService
             $out[$projectId][$key] = ($out[$projectId][$key] ?? Decimal::zero())->plus(Num::dec($amount));
         };
 
-        DB::table('vendor_bill_items as vbi')
-            ->join('vendor_bills as vb', 'vb.id', '=', 'vbi.vendor_bill_id')
-            ->where('vb.company_id', $companyId)
-            ->whereIn('vb.project_id', $projectIds ?: [0])
-            ->whereIn('vb.status', array_map(fn (VendorBillStatus $s) => $s->value, VendorBillStatus::approvedStates()))
-            ->whereNull('vb.deleted_at')
-            ->when($asOf, fn ($q) => $q->whereDate('vb.vendor_invoice_date', '<=', $asOf))
-            ->groupBy('vb.project_id', 'vbi.project_cost_head_id')
-            ->selectRaw('vb.project_id, vbi.project_cost_head_id, SUM(vbi.taxable_amount) as total')
+        DB::table('grn_items as gi')
+            ->join('grns as g', 'g.id', '=', 'gi.grn_id')
+            ->leftJoin('purchase_order_items as poi', 'poi.id', '=', 'gi.purchase_order_item_id')
+            ->where('g.company_id', $companyId)
+            ->whereIn('g.project_id', $projectIds ?: [0])
+            ->where('g.status', GrnStatus::Approved->value)
+            ->whereNull('g.deleted_at')
+            ->when($asOf, fn ($q) => $q->whereDate('g.receipt_date', '<=', $asOf))
+            ->groupBy('g.project_id', 'poi.project_cost_head_id')
+            ->selectRaw('g.project_id, poi.project_cost_head_id, SUM(gi.accepted_qty * COALESCE(poi.rate, gi.rate)) as total')
             ->get()
             ->each(fn ($r) => $add((int) $r->project_id, $r->project_cost_head_id, $r->total));
 
@@ -903,17 +893,6 @@ class ProjectCostControlService
             ->when($asOf, fn ($q) => $q->whereDate('sb.bill_date', '<=', $asOf))
             ->groupBy('sb.project_id', 'sbi.project_cost_head_id')
             ->selectRaw('sb.project_id, sbi.project_cost_head_id, SUM(sbi.amount) as total')
-            ->get()
-            ->each(fn ($r) => $add((int) $r->project_id, $r->project_cost_head_id, $r->total));
-
-        DB::table('expenses')
-            ->where('company_id', $companyId)
-            ->whereIn('project_id', $projectIds ?: [0])
-            ->whereIn('status', [ExpenseStatus::Approved->value, ExpenseStatus::Paid->value])
-            ->whereNull('deleted_at')
-            ->when($asOf, fn ($q) => $q->whereDate('expense_date', '<=', $asOf))
-            ->groupBy('project_id', 'project_cost_head_id')
-            ->selectRaw('project_id, project_cost_head_id, SUM(amount) as total')
             ->get()
             ->each(fn ($r) => $add((int) $r->project_id, $r->project_cost_head_id, $r->total));
 
@@ -940,24 +919,15 @@ class ProjectCostControlService
         $accepted = DB::table('grn_items as gi')
             ->join('grns as g', 'g.id', '=', 'gi.grn_id')
             ->where('g.company_id', $companyId)
-            ->where('g.status', 'approved')
+            ->where('g.status', GrnStatus::Approved->value)
             ->whereNull('g.deleted_at')
             ->groupBy('gi.purchase_order_item_id')
             ->selectRaw('gi.purchase_order_item_id, SUM(gi.accepted_qty) as accepted');
 
-        $invoicedPo = DB::table('vendor_bill_items as vbi')
-            ->join('vendor_bills as vb', 'vb.id', '=', 'vbi.vendor_bill_id')
-            ->where('vb.company_id', $companyId)
-            ->whereIn('vb.status', array_map(fn (VendorBillStatus $s) => $s->value, VendorBillStatus::approvedStates()))
-            ->whereNull('vb.deleted_at')
-            ->whereNotNull('vbi.purchase_order_item_id')
-            ->groupBy('vbi.purchase_order_item_id')
-            ->selectRaw('vbi.purchase_order_item_id, SUM(vbi.taxable_amount) as invoiced');
-
+        // Open PO commitment = remaining qty × line taxable rate (approved GRN reduces commitment; vendor bills no longer).
         DB::table('purchase_order_items as poi')
             ->join('purchase_orders as po', 'po.id', '=', 'poi.purchase_order_id')
             ->leftJoinSub($accepted, 'r', 'r.purchase_order_item_id', '=', 'poi.id')
-            ->leftJoinSub($invoicedPo, 'inv', 'inv.purchase_order_item_id', '=', 'poi.id')
             ->where('po.company_id', $companyId)
             ->whereIn('po.project_id', $projectIds ?: [0])
             ->whereIn('po.status', CommittedCostQuery::PO_STATES)
@@ -970,7 +940,6 @@ class ProjectCostControlService
                 'poi.taxable_amount',
             )
             ->selectRaw('COALESCE(r.accepted, 0) as accepted')
-            ->selectRaw('COALESCE(inv.invoiced, 0) as invoiced')
             ->get()
             ->each(function ($line) use ($add) {
                 $qty = Num::dec($line->quantity);
@@ -979,16 +948,7 @@ class ProjectCostControlService
                     return;
                 }
                 $openValue = Num::dec($line->taxable_amount)->times($openQty)->dividedBy($qty);
-                // Commitment remaining after invoicing against the line (floor at 0).
-                $remaining = Decimal::of($openValue->toMoney())->minus(Num::dec($line->invoiced));
-                // Spec: Open Commitment = Approved Commitment - Actual Invoiced Against Commitment.
-                // Prefer taxable - invoiced for the line when GRN-based open is incomplete vs billed.
-                $commitmentBase = Num::dec($line->taxable_amount)->minus(Num::dec($line->invoiced));
-                $use = $commitmentBase->lessThan($remaining) ? $commitmentBase : $remaining;
-                if ($use->isNegative()) {
-                    $use = Decimal::zero();
-                }
-                $add((int) $line->project_id, $line->project_cost_head_id, Decimal::of($use->toMoney()));
+                $add((int) $line->project_id, $line->project_cost_head_id, Decimal::of($openValue->toMoney()));
             });
 
         $posted = DB::table('subcontractor_bill_items as sbi')
@@ -1033,28 +993,13 @@ class ProjectCostControlService
             $out[$projectId][$key] = ($out[$projectId][$key] ?? Decimal::zero())->plus(Num::dec($amount));
         };
 
-        DB::table('vendor_bill_items as vbi')
-            ->join('vendor_bills as vb', 'vb.id', '=', 'vbi.vendor_bill_id')
-            ->where('vb.company_id', $companyId)
-            ->whereIn('vb.project_id', $projectIds ?: [0])
-            ->whereIn('vb.status', array_map(fn (VendorBillStatus $s) => $s->value, VendorBillStatus::approvedStates()))
-            ->whereNull('vb.deleted_at')
-            ->when($asOf, fn ($q) => $q->whereDate('vb.vendor_invoice_date', '<=', $asOf))
-            ->groupBy('vb.project_id', 'vbi.project_cost_head_id')
-            ->selectRaw('vb.project_id, vbi.project_cost_head_id, SUM(vbi.cgst_amount + vbi.sgst_amount + vbi.igst_amount) as total')
-            ->get()
-            ->each(fn ($r) => $add((int) $r->project_id, $r->project_cost_head_id, $r->total));
-
+        // GST exposure follows committed PO lines (vendor-bill GST retired with soft cutover).
         DB::table('purchase_order_items as poi')
             ->join('purchase_orders as po', 'po.id', '=', 'poi.purchase_order_id')
-            ->leftJoin('vendor_bill_items as vbi', function ($join) {
-                $join->on('vbi.purchase_order_item_id', '=', 'poi.id');
-            })
             ->where('po.company_id', $companyId)
             ->whereIn('po.project_id', $projectIds ?: [0])
             ->whereIn('po.status', CommittedCostQuery::PO_STATES)
             ->whereNull('po.deleted_at')
-            ->whereNull('vbi.id')
             ->groupBy('po.project_id', 'poi.project_cost_head_id')
             ->selectRaw('po.project_id, poi.project_cost_head_id, SUM(poi.cgst_amount + poi.sgst_amount + poi.igst_amount) as total')
             ->get()

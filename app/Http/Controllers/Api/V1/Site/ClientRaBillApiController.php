@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Site;
 use App\Enums\Finance\ClientInvoiceStatus;
 use App\Enums\IndianState;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Finance\Concerns\DeniesRetiredFinanceWrites;
 use App\Http\Resources\ClientInvoiceResource;
 use App\Models\Core\Company;
 use App\Models\Finance\ClientInvoice;
@@ -22,6 +23,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ClientRaBillApiController extends Controller
 {
+    use DeniesRetiredFinanceWrites;
+
     public function __construct(private readonly ClientInvoiceService $invoices) {}
 
     public function index(Request $request, Project $project): AnonymousResourceCollection
@@ -45,6 +48,7 @@ class ClientRaBillApiController extends Controller
 
     public function prefill(Request $request, Project $project): JsonResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [ClientInvoice::class, $project]);
 
         $data = $request->validate([
@@ -67,6 +71,7 @@ class ClientRaBillApiController extends Controller
 
     public function store(Request $request, Project $project): JsonResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [ClientInvoice::class, $project]);
         $invoice = $this->invoices->create($project, $this->validated($request), $request->user());
 
@@ -85,6 +90,7 @@ class ClientRaBillApiController extends Controller
 
     public function update(Request $request, Project $project, ClientInvoice $clientInvoice): ClientInvoiceResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $clientInvoice);
         Gate::authorize('update', $clientInvoice);
         $invoice = $this->invoices->update($clientInvoice, $this->validated($request), $request->user());
@@ -94,6 +100,7 @@ class ClientRaBillApiController extends Controller
 
     public function destroy(Project $project, ClientInvoice $clientInvoice): JsonResponse
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $clientInvoice);
         Gate::authorize('delete', $clientInvoice);
         $this->invoices->delete($clientInvoice);
@@ -103,6 +110,7 @@ class ClientRaBillApiController extends Controller
 
     public function submit(Request $request, Project $project, ClientInvoice $clientInvoice): ClientInvoiceResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $clientInvoice);
         Gate::authorize('submit', $clientInvoice);
         $this->invoices->submit($clientInvoice, $request->user());

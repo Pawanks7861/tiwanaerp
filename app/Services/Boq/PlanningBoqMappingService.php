@@ -15,6 +15,7 @@ use App\Models\Projects\Project;
 use App\Models\User;
 use App\Services\Projects\ProjectWbsService;
 use App\Support\Math\Decimal;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -41,6 +42,7 @@ class PlanningBoqMappingService
         $maps = BoqPlanningMap::query()
             ->where('boq_item_id', $item->id)
             ->where('is_active', true)
+            ->whereHas('task')
             ->with(['task:id,name,wbs_code,planned_qty,unit_id,completed_qty', 'task.unit:id,symbol'])
             ->orderBy('sequence')
             ->orderBy('id')
@@ -79,11 +81,8 @@ class PlanningBoqMappingService
         $boqNos = $this->boqNos($item);
         $factor = $this->conversionFactor($item);
 
-        $maps = BoqPlanningMap::query()
-            ->where('boq_item_id', $item->id)
-            ->where('is_active', true)
-            ->when($exceptMapId, fn ($q) => $q->whereKeyNot($exceptMapId))
-            ->get();
+        // Only maps on live (non soft-deleted) activities consume availability.
+        $maps = $this->activeMapsOnLiveTasksQuery($item->id, $exceptMapId)->get();
 
         $mappedBoq = Decimal::zero();
         $mappedNos = Decimal::zero();
@@ -373,6 +372,23 @@ class PlanningBoqMappingService
     }
 
     /**
+     * Deactivate every active BOQ mapping for a planning activity (soft-delete / release).
+     * Returns the number of maps released so callers can assert availability was freed.
+     */
+    public function releaseMapsForTask(ProjectTask $task, ?User $user = null): int
+    {
+        return BoqPlanningMap::query()
+            ->where('project_task_id', $task->id)
+            ->where('is_active', true)
+            ->update([
+                'is_active' => false,
+                'is_primary' => false,
+                'updated_by' => $user?->id,
+                'updated_at' => now(),
+            ]);
+    }
+
+    /**
      * Suggested BOQ qty from planning Nos × conversion (conversion_based).
      */
     public function suggestedBoqQty(BoqPlanningMap $map, string $planningExecutedQty): ?string
@@ -517,9 +533,7 @@ class PlanningBoqMappingService
             ->filter()
             ->all();
 
-        $existing = BoqPlanningMap::query()
-            ->where('boq_item_id', $item->id)
-            ->where('is_active', true)
+        $existing = $this->activeMapsOnLiveTasksQuery($item->id)
             ->when($excludeIds !== [], fn ($q) => $q->whereNotIn('id', $excludeIds))
             ->get();
 
@@ -759,6 +773,20 @@ class PlanningBoqMappingService
         }
 
         return Decimal::zero();
+    }
+
+    /**
+     * Active maps whose planning activity still exists and is not soft-deleted.
+     *
+     * @return Builder<BoqPlanningMap>
+     */
+    private function activeMapsOnLiveTasksQuery(int $boqItemId, ?int $exceptMapId = null): Builder
+    {
+        return BoqPlanningMap::query()
+            ->where('boq_item_id', $boqItemId)
+            ->where('is_active', true)
+            ->whereHas('task')
+            ->when($exceptMapId, fn ($q) => $q->whereKeyNot($exceptMapId));
     }
 
     private function conversionFactor(BoqItem $item): ?Decimal

@@ -7,9 +7,9 @@ use App\Enums\Finance\VendorBillStatus;
 use App\Enums\Finance\VendorBillType;
 use App\Enums\Procurement\PurchaseOrderStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Finance\Concerns\DeniesRetiredFinanceWrites;
 use App\Http\Resources\VendorBillResource;
 use App\Models\Finance\VendorBill;
-use App\Models\Finance\VendorBillItem;
 use App\Models\Procurement\PurchaseOrder;
 use App\Models\Projects\Project;
 use App\Services\Finance\VendorBillService;
@@ -23,6 +23,8 @@ use Illuminate\Validation\Rule;
 
 class VendorBillApiController extends Controller
 {
+    use DeniesRetiredFinanceWrites;
+
     public function __construct(
         private readonly VendorBillService $bills,
         private readonly VendorInvoiceMatchingService $matching,
@@ -72,6 +74,7 @@ class VendorBillApiController extends Controller
 
     public function prefill(Project $project, PurchaseOrder $purchaseOrder): JsonResponse
     {
+        $this->denyRetiredFinanceWrite();
         abort_unless((int) $purchaseOrder->project_id === (int) $project->id, 404);
         Gate::authorize('create', [VendorBill::class, $project]);
 
@@ -87,6 +90,7 @@ class VendorBillApiController extends Controller
 
     public function store(Request $request, Project $project): JsonResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [VendorBill::class, $project]);
         $bill = $this->bills->create($project, $this->validated($request, true));
 
@@ -108,6 +112,7 @@ class VendorBillApiController extends Controller
 
     public function update(Request $request, Project $project, VendorBill $vendorBill): VendorBillResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $vendorBill);
         Gate::authorize('update', $vendorBill);
         $bill = $this->bills->update($vendorBill, $this->validated($request, false, $vendorBill->bill_type));
@@ -117,6 +122,7 @@ class VendorBillApiController extends Controller
 
     public function destroy(Project $project, VendorBill $vendorBill): JsonResponse
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $vendorBill);
         Gate::authorize('delete', $vendorBill);
         $this->bills->delete($vendorBill);
@@ -126,6 +132,7 @@ class VendorBillApiController extends Controller
 
     public function submit(Request $request, Project $project, VendorBill $vendorBill): VendorBillResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $vendorBill);
         Gate::authorize('submit', $vendorBill);
         $this->bills->submit($vendorBill, $request->user());

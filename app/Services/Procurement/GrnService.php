@@ -16,6 +16,7 @@ use App\Services\Audit\AuditLogger;
 use App\Services\Numbering\DocumentNumberService;
 use App\Services\Weighbridge\WeighbridgeReceiptService;
 use App\Support\Math\Decimal;
+use App\Support\Procurement\GrnValuation;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -105,6 +106,7 @@ class GrnService
                 throw ValidationException::withMessages(['grn' => 'Add at least one received line before submitting.']);
             }
             $this->assertHasWarehouse($locked);
+            $this->assertRequiredDocuments($locked);
 
             $this->approvals->submit($locked, $user);
             $grn->setRawAttributes($locked->getAttributes(), true);
@@ -283,6 +285,21 @@ class GrnService
         if ($grn->warehouse_id === null) {
             throw ValidationException::withMessages(['warehouse_id' => 'Choose the receiving warehouse; accepted stock is posted there on approval.']);
         }
+    }
+
+    private function assertRequiredDocuments(Grn $grn): void
+    {
+        $missing = GrnValuation::missingDocumentCategories($grn);
+        if ($missing === []) {
+            return;
+        }
+
+        $labels = GrnValuation::requiredDocumentLabels();
+        $names = array_map(fn (string $c) => $labels[$c] ?? $c, $missing);
+
+        throw ValidationException::withMessages([
+            'attachments' => 'Attach these documents before submitting: '.implode(', ', $names).'.',
+        ]);
     }
 
     private function byUuid(PurchaseOrder $po, string $uuid): ?Grn

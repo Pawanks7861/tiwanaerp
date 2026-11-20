@@ -34,15 +34,12 @@ const procurementHome = computed(() => {
 });
 
 const financeHome = computed(() => {
-    const first = [
-        ['expenses.view', 'projects.expenses.index'],
-        ['billing.view', 'projects.ra-bills.index'],
-        ['vendor_bills.view', 'projects.vendor-bills.index'],
-        ['payments.view', 'projects.payments.index'],
-        ['petty_cash.view', 'projects.petty-cash.index'],
-    ].find(([permission]) => can(permission));
+    // Soft-retired finance modules; retention is the remaining project finance landing.
+    if (can('billing.view') || can('subcontract.view')) {
+        return route('projects.retention.index', props.project.id);
+    }
 
-    return first ? route(first[1], props.project.id) : null;
+    return null;
 });
 
 const tabs = computed(() =>

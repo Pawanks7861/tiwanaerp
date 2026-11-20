@@ -60,7 +60,7 @@ export function navigationCatalog() {
         },
         {
             group: 'Finance',
-            items: [{ key: 'finance.cash-flow', label: 'Cash Flow & Outstanding' }],
+            items: [],
         },
         {
             group: 'Utilities',
@@ -218,20 +218,12 @@ export function buildNavigation({
                             },
                     ],
                 }),
+                // Soft-retired: company cash-flow entry removed with vendor/client payments stack.
                 group({
                     key: 'finance',
                     label: 'Finance',
                     icon: 'banknotes',
-                    children: [
-                        can('payments.view') &&
-                            menuAllowed('finance.cash-flow', menuItems) && {
-                                key: 'finance.cash-flow',
-                                label: 'Cash Flow & Outstanding',
-                                icon: 'banknotes',
-                                href: route('finance.cash-flow'),
-                                active: route().current('finance.*'),
-                            },
-                    ],
+                    children: [],
                 }),
                 group({
                     key: 'utilities',

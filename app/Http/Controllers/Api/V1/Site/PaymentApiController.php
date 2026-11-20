@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\V1\Site;
 
 use App\Enums\Finance\PaymentDirection;
+use App\Enums\Finance\PaymentMode;
 use App\Enums\Finance\PaymentPartyType;
 use App\Enums\Finance\PaymentStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Finance\Concerns\DeniesRetiredFinanceWrites;
 use App\Http\Resources\PaymentResource;
 use App\Models\Finance\Payment;
 use App\Models\Projects\Project;
@@ -18,6 +20,8 @@ use Illuminate\Validation\Rule;
 
 class PaymentApiController extends Controller
 {
+    use DeniesRetiredFinanceWrites;
+
     public function __construct(private readonly PaymentService $payments) {}
 
     public function indexReceipts(Request $request, Project $project): AnonymousResourceCollection
@@ -79,6 +83,7 @@ class PaymentApiController extends Controller
 
     public function store(Request $request, Project $project): JsonResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [Payment::class, $project]);
         $payment = $this->payments->create($project, $this->validated($request, true));
 
@@ -97,6 +102,7 @@ class PaymentApiController extends Controller
 
     public function update(Request $request, Project $project, Payment $payment): PaymentResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $payment);
         Gate::authorize('update', $payment);
         $updated = $this->payments->update($payment, $this->validated($request, false));
@@ -106,6 +112,7 @@ class PaymentApiController extends Controller
 
     public function destroy(Project $project, Payment $payment): JsonResponse
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $payment);
         Gate::authorize('delete', $payment);
         $this->payments->delete($payment);
@@ -115,6 +122,7 @@ class PaymentApiController extends Controller
 
     public function approve(Request $request, Project $project, Payment $payment): PaymentResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $payment);
         Gate::authorize('approve', $payment);
         $this->payments->approve($payment, $request->user());
@@ -124,6 +132,7 @@ class PaymentApiController extends Controller
 
     public function cancel(Request $request, Project $project, Payment $payment): PaymentResource
     {
+        $this->denyRetiredFinanceWrite();
         $this->assertOnProject($project, $payment);
         Gate::authorize('cancel', $payment);
         $reason = $request->validate(['reason' => ['required', 'string', 'min:5', 'max:500']])['reason'];
@@ -143,7 +152,7 @@ class PaymentApiController extends Controller
                 'party_id' => ['required', 'integer'],
             ] : []),
             'payment_date' => ['required', 'date', 'before_or_equal:today'],
-            'mode' => ['required', Rule::enum(\App\Enums\Finance\PaymentMode::class)->except([\App\Enums\Finance\PaymentMode::PettyCash])],
+            'mode' => ['required', Rule::enum(PaymentMode::class)->except([PaymentMode::PettyCash])],
             'bank_reference' => ['nullable', 'string', 'max:100'],
             'amount' => ['required', 'numeric', 'decimal:0,2', 'gt:0', 'max:9999999999'],
             'tds_amount' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999'],

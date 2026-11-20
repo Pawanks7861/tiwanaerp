@@ -7,10 +7,11 @@ use App\Enums\Finance\VendorBillStatus;
 use App\Enums\Finance\VendorBillType;
 use App\Enums\Procurement\PurchaseOrderStatus;
 use App\Http\Controllers\Controller;
-use App\Integrations\Tally\TallyStatusPresenter;
 use App\Http\Controllers\Core\AuditPresenter;
+use App\Http\Controllers\Finance\Concerns\DeniesRetiredFinanceWrites;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
+use App\Integrations\Tally\TallyStatusPresenter;
 use App\Models\Finance\VendorBill;
 use App\Models\Finance\VendorBillItem;
 use App\Models\Procurement\PurchaseOrder;
@@ -30,6 +31,8 @@ use Inertia\Response;
 
 class VendorBillController extends Controller
 {
+    use DeniesRetiredFinanceWrites;
+
     public function __construct(
         private readonly VendorBillService $bills,
         private readonly PayableService $payables,
@@ -62,6 +65,7 @@ class VendorBillController extends Controller
 
     public function create(Request $request, Project $project): Response
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [VendorBill::class, $project]);
 
         return $this->form($project, null, $request->integer('purchase_order_id') ?: null, $request->string('bill_type')->toString() ?: 'purchase_order');
@@ -69,6 +73,7 @@ class VendorBillController extends Controller
 
     public function store(Request $request, Project $project): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [VendorBill::class, $project]);
 
         $bill = $this->bills->create($project, $this->validated($request, true));
@@ -126,6 +131,7 @@ class VendorBillController extends Controller
 
     public function edit(Project $project, VendorBill $vendorBill): Response
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('update', $vendorBill);
 
         return $this->form($project, $vendorBill, $vendorBill->purchase_order_id, $vendorBill->bill_type->value);
@@ -133,6 +139,7 @@ class VendorBillController extends Controller
 
     public function update(Request $request, Project $project, VendorBill $vendorBill): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('update', $vendorBill);
 
         $this->bills->update($vendorBill, $this->validated($request, false, $vendorBill->bill_type));
@@ -142,6 +149,7 @@ class VendorBillController extends Controller
 
     public function destroy(Project $project, VendorBill $vendorBill): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('delete', $vendorBill);
 
         $this->bills->delete($vendorBill);
@@ -151,6 +159,7 @@ class VendorBillController extends Controller
 
     public function submit(Request $request, Project $project, VendorBill $vendorBill): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('submit', $vendorBill);
 
         $this->bills->submit($vendorBill, $request->user());
@@ -160,6 +169,7 @@ class VendorBillController extends Controller
 
     public function process(Request $request, Project $project, VendorBill $vendorBill): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('process', $vendorBill);
 
         $this->bills->process($vendorBill, $request->user(), $request->validate([

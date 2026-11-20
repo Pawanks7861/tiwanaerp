@@ -10,21 +10,25 @@ const props = defineProps({
 
 const { can } = usePermissions();
 
+/** Soft-retired: expenses, petty cash, RA bills, vendor bills, payments, cash-flow. Retention kept for historical/subcontract use. */
 const items = computed(() =>
     [
-        can('expenses.view') && { key: 'expenses', label: 'Expenses', short: 'Expenses', route: 'projects.expenses.index' },
-        can('petty_cash.view') && { key: 'petty-cash', label: 'Petty cash', short: 'Petty cash', route: 'projects.petty-cash.index' },
-        can('billing.view') && { key: 'ra-bills', label: 'Client billing', short: 'RA bills', route: 'projects.ra-bills.index' },
-        can('vendor_bills.view') && { key: 'vendor-bills', label: 'Vendor bills', short: 'Vendor bills', route: 'projects.vendor-bills.index' },
-        can('payments.view') && { key: 'payments', label: 'Payments', short: 'Payments', route: 'projects.payments.index' },
-        (can('billing.view') || can('subcontract.view')) && { key: 'retention', label: 'Retention', short: 'Retention', route: 'projects.retention.index' },
-        can('payments.view') && { key: 'cash-flow', label: 'Cash flow', short: 'Cash flow', route: 'projects.cash-flow' },
+        (can('billing.view') || can('subcontract.view')) && {
+            key: 'retention',
+            label: 'Retention',
+            short: 'Retention',
+            route: 'projects.retention.index',
+        },
     ].filter(Boolean),
 );
 </script>
 
 <template>
-    <nav class="mb-4 flex max-w-full overflow-x-auto rounded-lg border border-line bg-white p-0.5 shadow-sm sm:inline-flex" aria-label="Finance">
+    <nav
+        v-if="items.length"
+        class="mb-4 flex max-w-full overflow-x-auto rounded-lg border border-line bg-white p-0.5 shadow-sm sm:inline-flex"
+        aria-label="Finance"
+    >
         <Link
             v-for="item in items"
             :key="item.key"

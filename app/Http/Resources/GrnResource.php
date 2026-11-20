@@ -2,7 +2,10 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\Approval\ApprovalStatus;
 use App\Models\Procurement\Grn;
+use App\Models\User;
+use App\Support\Procurement\GrnValuation;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -41,23 +44,33 @@ class GrnResource extends JsonResource
                 'name' => $this->warehouse?->name,
                 'type' => $this->warehouse?->type?->value ?? $this->warehouse?->type,
             ]),
-            'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($line) => [
-                'id' => $line->id,
-                'purchase_order_item_id' => $line->purchase_order_item_id,
-                'ordered_qty' => $line->ordered_qty,
-                'previously_received_qty' => $line->previously_received_qty,
-                'po_remaining_qty' => $line->po_remaining_qty,
-                'received_qty' => $line->received_qty,
-                'rejected_qty' => $line->rejected_qty,
-                'accepted_qty' => $line->accepted_qty,
-                'extra_qty' => $line->extra_qty,
-                'extra_reason' => $line->extra_reason,
-                'extra_remarks' => $line->extra_remarks,
-                'rejection_reason' => $line->rejection_reason,
-                'supplier_challan_qty' => $line->supplier_challan_qty,
-                'unit' => $line->relationLoaded('unit') ? $line->unit?->only(['id', 'symbol']) : null,
-                'item' => $line->relationLoaded('material') ? $line->material?->only(['id', 'code', 'name']) : null,
-            ])->values()),
+            'items' => $this->whenLoaded('items', function () {
+                return $this->items->map(function ($line) {
+                    $rate = GrnValuation::lineRate($line);
+
+                    return [
+                        'id' => $line->id,
+                        'purchase_order_item_id' => $line->purchase_order_item_id,
+                        'ordered_qty' => $line->ordered_qty,
+                        'previously_received_qty' => $line->previously_received_qty,
+                        'po_remaining_qty' => $line->po_remaining_qty,
+                        'received_qty' => $line->received_qty,
+                        'rejected_qty' => $line->rejected_qty,
+                        'accepted_qty' => $line->accepted_qty,
+                        'extra_qty' => $line->extra_qty,
+                        'extra_reason' => $line->extra_reason,
+                        'extra_remarks' => $line->extra_remarks,
+                        'rejection_reason' => $line->rejection_reason,
+                        'supplier_challan_qty' => $line->supplier_challan_qty,
+                        'rate' => $rate->toRate(),
+                        'amount' => GrnValuation::lineAmount($line)->toMoney(),
+                        'unit' => $line->relationLoaded('unit') ? $line->unit?->only(['id', 'symbol']) : null,
+                        'item' => $line->relationLoaded('material') ? $line->material?->only(['id', 'code', 'name']) : null,
+                    ];
+                })->values();
+            }),
+            'total_amount' => $this->whenLoaded('items', fn () => GrnValuation::totalAmount($this->items)->toMoney()),
+            'documents' => $this->whenLoaded('attachments', fn () => GrnValuation::documentStatus($this->resource)),
             'weighbridge' => $this->whenLoaded('weighbridgeReceipt', fn () => $this->weighbridgeReceipt
                 ? WeighbridgeReceiptResource::make($this->weighbridgeReceipt)->resolve()
                 : null),
@@ -76,7 +89,7 @@ class GrnResource extends JsonResource
     /**
      * @return array<string, bool>
      */
-    private function abilities(\App\Models\User $user): array
+    private function abilities(User $user): array
     {
         $editable = $this->isEditable();
 
@@ -87,10 +100,10 @@ class GrnResource extends JsonResource
             'submit' => $editable && $user->can('submit', $this->resource),
             'attach' => $user->can('update', $this->resource),
             'approve' => (bool) ($this->relationLoaded('latestApprovalRequest')
-                && $this->latestApprovalRequest?->status === \App\Enums\Approval\ApprovalStatus::Pending
+                && $this->latestApprovalRequest?->status === ApprovalStatus::Pending
                 && $user->can('approvals.view')),
             'reject' => (bool) ($this->relationLoaded('latestApprovalRequest')
-                && $this->latestApprovalRequest?->status === \App\Enums\Approval\ApprovalStatus::Pending
+                && $this->latestApprovalRequest?->status === ApprovalStatus::Pending
                 && $user->can('approvals.view')),
         ];
     }

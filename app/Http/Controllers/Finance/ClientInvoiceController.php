@@ -5,10 +5,11 @@ namespace App\Http\Controllers\Finance;
 use App\Enums\Finance\ClientInvoiceStatus;
 use App\Enums\IndianState;
 use App\Http\Controllers\Controller;
-use App\Integrations\Tally\TallyStatusPresenter;
 use App\Http\Controllers\Core\AuditPresenter;
+use App\Http\Controllers\Finance\Concerns\DeniesRetiredFinanceWrites;
 use App\Http\Controllers\Procurement\ProcurementPresenter;
 use App\Http\Controllers\Projects\ProjectHeader;
+use App\Integrations\Tally\TallyStatusPresenter;
 use App\Models\Core\Company;
 use App\Models\Finance\ClientInvoice;
 use App\Models\Finance\ClientInvoiceItem;
@@ -30,6 +31,8 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class ClientInvoiceController extends Controller
 {
+    use DeniesRetiredFinanceWrites;
+
     public function __construct(private readonly ClientInvoiceService $invoices, private readonly PayableService $payables) {}
 
     public function index(Request $request, Project $project): Response
@@ -52,6 +55,7 @@ class ClientInvoiceController extends Controller
 
     public function create(Request $request, Project $project): Response
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [ClientInvoice::class, $project]);
 
         return $this->form($request, $project, null);
@@ -59,6 +63,7 @@ class ClientInvoiceController extends Controller
 
     public function store(Request $request, Project $project): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('create', [ClientInvoice::class, $project]);
 
         $invoice = $this->invoices->create($project, $this->validated($request), $request->user());
@@ -106,6 +111,7 @@ class ClientInvoiceController extends Controller
 
     public function edit(Request $request, Project $project, ClientInvoice $clientInvoice): Response
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('update', $clientInvoice);
 
         return $this->form($request, $project, $clientInvoice);
@@ -113,6 +119,7 @@ class ClientInvoiceController extends Controller
 
     public function update(Request $request, Project $project, ClientInvoice $clientInvoice): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('update', $clientInvoice);
 
         $this->invoices->update($clientInvoice, $this->validated($request), $request->user());
@@ -122,6 +129,7 @@ class ClientInvoiceController extends Controller
 
     public function destroy(Project $project, ClientInvoice $clientInvoice): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('delete', $clientInvoice);
 
         $this->invoices->delete($clientInvoice);
@@ -131,6 +139,7 @@ class ClientInvoiceController extends Controller
 
     public function submit(Request $request, Project $project, ClientInvoice $clientInvoice): RedirectResponse
     {
+        $this->denyRetiredFinanceWrite();
         Gate::authorize('submit', $clientInvoice);
 
         $this->invoices->submit($clientInvoice, $request->user());
