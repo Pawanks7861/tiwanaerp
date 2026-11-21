@@ -263,6 +263,9 @@ const mappingTotalBreakdown = computed(() => activeMapRows.value.map((row) => {
     };
 }));
 
+/** Own-activity mapped items (edit) merged into the unlinked catalog from the server. */
+const drawerBoqExtras = ref([]);
+
 function blankMap() {
     return {
         id: null,
@@ -277,6 +280,9 @@ function blankMap() {
 }
 function loadMapsFromTask(t) {
     mapForm.clearErrors();
+    drawerBoqExtras.value = (t?.boq_maps || [])
+        .map((m) => m.item_option)
+        .filter((opt) => opt?.value != null);
     mapForm.maps = (t?.boq_maps?.length
         ? t.boq_maps.map((m) => ({
             id: m.id,
@@ -295,8 +301,30 @@ function loadMapsFromTask(t) {
     syncPlannedQtyFromMaps();
 }
 
+function boqCatalog() {
+    const byId = new Map();
+    for (const item of [...(props.options.boq_items || []), ...drawerBoqExtras.value]) {
+        if (item?.value != null) {
+            byId.set(item.value, item);
+        }
+    }
+
+    return [...byId.values()];
+}
+
 function boqItemFor(row) {
-    return (props.options.boq_items || []).find((i) => i.value === row.boq_item_id) || null;
+    return boqCatalog().find((i) => i.value === row.boq_item_id) || null;
+}
+
+/** Per-row options: unlinked + own extras, excluding items selected on other mapping rows. */
+function boqOptionsForRow(index) {
+    const taken = new Set(
+        (mapForm.maps || [])
+            .map((m, i) => (i !== index && m.boq_item_id ? m.boq_item_id : null))
+            .filter((id) => id != null),
+    );
+
+    return boqCatalog().filter((item) => ! taken.has(item.value) || mapForm.maps[index]?.boq_item_id === item.value);
 }
 
 function editableAvailableQty(row) {
@@ -405,13 +433,14 @@ function autofillAllocation(row) {
         row.tracking_basis = 'boq_quantity';
     }
 
+    // Exclusive mapping: default to full BOQ Qty / Total Nos (item cannot be used elsewhere).
     if (row.tracking_basis === 'nos') {
-        const available = editableAvailableNos(row);
-        row.planning_qty = available != null && available > 0 ? available.toFixed(4) : '';
+        const totalNos = Number(item.effective_nos ?? item.measurement_nos ?? 0);
+        row.planning_qty = Number.isFinite(totalNos) && totalNos > 0 ? totalNos.toFixed(4) : '';
         row.allocated_boq_qty = '';
     } else {
-        const available = editableAvailableQty(row);
-        row.planning_qty = available != null && available > 0 ? available.toFixed(4) : '';
+        const qty = Number(item.quantity ?? item.allocation?.boq_total_qty ?? 0);
+        row.planning_qty = Number.isFinite(qty) && qty > 0 ? qty.toFixed(4) : '';
         row.allocated_boq_qty = row.planning_qty;
     }
 }
@@ -913,10 +942,10 @@ const summaryCards = computed(() => [
                         <AppButton size="sm" variant="secondary" @click="mapForm.maps.push(blankMap())">Add BOQ link</AppButton>
                     </div>
                     <p class="text-[11px] text-slate-500">
-                        Select a BOQ item to auto-fill remaining Available Qty or Available Nos (by Map by).
-                        Total Nos = NOB × Nos / Building. Partial and split allocations are supported. Activity Total Qty updates from all linked mappings.
+                        Each BOQ item can link to only one Planning Activity. Select an unlinked item to auto-fill full BOQ Qty or Total Nos (NOB × Nos / Building). Multiple different BOQ items may still map to this activity.
                     </p>
                     <p v-if="mapForm.errors.maps || form.errors.maps" class="text-xs text-red-600">{{ mapForm.errors.maps || form.errors.maps }}</p>
+                    <p v-if="!boqCatalog().length" class="text-xs text-slate-500">No unlinked BOQ items available.</p>
                     <div v-for="(row, index) in mapForm.maps" :key="index" class="space-y-2 rounded-md border border-slate-100 bg-slate-50/70 p-3">
                         <div class="flex flex-wrap items-center justify-end gap-1">
                             <CopyValueButton
@@ -933,7 +962,7 @@ const summaryCards = computed(() => [
                                 v-model="row.boq_item_id"
                                 label="BOQ item"
                                 placeholder="Select BOQ item…"
-                                :options="options.boq_items || []"
+                                :options="boqOptionsForRow(index)"
                                 class="flex-1"
                                 :error="mapForm.errors[`maps.${index}.boq_item_id`] || form.errors[`maps.${index}.boq_item_id`]"
                                 @update:model-value="onBoqItemSelected(row)"

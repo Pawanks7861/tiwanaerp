@@ -92,7 +92,7 @@ class ProjectTaskController extends Controller
         $mapsByTask = BoqPlanningMap::query()
             ->whereIn('project_task_id', $tasks->modelKeys())
             ->where('is_active', true)
-            ->with(['item:id,name,item_code,quantity,measurement_nob,measurement_nos,unit_id', 'item.unit:id,symbol', 'boq:id,boq_number,version'])
+            ->with(['item:id,boq_id,name,item_code,quantity,measurement_nob,measurement_nos,unit_id', 'item.unit:id,symbol', 'item.boq:id,boq_number,version,status,is_current,title', 'boq:id,boq_number,version'])
             ->orderByDesc('is_primary')
             ->orderBy('sequence')
             ->orderBy('id')
@@ -244,6 +244,7 @@ class ProjectTaskController extends Controller
                     'boq_label' => $m->boq ? ($m->boq->boq_number.' / R'.$m->boq->version) : null,
                     'item_name' => $m->item?->name,
                     'item_code' => $m->item?->item_code,
+                    'item_option' => $m->item ? $this->boqMaps->itemOptionPayload($m->item) : null,
                 ])->values()->all()
                 : $this->boqMaps->mapsForTask($t);
         }

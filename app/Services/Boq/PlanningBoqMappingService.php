@@ -148,6 +148,17 @@ class PlanningBoqMappingService
             $resolvedRows = [];
             $batchClaimedNos = Decimal::zero();
             $batchClaimedBoq = Decimal::zero();
+            $taskIdsInRequest = collect($rows)
+                ->map(fn (array $row) => (int) ($row['project_task_id'] ?? 0))
+                ->filter()
+                ->unique()
+                ->values();
+            if ($taskIdsInRequest->count() > 1) {
+                throw ValidationException::withMessages([
+                    'maps' => 'This BOQ item can be linked to only one Planning Activity.',
+                ]);
+            }
+
             foreach (array_values($rows) as $i => $row) {
                 $taskId = (int) ($row['project_task_id'] ?? 0);
                 $task = ProjectTask::query()
@@ -162,6 +173,8 @@ class PlanningBoqMappingService
                 if ($task->isPlanningHead()) {
                     throw ValidationException::withMessages(["maps.$i.project_task_id" => 'Map to a leaf planning activity, not a planning head.']);
                 }
+
+                $this->assertBoqItemExclusiveToTask($lockedItem, $task, "maps.$i.project_task_id");
 
                 $model = $this->findMapModel($lockedItem, $task, $row);
                 $resolved = $this->resolveManualAllocation(
@@ -225,9 +238,20 @@ class PlanningBoqMappingService
             $resolvedEntries = [];
             /** @var array<int, array{nos: Decimal, boq: Decimal}> $batchClaimed */
             $batchClaimed = [];
+            /** @var array<int, true> $seenItemIds */
+            $seenItemIds = [];
 
             foreach (array_values($rows) as $i => $row) {
                 $itemId = (int) ($row['boq_item_id'] ?? 0);
+                if ($itemId > 0 && isset($seenItemIds[$itemId])) {
+                    throw ValidationException::withMessages([
+                        "maps.$i.boq_item_id" => 'This BOQ item is already selected in another mapping on this activity.',
+                    ]);
+                }
+                if ($itemId > 0) {
+                    $seenItemIds[$itemId] = true;
+                }
+
                 $item = BoqItem::query()
                     ->whereKey($itemId)
                     ->whereHas('boq', fn ($q) => $q->where('project_id', $lockedTask->project_id))
@@ -238,6 +262,7 @@ class PlanningBoqMappingService
                     throw ValidationException::withMessages(["maps.$i.boq_item_id" => 'Choose a BOQ item from this project.']);
                 }
 
+                $this->assertBoqItemExclusiveToTask($item, $lockedTask, "maps.$i.boq_item_id");
                 $this->assertMappingUnitCompatible($lockedTask, $item, "maps.$i.boq_item_id");
 
                 Boq::query()->whereKey($item->boq_id)->lockForUpdate()->firstOrFail();
@@ -329,7 +354,7 @@ class PlanningBoqMappingService
         return BoqPlanningMap::query()
             ->where('project_task_id', $task->id)
             ->where('is_active', true)
-            ->with(['item:id,name,item_code,quantity,measurement_nob,measurement_nos,unit_id', 'item.unit:id,symbol', 'boq:id,boq_number,version,status,is_current'])
+            ->with(['item:id,boq_id,name,item_code,quantity,measurement_nob,measurement_nos,unit_id', 'item.unit:id,symbol', 'item.boq:id,boq_number,version,status,is_current,title', 'boq:id,boq_number,version,status,is_current'])
             ->orderByDesc('is_primary')
             ->orderBy('sequence')
             ->orderBy('id')
@@ -343,24 +368,40 @@ class PlanningBoqMappingService
                     : null,
                 'item_name' => $m->item?->name,
                 'item_code' => $m->item?->item_code,
-                'allocation' => $m->item ? $this->allocationSummary($m->item) : null,
+                'allocation' => $m->item ? $this->allocationSummary($m->item, (int) $m->id) : null,
+                'item_option' => $m->item ? $this->itemOptionPayload($m->item) : null,
             ])
             ->all();
     }
 
     /**
-     * Eligible current BOQ items for Planning mapping on a project.
+     * Eligible BOQ items for Planning mapping on a project.
+     * One BOQ item may link to only one Planning Activity: already-linked items are hidden,
+     * except items linked to $exceptTaskId (edit mode keeps the activity's own maps selectable).
      *
      * @return list<array<string, mixed>>
      */
-    public function eligibleBoqItems(Project $project): array
+    public function eligibleBoqItems(Project $project, ?int $exceptTaskId = null): array
     {
+        $linkedElsewhere = BoqPlanningMap::query()
+            ->where('is_active', true)
+            ->where('project_id', $project->id)
+            ->whereHas('task')
+            ->when(
+                $exceptTaskId,
+                fn ($q) => $q->where('project_task_id', '!=', $exceptTaskId),
+                fn ($q) => $q
+            )
+            ->pluck('boq_item_id')
+            ->unique()
+            ->all();
+
         $items = BoqItem::query()
             ->whereHas('boq', fn ($q) => $q
                 ->where('project_id', $project->id)
-                ->where(fn ($w) => $w
-                    ->where(fn ($a) => $a->where('status', BoqStatus::Approved)->where('is_current', true))
-                    ->orWhere('status', BoqStatus::Draft)))
+                ->where('status', BoqStatus::Approved)
+                ->where('is_current', true))
+            ->when($linkedElsewhere !== [], fn ($q) => $q->whereNotIn('id', $linkedElsewhere))
             ->with(['unit:id,symbol', 'boq:id,boq_number,version,status,is_current,title'])
             ->orderBy('boq_id')
             ->orderBy('sort_order')
@@ -368,32 +409,123 @@ class PlanningBoqMappingService
             ->limit(2000)
             ->get();
 
-        return $items->map(function (BoqItem $item) {
-            $summary = $this->allocationSummary($item);
-            $nos = SimpleBoqMeasurementCalculator::nosBreakdown($item);
+        // Edit mode: also include this activity's currently linked items (even if already mapped).
+        if ($exceptTaskId) {
+            $ownItems = BoqItem::query()
+                ->whereIn(
+                    'id',
+                    BoqPlanningMap::query()
+                        ->where('project_task_id', $exceptTaskId)
+                        ->where('is_active', true)
+                        ->select('boq_item_id')
+                )
+                ->with(['unit:id,symbol', 'boq:id,boq_number,version,status,is_current,title'])
+                ->get();
+            $items = $items->concat($ownItems)->unique('id')->values();
+        }
 
-            $baseLabel = trim(($item->item_code ? $item->item_code.' — ' : '').$item->name);
-            $unit = $item->unit?->symbol;
+        return $items->map(fn (BoqItem $item) => $this->itemOptionPayload($item))->values()->all();
+    }
 
-            return [
-                'value' => $item->id,
-                'boq_id' => $item->boq_id,
-                'label' => $baseLabel,
-                'boq_label' => $item->boq
-                    ? ($item->boq->boq_number.' / R'.$item->boq->version.($item->boq->is_current ? '' : ' (draft)'))
+    /**
+     * Dropdown / catalog option shape for a BOQ item.
+     *
+     * @return array<string, mixed>
+     */
+    public function itemOptionPayload(BoqItem $item): array
+    {
+        // Partial eager-loads (id + columns) must include boq_id or Laravel throws MissingAttributeException.
+        if (! array_key_exists('boq_id', $item->getAttributes())) {
+            $item->refresh();
+        }
+        $item->loadMissing(['unit:id,symbol', 'boq:id,boq_number,version,status,is_current,title']);
+        $summary = $this->allocationSummary($item);
+        $nos = SimpleBoqMeasurementCalculator::nosBreakdown($item);
+        $baseLabel = trim(($item->item_code ? $item->item_code.' — ' : '').$item->name);
+
+        return [
+            'value' => $item->id,
+            'boq_id' => $item->boq_id,
+            'label' => $baseLabel,
+            'boq_label' => $item->boq
+                ? ($item->boq->boq_number.' / R'.$item->boq->version.($item->boq->is_current ? '' : ' (draft)'))
+                : null,
+            'name' => $item->name,
+            'item_code' => $item->item_code,
+            'unit' => $item->unit?->symbol,
+            'unit_id' => $item->unit_id,
+            'quantity' => Decimal::of($item->quantity ?? '0')->toQuantity(),
+            'measurement_nob' => $nos['measurement_nob'],
+            'nos_per_building' => $nos['nos_per_building'],
+            'measurement_nos' => $nos['effective_nos'],
+            'effective_nos' => $nos['effective_nos'],
+            'allocation' => $summary,
+        ];
+    }
+
+    /**
+     * Active link exclusivity: a BOQ item may belong to only one live Planning Activity.
+     */
+    public function assertBoqItemExclusiveToTask(BoqItem $item, ProjectTask $task, string $errorKey): void
+    {
+        $other = $this->activeMapsOnLiveTasksQuery((int) $item->id)
+            ->where('project_task_id', '!=', $task->id)
+            ->lockForUpdate()
+            ->exists();
+
+        if ($other) {
+            throw ValidationException::withMessages([
+                $errorKey => 'This BOQ item is already linked to another Planning Activity.',
+            ]);
+        }
+    }
+
+    /**
+     * Report active BOQ items linked to more than one live Planning Activity (historical splits).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function reportSplitMappings(Project $project): array
+    {
+        $rows = BoqPlanningMap::query()
+            ->where('project_id', $project->id)
+            ->where('is_active', true)
+            ->whereHas('task')
+            ->with([
+                'item:id,boq_id,name,item_code,quantity,unit_id',
+                'item.unit:id,symbol',
+                'boq:id,boq_number,version',
+                'task:id,name,wbs_code',
+            ])
+            ->orderBy('boq_item_id')
+            ->orderBy('project_task_id')
+            ->get()
+            ->groupBy('boq_item_id')
+            ->filter(fn ($group) => $group->pluck('project_task_id')->unique()->count() > 1);
+
+        $report = [];
+        foreach ($rows as $itemId => $maps) {
+            $first = $maps->first();
+            $report[] = [
+                'boq_item_id' => (int) $itemId,
+                'boq' => $first?->boq
+                    ? ($first->boq->boq_number.' / R'.$first->boq->version)
                     : null,
-                'name' => $item->name,
-                'item_code' => $item->item_code,
-                'unit' => $unit,
-                'unit_id' => $item->unit_id,
-                'quantity' => Decimal::of($item->quantity ?? '0')->toQuantity(),
-                'measurement_nob' => $nos['measurement_nob'],
-                'nos_per_building' => $nos['nos_per_building'],
-                'measurement_nos' => $nos['effective_nos'],
-                'effective_nos' => $nos['effective_nos'],
-                'allocation' => $summary,
+                'item_code' => $first?->item?->item_code,
+                'item_name' => $first?->item?->name,
+                'activities' => $maps->map(fn (BoqPlanningMap $m) => [
+                    'project_task_id' => $m->project_task_id,
+                    'wbs_code' => $m->task?->wbs_code,
+                    'name' => $m->task?->name,
+                    'tracking_basis' => $m->tracking_basis?->value,
+                    'planning_qty' => Decimal::of($m->planning_qty ?? '0')->toQuantity(),
+                    'allocated_boq_qty' => Decimal::of($m->allocated_boq_qty ?? '0')->toQuantity(),
+                    'unit' => $m->boq_unit_symbol ?: $m->item?->unit?->symbol,
+                ])->values()->all(),
             ];
-        })->values()->all();
+        }
+
+        return array_values($report);
     }
 
     /**
